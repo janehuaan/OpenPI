@@ -1,0 +1,20 @@
+{
+  "kind": "webpage_snapshot",
+  "url": "https://github.com/AgnesAI-Labs/AgnesAI-Models/blob/main/MODEL_CATALOG.md",
+  "final_url": "https://github.com/AgnesAI-Labs/AgnesAI-Models/blob/main/MODEL_CATALOG.md",
+  "status": 200,
+  "read_status": "blocked",
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-07-16T21:47:09.659342+00:00",
+  "title": "AgnesAI-Models/MODEL_CATALOG.md at main · AgnesAI-Labs/AgnesAI-Models · GitHub",
+  "description": "Official Agnes AI gateway and model catalog for OpenAI-compatible text, image, video, and agent workflows. - AgnesAI-Models/MODEL_CATALOG.md at main · AgnesAI-Labs/AgnesAI-Models",
+  "site_name": "GitHub",
+  "published_at": null,
+  "source_type": "source_repo",
+  "text": "",
+  "quote_candidates": [],
+  "word_count": 0,
+  "truncated": false,
+  "blocked": true,
+  "source": "direct_http"
+}

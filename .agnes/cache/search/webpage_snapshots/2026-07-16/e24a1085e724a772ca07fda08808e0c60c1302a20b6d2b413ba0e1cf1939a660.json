@@ -1,0 +1,20 @@
+{
+  "kind": "webpage_snapshot",
+  "url": "https://code.claude.com/docs/en/memory?_rsc=4Vrbm42DZc3Y7r9j",
+  "final_url": "https://code.claude.com/docs/en/memory?_rsc=4Vrbm42DZc3Y7r9j",
+  "status": 200,
+  "read_status": "blocked",
+  "content_type": "text/x-component",
+  "fetched_at": "2026-07-16T09:05:30.783339+00:00",
+  "title": "Untitled webpage",
+  "description": "",
+  "site_name": null,
+  "published_at": null,
+  "source_type": "unknown",
+  "text": "",
+  "quote_candidates": [],
+  "word_count": 0,
+  "truncated": false,
+  "blocked": true,
+  "source": "direct_http"
+}

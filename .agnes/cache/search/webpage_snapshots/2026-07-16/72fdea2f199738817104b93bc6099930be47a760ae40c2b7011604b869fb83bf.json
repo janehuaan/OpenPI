@@ -1,0 +1,20 @@
+{
+  "kind": "webpage_snapshot",
+  "url": "https://github.com/devwithmohit/ai-agent-architecture-patterns/blob/main/02-production/memory-architectures.md",
+  "final_url": "https://github.com/devwithmohit/ai-agent-architecture-patterns/blob/main/02-production/memory-architectures.md",
+  "status": 200,
+  "read_status": "blocked",
+  "content_type": "text/html; charset=utf-8",
+  "fetched_at": "2026-07-16T09:04:38.065915+00:00",
+  "title": "ai-agent-architecture-patterns/02-production/memory-architectures.md at main · devwithmohit/ai-agent-architecture-patterns · GitHub",
+  "description": "Production-grade architecture patterns, decision frameworks, and best  practices for building reliable AI agents. Framework-agnostic reference  for engineers. - ai-agent-architecture-patterns/02-production/memory-architectures.md at main · devwithmohit/ai-agent-architecture-patterns",
+  "site_name": "GitHub",
+  "published_at": null,
+  "source_type": "source_repo",
+  "text": "",
+  "quote_candidates": [],
+  "word_count": 0,
+  "truncated": false,
+  "blocked": true,
+  "source": "direct_http"
+}
