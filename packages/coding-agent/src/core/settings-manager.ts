@@ -134,6 +134,8 @@ export interface Settings {
 	mcpServers?: McpServersConfig;
 	/** Checkpoint snapshot interval in turns (default 10; 0 disables checkpointing). */
 	checkpointIntervalTurns?: number;
+	/** Max messages stored per snapshot (default 1000; 0 = no cap). */
+	checkpointMaxMessages?: number;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */

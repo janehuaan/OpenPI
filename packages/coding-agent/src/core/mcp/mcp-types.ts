@@ -17,6 +17,8 @@ export interface McpServerConfig {
 	url?: string;
 	/** HTTP transport: extra headers. */
 	headers?: Record<string, string>;
+	/** Prefix tool names with "<serverName>_" to avoid collisions with builtin or other servers' tools. */
+	prefixTools?: boolean;
 }
 
 /** Map of server name to config, e.g. { "filesystem": { command: "npx", args: [...] } } */

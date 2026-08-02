@@ -134,19 +134,21 @@ export class McpManager {
 		const claimedNames = new Set<string>();
 		for (const [serverName, handle] of this.handles) {
 			if (handle.status !== "connected") continue;
+			const prefix = handle.config.prefixTools === true ? `${serverName}_` : "";
 			for (const tool of handle.tools) {
-				if (!MCP_TOOL_NAME_PATTERN.test(tool.name)) {
-					handle.error = `Invalid tool name "${tool.name}" (must match ${MCP_TOOL_NAME_PATTERN.source})`;
+				const toolName = `${prefix}${tool.name}`;
+				if (!MCP_TOOL_NAME_PATTERN.test(toolName)) {
+					handle.error = `Invalid tool name "${toolName}" (must match ${MCP_TOOL_NAME_PATTERN.source})`;
 					continue;
 				}
-				if (claimedNames.has(tool.name)) {
-					handle.error = `Tool name "${tool.name}" collides with another MCP server or tool`;
+				if (claimedNames.has(toolName)) {
+					handle.error = `Tool name "${toolName}" collides with another MCP server or tool`;
 					continue;
 				}
-				claimedNames.add(tool.name);
+				claimedNames.add(toolName);
 				registered.push({
-					definition: mcpToolToToolDefinition(serverName, tool, (toolName, args) =>
-						this.callTool(handle, toolName, args),
+					definition: mcpToolToToolDefinition(serverName, tool, (_name, args) =>
+						this.callTool(handle, tool.name, args),
 					),
 					sourceInfo: createSyntheticSourceInfo(`<mcp:${serverName}:${tool.name}>`, {
 						source: `mcp:${serverName}`,

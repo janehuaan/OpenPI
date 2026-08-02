@@ -429,7 +429,16 @@ export class AgentSession {
 			(tool) => tool.name !== SUB_AGENT_TOOL_NAME && (!toolNames || toolNames.has(tool.name)),
 		);
 		const result = await runSubAgentTask(
-			{ parent: this.agent, tools, security: this._builtinSecurity },
+			{
+				parent: this.agent,
+				tools,
+				security: this._builtinSecurity,
+				confirm: async (reason) => {
+					const ui = this._extensionUIContext;
+					if (ui?.confirm === undefined) return false;
+					return await ui.confirm("Security confirmation (sub-agent)", reason);
+				},
+			},
 			task,
 			options,
 		);
@@ -880,7 +889,13 @@ export class AgentSession {
 		if (interval <= 0 || this._turnIndex % interval !== 0) return;
 		const messages = this.agent.state.messages;
 		if (messages.length === 0) return;
-		this.sessionManager.appendSnapshot([...messages], this.getActiveToolNames(), { checkpoint: true });
+		// Cap snapshot size so long sessions do not duplicate the full
+		// transcript into the JSONL repeatedly; early history is covered by
+		// compaction summaries anyway.
+		const maxMessages = this.settingsManager.getGlobalSettings().checkpointMaxMessages ?? 1000;
+		const snapshotMessages =
+			maxMessages > 0 && messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+		this.sessionManager.appendSnapshot([...snapshotMessages], this.getActiveToolNames(), { checkpoint: true });
 	}
 
 	/**

@@ -27,6 +27,8 @@ export interface RunSubAgentDependencies {
 	parent: Agent;
 	tools: AgentTool[];
 	security?: BuiltinSecurity;
+	/** Interactive confirmation callback for medium/high operations (UI). When absent, confirmations block. */
+	confirm?: (reason: string) => Promise<boolean>;
 }
 
 export interface SubAgentResult {
@@ -97,18 +99,13 @@ export async function runSubAgentTask(
 				return { block: true, reason: result.reason ?? "Blocked by builtin security policy" };
 			}
 			if (result.decision === "confirm") {
-				security.appendAudit({
-					tool: toolCall.name,
-					target,
-					level: result.level,
-					decision: "block",
-					reason: `${result.reason ?? "Operation"} requires confirmation, unavailable in sub-agents`,
-					mode: security.mode,
-				});
-				return {
-					block: true,
-					reason: `${result.reason ?? "Operation"} requires confirmation, which is unavailable in sub-agents`,
-				};
+				const reason = `${result.reason ?? "Operation"} requires confirmation`;
+				const allowed = deps.confirm ? await deps.confirm(reason) : false;
+				security.recordDecision(toolCall.name, target, result, allowed);
+				if (!allowed) {
+					return { block: true, reason: `${reason} (denied or no confirmation available)` };
+				}
+				return undefined;
 			}
 			return undefined;
 		};
