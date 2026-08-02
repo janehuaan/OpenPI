@@ -17,12 +17,6 @@ function makeProvider(): Provider {
 		api: "openai-responses",
 		getModels: () => [],
 		getAuth: async () => undefined,
-		stream: async function* () {
-			return;
-		},
-		streamSimple: async function* () {
-			return;
-		},
 		checkAuth: async () => undefined,
 	} as unknown as Provider;
 }
