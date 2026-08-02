@@ -10,6 +10,8 @@
  * - OPENPI_EMBEDDING_BASE_URL (default https://api.openai.com/v1)
  * - OPENPI_EMBEDDING_MODEL  (default text-embedding-3-small)
  */
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname } from "path";
 import { cosine, fingerprint } from "./vectors.ts";
 
 export interface SemanticEmbedderOptions {
@@ -18,6 +20,8 @@ export interface SemanticEmbedderOptions {
 	model?: string;
 	/** Maximum batch size per API call (default 64). */
 	batchSize?: number;
+	/** Optional cache file path (JSON: fingerprint -> vector array). Persisted across restarts. */
+	cachePath?: string;
 }
 
 export function loadSemanticEmbedderOptions(env: NodeJS.ProcessEnv = process.env): SemanticEmbedderOptions | null {
@@ -37,6 +41,8 @@ export class SemanticEmbedder {
 	private readonly model: string;
 	private readonly batchSize: number;
 	private readonly cache = new Map<string, Float32Array>();
+	private readonly cachePath?: string;
+	private cacheDirty = false;
 
 	constructor(options: SemanticEmbedderOptions) {
 		if (!options.apiKey) throw new Error("SemanticEmbedder requires an apiKey");
@@ -44,6 +50,41 @@ export class SemanticEmbedder {
 		this.baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
 		this.model = options.model ?? "text-embedding-3-small";
 		this.batchSize = options.batchSize ?? 64;
+		this.cachePath = options.cachePath;
+		if (this.cachePath) {
+			this.loadCache();
+		}
+	}
+
+	/** Persist the fingerprint cache to disk when a cache path is configured. */
+	saveCache(): void {
+		if (!this.cachePath || !this.cacheDirty) return;
+		try {
+			const entries = Array.from(this.cache.entries()).map(([key, vector]) => [key, Array.from(vector)]);
+			mkdirSync(dirname(this.cachePath), { recursive: true });
+			writeFileSync(this.cachePath, JSON.stringify({ version: 1, entries }), "utf8");
+			this.cacheDirty = false;
+		} catch {
+			// Cache persistence is best-effort.
+		}
+	}
+
+	private loadCache(): void {
+		try {
+			const value = JSON.parse(readFileSync(this.cachePath!, "utf8")) as {
+				version?: number;
+				entries?: Array<[string, number[]]>;
+			};
+			if (value?.version === 1 && Array.isArray(value.entries)) {
+				for (const [key, vector] of value.entries) {
+					if (typeof key === "string" && Array.isArray(vector)) {
+						this.cache.set(key, Float32Array.from(vector));
+					}
+				}
+			}
+		} catch {
+			// Missing or corrupt cache file: start empty.
+		}
 	}
 
 	/** Embed one text (cached by content fingerprint). */
@@ -78,8 +119,10 @@ export class SemanticEmbedder {
 				const vector = vectors[k] ?? new Float32Array(0);
 				out[chunk[k]!] = vector;
 				this.cache.set(fingerprint(inputs[k]!), vector);
+				this.cacheDirty = true;
 			}
 		}
+		this.saveCache();
 		return out;
 	}
 

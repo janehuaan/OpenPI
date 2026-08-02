@@ -5,6 +5,7 @@
  * compact-safe re-injection, heuristic + LLM extract, and AutoDream maintain.
  */
 
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { globalMemoryDir, loadMemoryConfig } from "./config.ts";
@@ -195,8 +196,12 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 				if (config.semanticSearch && matched.length > 0 && params.keyword?.trim()) {
 					const embedderOptions = loadSemanticEmbedderOptions();
 					if (embedderOptions) {
+						const cacheDir = scope === "global" ? globalDir : memoryDir(ctx.cwd);
 						const reranked = await semanticRerank(
-							new SemanticEmbedder(embedderOptions),
+							new SemanticEmbedder({
+								...embedderOptions,
+								cachePath: join(cacheDir, "semantic-cache.json"),
+							}),
 							params.keyword,
 							matched,
 							(entry) => `${entry.type} ${entry.key} ${entry.value}`,

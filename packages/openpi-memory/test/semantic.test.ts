@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadSemanticEmbedderOptions, SemanticEmbedder, semanticRerank } from "../src/semantic.ts";
 
@@ -58,6 +61,28 @@ describe("SemanticEmbedder", () => {
 		globalThis.fetch = vi.fn(async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
 		const embedder = new SemanticEmbedder({ apiKey: "bad" });
 		await expect(embedder.embedBatch(["x"])).rejects.toThrow(/401/);
+	});
+
+	it("persists and reloads the fingerprint cache", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "semantic-cache-"));
+		const cachePath = join(dir, "semantic-cache.json");
+
+		globalThis.fetch = vi.fn(async () => {
+			return new Response(JSON.stringify({ data: [{ index: 0, embedding: [0.5, 0.5, 0] }] }), { status: 200 });
+		}) as unknown as typeof fetch;
+
+		const first = new SemanticEmbedder({ apiKey: "k", cachePath });
+		await first.embedBatch(["persisted text"]);
+		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+		// New instance loads the cache and does not hit the API.
+		globalThis.fetch = vi.fn() as unknown as typeof fetch;
+		const second = new SemanticEmbedder({ apiKey: "k", cachePath });
+		const [vector] = await second.embedBatch(["persisted text"]);
+		expect(Array.from(vector)).toEqual([0.5, 0.5, 0]);
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+
+		rmSync(dir, { recursive: true, force: true });
 	});
 });
 
