@@ -3668,6 +3668,32 @@ export function CapabilitiesSurface({
 										<strong>{capabilities.mcp.tools.length}</strong>
 									</div>
 								</div>
+								{capabilities.mcp.servers.length > 0 && (
+									<div className="capability-list compact">
+										{capabilities.mcp.servers.map((server) => (
+											<div className="capability-row" key={server.name}>
+												<span
+													className={`capability-icon mcp ${
+														server.status === "connected" ? "online" : ""
+													}`}
+												>
+													<Cable size={16} />
+												</span>
+												<div className="capability-copy">
+													<strong>{server.name}</strong>
+													<code>
+														{server.status === "connected"
+															? `${server.toolCount} tool(s)`
+															: server.status === "starting"
+																? "starting"
+																: (server.error ?? "error")}
+													</code>
+												</div>
+												<span className="active-indicator">{server.status}</span>
+											</div>
+										))}
+									</div>
+								)}
 								{capabilities.mcp.tools.length > 0 && (
 									<div className="capability-list compact">
 										{capabilities.mcp.tools.map((tool) => (

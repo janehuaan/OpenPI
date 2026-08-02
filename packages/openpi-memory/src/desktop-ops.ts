@@ -15,6 +15,23 @@ import * as path from "node:path";
 import { listArchiveCount } from "./durability.ts";
 import { loadMeta, maintainMemoryDirectory, maintainMemoryIndex } from "./maintain.ts";
 import { LEXICON_BIN } from "./rank.ts";
+
+function embeddingKeyConfigured(): boolean {
+	if (process.env.OPENPI_EMBEDDING_API_KEY?.trim()) return true;
+	// secrets.env lives next to the agent config.
+	const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
+	try {
+		const file = path.join(agentDir, "secrets.env");
+		if (!fs.existsSync(file)) return false;
+		return fs
+			.readFileSync(file, "utf8")
+			.split("\n")
+			.some((line) => /^\s*OPENPI_EMBEDDING_API_KEY\s*=/.test(line));
+	} catch {
+		return false;
+	}
+}
+
 import {
 	deleteTopic,
 	deleteTopicAt,
@@ -78,6 +95,9 @@ try {
 					autoSessionDigest: DEFAULT_MEMORY_CONFIG.autoSessionDigest,
 					promoteUserToGlobal: DEFAULT_MEMORY_CONFIG.promoteUserToGlobal,
 					searchArchive: DEFAULT_MEMORY_CONFIG.searchArchive,
+					semanticSearch: DEFAULT_MEMORY_CONFIG.semanticSearch,
+					// Semantic rerank is only active when an embedding API key is configured.
+					semanticEnabled: embeddingKeyConfigured(),
 				},
 			})}\n`,
 		);

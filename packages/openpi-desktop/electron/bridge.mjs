@@ -152,7 +152,31 @@ function securityConfigPath() {
 	return join(agentDir(), "security.json");
 }
 
+function settingsPath() {
+	return join(agentDir(), "settings.json");
+}
+
+function readSettingsJson() {
+	try {
+		const value = JSON.parse(readFileSync(settingsPath(), "utf8"));
+		return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+	} catch {
+		return {};
+	}
+}
+
+function writeSettingsJson(settings) {
+	mkdirSync(agentDir(), { recursive: true });
+	writeFileSync(settingsPath(), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Security mode authority: the builtin gate reads settings.json `securityMode`.
+ * `security.json` (openpi-security extension) is kept as a legacy mirror.
+ */
 function readSecurityMode() {
+	const fromSettings = readSettingsJson().securityMode;
+	if (["strict", "confirm", "permissive", "bypass"].includes(fromSettings)) return fromSettings;
 	const path = securityConfigPath();
 	if (!existsSync(path)) return "confirm";
 	try {
@@ -177,9 +201,13 @@ function listSecurityAudit(cwd) {
 
 async function writeSecurityMode(mode) {
 	if (!["strict", "confirm", "permissive", "bypass"].includes(mode)) throw new Error("Invalid mode");
-	const agent = agentDir();
-	mkdirSync(agent, { recursive: true });
-	writeFileSync(join(agent, "security.json"), `${JSON.stringify({ mode, auditToDisk: true }, null, 2)}\n`, "utf8");
+	// The builtin gate reads settings.json; keep security.json as a legacy
+	// mirror for the openpi-security extension.
+	const settings = readSettingsJson();
+	settings.securityMode = mode;
+	writeSettingsJson(settings);
+	mkdirSync(agentDir(), { recursive: true });
+	writeFileSync(join(agentDir(), "security.json"), `${JSON.stringify({ mode, auditToDisk: true }, null, 2)}\n`, "utf8");
 	try {
 		await ensureDaemon();
 		const instances = await listInstancesLive();
