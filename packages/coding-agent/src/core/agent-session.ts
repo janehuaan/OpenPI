@@ -42,6 +42,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
+import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -94,6 +95,7 @@ import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
+import { BuiltinSecurity, type SecurityMode } from "./security/builtin-security.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
@@ -201,6 +203,8 @@ export interface AgentSessionConfig {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
+	/** Builtin security gate mode. When set, tool calls are checked before extensions run. */
+	securityMode?: SecurityMode;
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
 }
@@ -334,6 +338,7 @@ export class AgentSession {
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
+	private _builtinSecurity?: BuiltinSecurity;
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
 	private _extensionAbortHandler?: () => void;
 	private _extensionShutdownHandler?: ShutdownHandler;
@@ -368,6 +373,10 @@ export class AgentSession {
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
+		const securityMode = config.securityMode ?? this.settingsManager.getGlobalSettings().securityMode;
+		this._builtinSecurity = securityMode
+			? new BuiltinSecurity({ mode: securityMode, cwd: config.cwd, agentDir: getAgentDir() })
+			: undefined;
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -448,6 +457,39 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			// Builtin security gate runs before extension handlers: zero-config baseline.
+			const security = this._builtinSecurity;
+			if (security) {
+				const input = (args ?? {}) as Record<string, unknown>;
+				const target = String(input.command ?? input.filePath ?? input.path ?? "");
+				const result = security.check(toolCall.name, target);
+				if (result.decision === "block") {
+					security.appendAudit({
+						tool: toolCall.name,
+						target,
+						level: result.level,
+						decision: "block",
+						reason: result.reason,
+						mode: security.mode,
+					});
+					return { block: true, reason: result.reason ?? "Blocked by builtin security policy" };
+				}
+				if (result.decision === "confirm") {
+					const ui = this._extensionUIContext;
+					const confirmed =
+						ui?.confirm !== undefined
+							? await ui.confirm("Security confirmation", result.reason ?? "Confirm this operation?")
+							: false;
+					security.recordDecision(toolCall.name, target, result, confirmed);
+					if (!confirmed) {
+						return {
+							block: true,
+							reason: `${result.reason ?? "Operation"} was denied by the user`,
+						};
+					}
+				}
+			}
+
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;

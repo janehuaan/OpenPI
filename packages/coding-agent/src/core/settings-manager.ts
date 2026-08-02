@@ -7,6 +7,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import type { SecurityMode } from "./security/builtin-security.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -126,6 +127,8 @@ export interface Settings {
 	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
+	/** Builtin security gate mode. When set, tool calls are checked before extensions run. */
+	securityMode?: SecurityMode;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */

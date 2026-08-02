@@ -6,6 +6,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
+import { isSecurityMode, type SecurityMode } from "../core/security/builtin-security.ts";
 
 export type Mode = "text" | "json" | "rpc";
 
@@ -47,6 +48,7 @@ export interface Args {
 	offline?: boolean;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
+	securityMode?: SecurityMode;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -135,6 +137,16 @@ export function parseArgs(args: string[]): Args {
 				result.diagnostics.push({
 					type: "warning",
 					message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_LEVELS.join(", ")}`,
+				});
+			}
+		} else if (arg === "--security-mode" && i + 1 < args.length) {
+			const mode = args[++i];
+			if (isSecurityMode(mode)) {
+				result.securityMode = mode;
+			} else {
+				result.diagnostics.push({
+					type: "warning",
+					message: `Invalid --security-mode "${mode}" (expected strict, confirm, permissive, or bypass)`,
 				});
 			}
 		} else if (arg === "--print" || arg === "-p") {

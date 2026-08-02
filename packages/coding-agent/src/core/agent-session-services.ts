@@ -12,6 +12,7 @@ import {
 	type ResourceLoaderReloadOptions,
 } from "./resource-loader.ts";
 import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
+import type { SecurityMode } from "./security/builtin-security.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 
@@ -61,6 +62,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	/** Builtin security gate mode. When set, tool calls are checked before extensions run. */
+	securityMode?: SecurityMode;
 }
 
 /**
@@ -202,6 +205,7 @@ export async function createAgentSessionFromServices(
 		excludeTools: options.excludeTools,
 		noTools: options.noTools,
 		customTools: options.customTools,
+		securityMode: options.securityMode,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 }
