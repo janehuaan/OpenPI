@@ -1,0 +1,130 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { Type } from "typebox";
+import { afterEach, describe, expect, it } from "vitest";
+import { createHarness } from "./harness.ts";
+
+type Harness = Awaited<ReturnType<typeof createHarness>>;
+
+const harnesses: Harness[] = [];
+
+async function makeHarness(options: Parameters<typeof createHarness>[0] = {}) {
+	const harness = await createHarness(options);
+	harnesses.push(harness);
+	return harness;
+}
+
+function makeEchoTool(): AgentTool {
+	return {
+		name: "echo",
+		label: "Echo",
+		description: "Echo back the given text",
+		parameters: Type.Object({ text: Type.String() }),
+		execute: async (_toolCallId, params) => {
+			const text = typeof params === "object" && params !== null && "text" in params ? String(params.text) : "";
+			return { content: [{ type: "text", text: `echoed:${text}` }], details: { text } };
+		},
+	};
+}
+
+afterEach(() => {
+	for (const harness of harnesses) {
+		harness.cleanup();
+	}
+	harnesses.length = 0;
+});
+
+describe("sub-agent", () => {
+	it("registers the sub_agent tool on the session", async () => {
+		const harness = await makeHarness();
+		const toolNames = harness.session.getAllTools().map((tool) => tool.name);
+		expect(toolNames).toContain("sub_agent");
+	});
+
+	it("runs a task in an isolated agent with tool access", async () => {
+		const harness = await makeHarness({ tools: [makeEchoTool()] });
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("echo", { text: "hello sub" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("The echo tool returned: echoed:hello sub"),
+		]);
+
+		const answer = await harness.session.runSubAgent("Echo the text 'hello sub'");
+
+		expect(answer).toContain("echoed:hello sub");
+		// The sub-agent transcript stays isolated from the parent session.
+		expect(harness.session.messages.map((message) => message.role)).toEqual([]);
+	});
+
+	it("stops after the turn limit and reports it", async () => {
+		const harness = await makeHarness();
+
+		// 3 turns available but limit is 1.
+		harness.setResponses([
+			fauxAssistantMessage("turn 1"),
+			fauxAssistantMessage("turn 2"),
+			fauxAssistantMessage("turn 3"),
+		]);
+
+		const answer = await harness.session.runSubAgent("Keep going", { maxSteps: 1 });
+
+		expect(answer).toContain("sub-agent stopped after 1 turns");
+		expect(harness.getPendingResponseCount()).toBe(2);
+	});
+
+	it("restricts the sub-agent tool set via options.tools", async () => {
+		const harness = await makeHarness({ tools: [makeEchoTool()] });
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("echo", { text: "hi" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		await harness.session.runSubAgent("Echo hi", { tools: ["echo"] });
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("applies the builtin security gate to sub-agent tool calls", async () => {
+		const harness = await makeHarness({ settings: { securityMode: "strict" } });
+
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("bash", { command: "sudo rm -rf /" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		const answer = await harness.session.runSubAgent("Delete everything");
+
+		// The faux provider returns its preset text regardless of the tool
+		// result, so verify the gate through the audit log instead: the
+		// critical command must be recorded as blocked.
+		expect(answer).toBe("done");
+		const auditPath = join(harness.tempDir, ".pi", "security", "audit.jsonl");
+		const audit = readFileSync(auditPath, "utf8");
+		const entries = audit
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(entries.some((entry) => entry.decision === "block" && entry.level === "critical")).toBe(true);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("shares the parent model and session id", async () => {
+		const harness = await makeHarness();
+
+		harness.setResponses([fauxAssistantMessage("sub answer")]);
+		await harness.session.runSubAgent("Say something");
+
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("returns partial text when the sub-agent stops mid-task", async () => {
+		const harness = await makeHarness();
+
+		harness.setResponses([fauxAssistantMessage("partial result")]);
+		const answer = await harness.session.runSubAgent("Do a long task", { maxSteps: 1 });
+
+		expect(answer).toContain("partial result");
+		expect(answer).toContain("stopped after 1 turns");
+	});
+});

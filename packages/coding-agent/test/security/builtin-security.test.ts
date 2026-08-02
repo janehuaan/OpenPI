@@ -60,7 +60,7 @@ describe("classifyWriteEdit", () => {
 
 describe("BuiltinSecurity.check", () => {
 	function gate(mode: "strict" | "confirm" | "permissive" | "bypass") {
-		return new BuiltinSecurity({ mode, cwd: tempDir, agentDir: tempDir });
+		return new BuiltinSecurity({ mode, cwd: tempDir });
 	}
 
 	it("blocks critical commands in every mode", () => {
@@ -131,7 +131,7 @@ describe("BuiltinSecurity.check", () => {
 
 describe("BuiltinSecurity audit", () => {
 	it("appends audit entries for blocked calls", () => {
-		const g = new BuiltinSecurity({ mode: "confirm", cwd: tempDir, agentDir: tempDir });
+		const g = new BuiltinSecurity({ mode: "confirm", cwd: tempDir });
 		g.appendAudit({
 			tool: "bash",
 			target: "rm -rf /",
@@ -140,7 +140,7 @@ describe("BuiltinSecurity audit", () => {
 			reason: "Recursive delete of root/parent",
 			mode: "confirm",
 		});
-		const lines = readFileSync(join(tempDir, "security", "audit.jsonl"), "utf8")
+		const lines = readFileSync(join(tempDir, ".pi", "security", "audit.jsonl"), "utf8")
 			.trim()
 			.split("\n");
 		expect(lines).toHaveLength(1);
@@ -151,10 +151,10 @@ describe("BuiltinSecurity audit", () => {
 	});
 
 	it("records user decisions through recordDecision", () => {
-		const g = new BuiltinSecurity({ mode: "confirm", cwd: tempDir, agentDir: tempDir });
+		const g = new BuiltinSecurity({ mode: "confirm", cwd: tempDir });
 		const result = g.check("bash", "sudo apt update");
 		g.recordDecision("bash", "sudo apt update", result, false);
-		const lines = readFileSync(join(tempDir, "security", "audit.jsonl"), "utf8")
+		const lines = readFileSync(join(tempDir, ".pi", "security", "audit.jsonl"), "utf8")
 			.trim()
 			.split("\n");
 		const entry = JSON.parse(lines[0]);

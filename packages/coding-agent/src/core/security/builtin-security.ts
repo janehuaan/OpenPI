@@ -49,13 +49,11 @@ const CONFIRM_KEY_LENGTH = 80;
 export class BuiltinSecurity {
 	readonly mode: SecurityMode;
 	readonly cwd: string;
-	readonly agentDir: string;
 	private readonly confirmedCommands = new Set<string>();
 
-	constructor(opts: { mode: SecurityMode; cwd: string; agentDir: string }) {
+	constructor(opts: { mode: SecurityMode; cwd: string }) {
 		this.mode = opts.mode;
 		this.cwd = opts.cwd;
-		this.agentDir = opts.agentDir;
 	}
 
 	/**
@@ -111,11 +109,11 @@ export class BuiltinSecurity {
 		});
 	}
 
-	/** Append an audit entry to <agentDir>/security-audit.jsonl (best effort). */
+	/** Append an audit entry to <cwd>/.pi/security/audit.jsonl (best effort). */
 	appendAudit(entry: Omit<SecurityAuditEntry, "timestamp">): void {
 		const auditEntry: SecurityAuditEntry = { timestamp: Date.now(), ...entry };
 		try {
-			const dir = join(this.agentDir, "security");
+			const dir = join(this.cwd, ".pi", "security");
 			mkdirSync(dir, { recursive: true });
 			appendFileSync(join(dir, "audit.jsonl"), `${JSON.stringify(auditEntry)}\n`, "utf8");
 		} catch {

@@ -42,7 +42,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
-import { getAgentDir } from "../config.ts";
+import { Type } from "typebox";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -102,6 +102,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
+import { type RunSubAgentTaskOptions, runSubAgentTask, SUB_AGENT_TOOL_NAME } from "./sub-agent.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -376,9 +377,7 @@ export class AgentSession {
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		const securityMode = config.securityMode ?? this.settingsManager.getGlobalSettings().securityMode;
-		this._builtinSecurity = securityMode
-			? new BuiltinSecurity({ mode: securityMode, cwd: config.cwd, agentDir: getAgentDir() })
-			: undefined;
+		this._builtinSecurity = securityMode ? new BuiltinSecurity({ mode: securityMode, cwd: config.cwd }) : undefined;
 		const mcpServers = this.settingsManager.getGlobalSettings().mcpServers;
 		this._mcpManager =
 			mcpServers && Object.keys(mcpServers).length > 0 ? new McpManager(mcpServers, config.cwd) : undefined;
@@ -416,6 +415,27 @@ export class AgentSession {
 		if (!this._mcpManager) return;
 		await this._mcpManager.stop();
 		this._refreshToolRegistry();
+	}
+
+	/**
+	 * Run a task in an isolated in-process sub-agent.
+	 *
+	 * The sub-agent shares the parent's model and auth but has its own
+	 * transcript and a restricted tool set. Returns its final answer text.
+	 */
+	async runSubAgent(task: string, options: RunSubAgentTaskOptions = {}): Promise<string> {
+		const toolNames = options.tools ? new Set(options.tools) : undefined;
+		const tools = Array.from(this._toolRegistry.values()).filter(
+			(tool) => tool.name !== SUB_AGENT_TOOL_NAME && (!toolNames || toolNames.has(tool.name)),
+		);
+		const result = await runSubAgentTask(
+			{ parent: this.agent, tools, security: this._builtinSecurity },
+			task,
+			options,
+		);
+		return result.stoppedEarly
+			? `${result.answer}\n\n[sub-agent stopped after ${result.turns} turns (limit ${options.maxSteps ?? 20})]`
+			: result.answer;
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -2632,6 +2652,31 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
+
+		// In-process sub-agent tool: delegates a task to an isolated Agent.
+		const subAgentParamsSchema = Type.Object({
+			task: Type.String({ description: "The task to delegate" }),
+			tools: Type.Optional(
+				Type.Array(Type.String({ description: "Tool names the sub-agent may use (default: all)" })),
+			),
+			maxSteps: Type.Optional(Type.Integer({ description: "Max turns before forced stop (default 20)" })),
+		});
+		const subAgentTool: ToolDefinition<typeof subAgentParamsSchema> = {
+			name: SUB_AGENT_TOOL_NAME,
+			label: "Sub-agent",
+			description:
+				"Delegate a task to an isolated sub-agent that runs in-process with its own context and a restricted tool set. Returns the sub-agent's final answer.",
+			promptSnippet: "sub_agent - delegate a task to an isolated sub-agent (own context, restricted tools)",
+			parameters: subAgentParamsSchema,
+			execute: async (_toolCallId, params) => {
+				const answer = await this.runSubAgent(params.task, {
+					tools: params.tools,
+					maxSteps: params.maxSteps,
+				});
+				return { content: [{ type: "text", text: answer }], details: undefined };
+			},
+		};
+		this._baseToolDefinitions.set(SUB_AGENT_TOOL_NAME, subAgentTool);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
