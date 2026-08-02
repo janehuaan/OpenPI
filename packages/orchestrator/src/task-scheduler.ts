@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { getSocketPath, VERSION } from "./config.ts";
 import { ProcessTaskExecutor, type TaskExecution, type TaskExecutor } from "./task-executor.ts";
 import { computeBackoffMs, normalizeRetryPolicy, shouldRetryRun } from "./task-retry.ts";
@@ -130,6 +130,7 @@ export class TaskScheduler {
 			runsRunning: runs.filter((run) => run.status === "running").length + this.activeRuns.size,
 			runsQueued: runs.filter((run) => run.status === "queued").length,
 			startedAt,
+			cliMtime: cliEntryMtime(),
 			stepRunsRunning: stepRuns.filter((sr) => sr.status === "running").length,
 			stepRunsQueued: stepRuns.filter((sr) => sr.status === "pending").length,
 		};
@@ -516,6 +517,16 @@ export class TaskScheduler {
 		if (!pending) return;
 		clearTimeout(pending.timer);
 		this.pendingRetries.delete(taskId);
+	}
+}
+
+/** mtime of the running CLI entry (dist/cli.js) — clients use it to detect code upgrades. */
+function cliEntryMtime(): number {
+	try {
+		const entry = process.argv[1];
+		return entry ? statSync(entry).mtimeMs : 0;
+	} catch {
+		return 0;
 	}
 }
 

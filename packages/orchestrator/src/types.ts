@@ -155,6 +155,8 @@ export interface OrchestratorHealth {
 	runsRunning: number;
 	runsQueued: number;
 	startedAt: string;
+	/** mtime of the orchestrator CLI entry the daemon was started from; lets clients detect code upgrades. */
+	cliMtime: number;
 	/** Number of step-level runs currently executing. */
 	stepRunsRunning?: number;
 	/** Number of step-level runs queued. */

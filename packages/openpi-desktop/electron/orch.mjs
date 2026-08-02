@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createConnection } from "node:net";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { nodeBinary, nodeSpawnEnv, orchestratorCli, orchestratorDir, piCli } from "./paths.mjs";
@@ -105,6 +105,18 @@ export async function getHealthSafe() {
 	return undefined;
 }
 
+/** True when the running daemon was started from a different CLI build than the current one. */
+async function daemonNeedsRestart() {
+	const health = await getHealthSafe();
+	if (!health || typeof health.cliMtime !== "number") return false;
+	try {
+		const localMtime = statSync(orchestratorCli()).mtimeMs;
+		return health.cliMtime !== localMtime;
+	} catch {
+		return false;
+	}
+}
+
 export async function ensureDaemon() {
 	if (daemonStartPromise) return daemonStartPromise;
 
@@ -116,7 +128,16 @@ export async function ensureDaemon() {
 
 async function startDaemon() {
 	const probe = await probeDaemon();
-	if (probe.alive) return true;
+	if (probe.alive) {
+		// Restart the daemon when its code differs from the current build
+		// (e.g. after installing a new .app): the long-lived daemon would
+		// otherwise keep running the old coding-agent indefinitely.
+		if (await daemonNeedsRestart()) {
+			await stopDaemon();
+		} else {
+			return true;
+		}
+	}
 
 	// Stale socket: file exists but list failed
 	const path = socketPath();
