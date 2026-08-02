@@ -4,6 +4,11 @@
 
 ### Added
 
+- MCP panel shows per-server status (name, status, tool count, error) from RPC capabilities `mcp.servers`.
+- Security mode UI writes `settings.json` `securityMode` (builtin gate authority) and keeps `security.json` as a legacy mirror for the openpi-security extension; reads prefer `settings.json`.
+
+### Added
+
 - Added Work and Code conversation modes with a native project-directory picker and mode-aware conversation starters.
 - Added bundled local Whisper streaming speech-to-text in the chat composer with automatic session continuation and native microphone permissions.
 
