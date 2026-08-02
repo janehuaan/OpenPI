@@ -171,6 +171,73 @@ export interface BashToolOptions {
 	spawnHook?: BashSpawnHook;
 }
 
+/**
+ * Create bash operations that execute every command inside a Docker container.
+ *
+ * The host cwd is mounted read-write at /work; the image must contain a shell.
+ * Docker must be available on PATH; otherwise commands fail with the docker
+ * error visible in the tool output.
+ */
+export function createDockerBashOperations(options: { image: string; cwd: string }): BashOperations {
+	return {
+		exec: async (command, cwd, { onData, signal, timeout, env }) => {
+			const timeoutMs = resolveTimeoutMs(timeout);
+			if (signal?.aborted) {
+				throw new Error("aborted");
+			}
+			const args = [
+				"run",
+				"--rm",
+				"-i",
+				"-v",
+				`${options.cwd}:/work`,
+				"-w",
+				"/work",
+				options.image,
+				"bash",
+				"-lc",
+				command,
+			];
+			const child = spawn("docker", args, {
+				cwd,
+				env: env ?? getShellEnv(),
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+			let timedOut = false;
+			let timeoutHandle: NodeJS.Timeout | undefined;
+			const onAbort = () => {
+				if (child.pid) killProcessTree(child.pid);
+			};
+
+			try {
+				if (timeoutMs !== undefined) {
+					timeoutHandle = setTimeout(() => {
+						timedOut = true;
+						if (child.pid) killProcessTree(child.pid);
+					}, timeoutMs);
+				}
+				child.stdout?.on("data", onData);
+				child.stderr?.on("data", onData);
+				if (signal) {
+					if (signal.aborted) onAbort();
+					else signal.addEventListener("abort", onAbort, { once: true });
+				}
+				const exitCode = await waitForChildProcess(child);
+				if (signal?.aborted) {
+					throw new Error("aborted");
+				}
+				if (timedOut) {
+					throw new Error(`timeout:${timeout}`);
+				}
+				return { exitCode };
+			} finally {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				if (signal) signal.removeEventListener("abort", onAbort);
+			}
+		},
+	};
+}
+
 const BASH_PREVIEW_LINES = 5;
 const BASH_UPDATE_THROTTLE_MS = 100;
 

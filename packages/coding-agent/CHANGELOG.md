@@ -9,6 +9,7 @@
 - `sub_agent` tool: delegate a task to an isolated in-process sub-agent sharing the parent model/auth, with its own transcript and a restricted tool set (turn limit via `maxSteps`).
 - Session checkpoint snapshots: full-transcript snapshots appended every `checkpointIntervalTurns` turns (default 10), so resume/fork replay starts from a recent point instead of the beginning.
 - Built-in `web_search` (Tavily → Brave → DuckDuckGo fallback, no key required) and `web_fetch` (SSRF guard blocks loopback/private/link-local hosts) tools, active by default.
+- Docker sandbox for bash: `settings.json` `bashSandbox.dockerImage` runs every command in a container with the host cwd mounted at `/work`.
 
 ## [0.80.8] - 2026-07-24
 

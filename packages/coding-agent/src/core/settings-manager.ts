@@ -136,6 +136,8 @@ export interface Settings {
 	checkpointIntervalTurns?: number;
 	/** Max messages stored per snapshot (default 1000; 0 = no cap). */
 	checkpointMaxMessages?: number;
+	/** Run every bash command inside a Docker container (image with a shell; cwd mounted at /work). */
+	bashSandbox?: { dockerImage?: string };
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
