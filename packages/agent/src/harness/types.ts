@@ -368,6 +368,15 @@ export interface CompactionEntry<T = unknown> extends SessionTreeEntryBase {
 	fromHook?: boolean;
 }
 
+export interface SnapshotEntry<T = unknown> extends SessionTreeEntryBase {
+	type: "snapshot";
+	/** Full transcript at snapshot time. Replaces all earlier entries when building context. */
+	messages: AgentMessage[];
+	/** Active tool names at snapshot time. */
+	toolNames: string[] | null;
+	details?: T;
+}
+
 export interface BranchSummaryEntry<T = unknown> extends SessionTreeEntryBase {
 	type: "branch_summary";
 	fromId: string;
@@ -412,6 +421,7 @@ export type SessionTreeEntry =
 	| ModelChangeEntry
 	| ActiveToolsChangeEntry
 	| CompactionEntry
+	| SnapshotEntry
 	| BranchSummaryEntry
 	| CustomEntry
 	| CustomMessageEntry

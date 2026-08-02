@@ -805,6 +805,7 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
+			this._maybeAppendSnapshot();
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
 				type: "message_start",
@@ -864,6 +865,22 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 		}
+	}
+
+	/**
+	 * Periodically persist a checkpoint snapshot of the full transcript.
+	 *
+	 * Snapshots let session replay start from a recent point instead of
+	 * rebuilding from the beginning of a long transcript. Interval is
+	 * configurable via settings.checkpointIntervalTurns (default 10;
+	 * 0 disables checkpointing).
+	 */
+	private _maybeAppendSnapshot(): void {
+		const interval = this.settingsManager.getGlobalSettings().checkpointIntervalTurns ?? 10;
+		if (interval <= 0 || this._turnIndex % interval !== 0) return;
+		const messages = this.agent.state.messages;
+		if (messages.length === 0) return;
+		this.sessionManager.appendSnapshot([...messages], this.getActiveToolNames(), { checkpoint: true });
 	}
 
 	/**

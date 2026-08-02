@@ -88,6 +88,20 @@ export interface BranchSummaryEntry<T = unknown> extends SessionEntryBase {
 }
 
 /**
+ * Checkpoint snapshot: the full transcript at a point in time.
+ *
+ * When present on the active path, entries before the snapshot are skipped when
+ * building LLM context (the snapshot messages are the transcript). Used for
+ * crash recovery and fast replay of long sessions.
+ */
+export interface SnapshotEntry<T = unknown> extends SessionEntryBase {
+	type: "snapshot";
+	messages: AgentMessage[];
+	toolNames: string[] | null;
+	details?: T;
+}
+
+/**
  * Custom entry for extensions to store extension-specific data in the session.
  * Use customType to identify your extension's entries.
  *
@@ -142,6 +156,7 @@ export type SessionEntry =
 	| ThinkingLevelChangeEntry
 	| ModelChangeEntry
 	| CompactionEntry
+	| SnapshotEntry
 	| BranchSummaryEntry
 	| CustomEntry
 	| CustomMessageEntry
@@ -400,6 +415,9 @@ export function sessionEntryToContextMessages(entry: SessionEntry): AgentMessage
 	if (entry.type === "compaction") {
 		return [createCompactionSummaryMessage(entry.summary, entry.tokensBefore, entry.timestamp)];
 	}
+	if (entry.type === "snapshot") {
+		return entry.messages;
+	}
 	return [];
 }
 
@@ -418,11 +436,21 @@ export function buildContextEntries(
 ): SessionEntry[] {
 	const path = buildSessionPath(entries, leafId, byId);
 	let compaction: CompactionEntry | null = null;
+	let snapshot: SnapshotEntry | null = null;
 
 	for (const entry of path) {
 		if (entry.type === "compaction") {
 			compaction = entry;
+		} else if (entry.type === "snapshot") {
+			snapshot = entry;
 		}
+	}
+
+	// A snapshot replaces everything before it: its messages are the full
+	// transcript at that point, so earlier entries are redundant.
+	if (snapshot) {
+		const snapshotIdx = path.findIndex((entry) => entry.type === "snapshot" && entry.id === snapshot.id);
+		return [snapshot, ...path.slice(snapshotIdx + 1)];
 	}
 
 	if (!compaction) {
@@ -1042,6 +1070,21 @@ export class SessionManager {
 			tokensBefore,
 			details,
 			fromHook,
+		};
+		this._appendEntry(entry);
+		return entry.id;
+	}
+
+	/** Append a checkpoint snapshot (full transcript) as child of current leaf, then advance leaf. Returns entry id. */
+	appendSnapshot(messages: AgentMessage[], toolNames: string[] | null, details?: unknown): string {
+		const entry: SnapshotEntry = {
+			type: "snapshot",
+			messages,
+			toolNames,
+			details,
+			id: generateId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
 		};
 		this._appendEntry(entry);
 		return entry.id;

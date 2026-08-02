@@ -132,6 +132,8 @@ export interface Settings {
 	securityMode?: SecurityMode;
 	/** MCP servers to start and expose their tools to the agent. */
 	mcpServers?: McpServersConfig;
+	/** Checkpoint snapshot interval in turns (default 10; 0 disables checkpointing). */
+	checkpointIntervalTurns?: number;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
