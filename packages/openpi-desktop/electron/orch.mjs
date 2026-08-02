@@ -108,7 +108,10 @@ export async function getHealthSafe() {
 /** True when the running daemon was started from a different CLI build than the current one. */
 async function daemonNeedsRestart() {
 	const health = await getHealthSafe();
-	if (!health || typeof health.cliMtime !== "number") return false;
+	if (!health) return false;
+	// A daemon built before the cliMtime field exists cannot be verified;
+	// restart it once so its code matches the current build.
+	if (typeof health.cliMtime !== "number") return true;
 	try {
 		const localMtime = statSync(orchestratorCli()).mtimeMs;
 		return health.cliMtime !== localMtime;
