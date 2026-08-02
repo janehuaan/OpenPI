@@ -69,6 +69,7 @@ export function withModelsJsonEndpoint(provider: Provider, config: ModelsJsonPro
 						return;
 					}
 					if (typeof config.apiKey !== "string" || !config.apiKey) return;
+					if (!config.baseUrl) return;
 
 					const url = `${config.baseUrl.replace(/\/+$/, "")}/models`;
 					const response = await fetch(url, {
@@ -90,7 +91,7 @@ export function withModelsJsonEndpoint(provider: Provider, config: ModelsJsonPro
 					}
 					const refreshed = parseOpenAiModelsResponse(
 						provider.id,
-						provider.api,
+						(config.api as Api) ?? "openai-responses",
 						config.baseUrl,
 						await response.json(),
 					);
