@@ -4,6 +4,7 @@
 
 ### Added
 
+- `desktop-ops meta` reports `semanticSearch` feature state and whether an embedding key is configured (env or `secrets.env`).
 - Semantic embedding rerank for memory search: when `OPENPI_EMBEDDING_API_KEY` is set (base URL/model configurable), query results are blended with embedding similarity (`semanticSearch`, default true). Degrades silently to hash-vector + BM25 without a key or on API failure.
 
 ## [0.80.8] - 2026-07-24
