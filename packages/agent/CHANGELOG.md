@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `Agent.shouldStopAfterTurn` hook (and `AgentOptions.shouldStopAfterTurn`) letting callers stop the agent loop early after a turn's tool calls, used by the coding-agent sub-agent turn limit.
+- `snapshot` session-tree entry type: a full transcript checkpoint that replaces earlier entries when building LLM context.
+
 ## [0.80.8] - 2026-07-24
 
 ## [0.80.7] - 2026-07-14

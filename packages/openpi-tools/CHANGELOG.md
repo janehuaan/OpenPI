@@ -9,6 +9,7 @@
 ### Changed
 
 - Session `tasks` tool clarified as in-chat todos only; not for scheduled jobs.
+- Exported `chunkText`/`scoreChunks` (knowledge-base) and `rgSearch`/`grepSearch` (code-search) as pure functions for unit testing.
 
 ## [0.80.8] - 2026-07-24
 

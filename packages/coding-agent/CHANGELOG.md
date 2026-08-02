@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Builtin security gate: zero-config tool-call interception before extension handlers, with strict/confirm/permissive/bypass modes, session-level confirmation caching, and an audit log at `<cwd>/.pi/security/audit.jsonl`. Enable via `--security-mode` or `settings.json` `securityMode`.
+- Native MCP support: `settings.json` `mcpServers` starts stdio or streamable-HTTP MCP servers and merges their tools into the agent tool registry. RPC capabilities report real server status instead of name heuristics.
+- `sub_agent` tool: delegate a task to an isolated in-process sub-agent sharing the parent model/auth, with its own transcript and a restricted tool set (turn limit via `maxSteps`).
+- Session checkpoint snapshots: full-transcript snapshots appended every `checkpointIntervalTurns` turns (default 10), so resume/fork replay starts from a recent point instead of the beginning.
+- Built-in `web_search` (Tavily → Brave → DuckDuckGo fallback, no key required) and `web_fetch` (SSRF guard blocks loopback/private/link-local hosts) tools, active by default.
+
 ## [0.80.8] - 2026-07-24
 
 ### Fixed

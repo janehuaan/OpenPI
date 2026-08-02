@@ -78,6 +78,47 @@ node --experimental-strip-types packages/openpi-bootstrap/src/cli.ts verify
 - Prefer per-task `--tools` allowlists for scheduled work.
 - Do not expose orchestrator sockets publicly.
 
+## Builtin security gate (no extension required)
+
+The core agent ships a builtin gate that intercepts tool calls before extensions:
+
+- Classifies `bash` commands and `write`/`edit` targets (critical/high/medium/low).
+- Modes: `strict` (block high+), `confirm` (ask via UI; block without UI), `permissive` (ask only high), `bypass` (block only critical).
+- Medium commands confirmed once are cached for the session; blocked/confirmed decisions are audited to `<cwd>/.pi/security/audit.jsonl`.
+- Enable: `pi --security-mode confirm` or `settings.json` → `"securityMode": "confirm"`.
+- The `openpi-security` extension still works and runs after the builtin gate.
+
+## MCP servers
+
+Configure in `settings.json` (`~/.pi/agent/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] },
+    "remote": { "url": "https://mcp.example.com/sse" }
+  }
+}
+```
+
+Tools from connected servers are merged into the agent tool registry automatically. Status is reported over RPC (`mcp.servers`).
+
+## Sub-agents
+
+Every session has a `sub_agent` tool: delegate a task to an isolated in-process agent with its own context and restricted tools. Parameters: `task`, optional `tools` allowlist, optional `maxSteps` (default 20). Sub-agent tool calls pass through the builtin security gate.
+
+## Checkpoint snapshots
+
+Sessions append a full-transcript snapshot every `checkpointIntervalTurns` turns (default 10, `0` disables). Resume/fork replay starts from the latest snapshot instead of the beginning of the transcript.
+
+## Web tools
+
+`web_search` (Tavily → Brave → DuckDuckGo, no key needed for the fallback; keys via env or `~/.pi/agent/secrets.env`) and `web_fetch` (SSRF-guarded) are built-in and active by default.
+
+## Semantic memory search
+
+When `OPENPI_EMBEDDING_API_KEY` is set (also `OPENPI_EMBEDDING_BASE_URL` for local gateways, `OPENPI_EMBEDDING_MODEL`, default `text-embedding-3-small`), memory queries blend embedding similarity with the hybrid BM25 ranking (`semanticSearch` config, default true). Without a key the existing hash-vector + BM25 search is used.
+
 ## Life adapters
 
 ```bash
