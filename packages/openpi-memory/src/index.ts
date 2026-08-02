@@ -30,7 +30,7 @@ import {
 	saveMeta,
 	shouldMaintain,
 } from "./maintain.ts";
-import { loadSemanticEmbedderOptions, SemanticEmbedder, semanticRerank } from "./semantic.ts";
+import { loadSemanticEmbedderOptions, prewarmSemanticCache, SemanticEmbedder, semanticRerank } from "./semantic.ts";
 import { formatSelectiveSnapshot, selectSnapshotEntries } from "./snapshot.ts";
 import {
 	deleteTopic,
@@ -51,7 +51,7 @@ import {
 	saveTopicAt,
 	upsertEntry,
 } from "./store.ts";
-import { EXCLUSION_LIST, type MemoryIndexEntry } from "./types.ts";
+import { EXCLUSION_LIST, type MemoryConfig, type MemoryIndexEntry } from "./types.ts";
 import { reindexVectors } from "./vectors.ts";
 
 const MemoryParams = Type.Object({
@@ -265,6 +265,7 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 					const file = saveTopicAt(globalDir, type, key, params.body ?? params.value);
 					refreeze(ctx.cwd);
 					pi.appendEntry("openpi-memory:save", { type, key, file, scope, at: new Date().toISOString() });
+					prewarmOnSave(config, params, globalDir);
 					return {
 						content: [{ type: "text", text: `Saved global ${type}/${key} (${next.length} index entries).` }],
 						details: { action, type, key, count: next.length, scope },
@@ -274,6 +275,7 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 				const file = saveTopic(ctx.cwd, type, key, params.body ?? params.value);
 				refreeze(ctx.cwd);
 				pi.appendEntry("openpi-memory:save", { type, key, file, scope, at: new Date().toISOString() });
+				prewarmOnSave(config, params, memoryDir(ctx.cwd));
 				return {
 					content: [
 						{
@@ -763,6 +765,16 @@ function messagesToTurns(messages: unknown[]): TranscriptTurn[] {
 		turns.push({ role, text });
 	}
 	return turns;
+}
+
+/** Fire-and-forget semantic cache pre-warm after a memory save/update. */
+function prewarmOnSave(config: MemoryConfig, params: { value?: string; body?: string }, dir: string): void {
+	if (!config.semanticSearch) return;
+	const options = loadSemanticEmbedderOptions();
+	if (!options) return;
+	const text = [params.body ?? params.value ?? ""].join(" ");
+	if (!text.trim()) return;
+	void prewarmSemanticCache(options, [text], join(dir, "semantic-cache.json"));
 }
 
 function mergeUnique(globalEntries: MemoryIndexEntry[], project: MemoryIndexEntry[]): MemoryIndexEntry[] {

@@ -164,6 +164,26 @@ export interface SemanticRerankOptions {
 }
 
 /**
+ * Pre-warm the semantic cache for texts (fire-and-forget).
+ *
+ * Call from write paths (memory save/update) so subsequent queries hit the
+ * persisted fingerprint cache instead of the embedding API. Failures are
+ * swallowed; the query path falls back to live embedding.
+ */
+export async function prewarmSemanticCache(
+	options: SemanticEmbedderOptions,
+	texts: string[],
+	cachePath?: string,
+): Promise<void> {
+	try {
+		const embedder = new SemanticEmbedder({ ...options, cachePath });
+		await embedder.embedBatch(texts.filter((text) => text.trim().length > 0));
+	} catch {
+		// Best-effort pre-warm.
+	}
+}
+
+/**
  * Rerank entries by semantic embedding similarity, blended with optional base
  * scores. Returns null when the embedder is unavailable or the API fails, so
  * callers fall back to their existing ranking.

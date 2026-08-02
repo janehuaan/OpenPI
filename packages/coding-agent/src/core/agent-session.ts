@@ -2669,9 +2669,13 @@ export class AgentSession {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
-		const dockerImage = this.settingsManager.getGlobalSettings().bashSandbox?.dockerImage;
-		const bashOperations = dockerImage
-			? createDockerBashOperations({ image: dockerImage, cwd: this._cwd })
+		const sandboxSettings = this.settingsManager.getGlobalSettings().bashSandbox;
+		const bashOperations = sandboxSettings?.dockerImage
+			? createDockerBashOperations({
+					image: sandboxSettings.dockerImage,
+					cwd: this._cwd,
+					command: sandboxSettings.command,
+				})
 			: undefined;
 		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(

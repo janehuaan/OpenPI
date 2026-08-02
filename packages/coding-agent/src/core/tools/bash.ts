@@ -172,13 +172,16 @@ export interface BashToolOptions {
 }
 
 /**
- * Create bash operations that execute every command inside a Docker container.
+ * Create bash operations that execute every command inside a container.
  *
  * The host cwd is mounted read-write at /work; the image must contain a shell.
- * Docker must be available on PATH; otherwise commands fail with the docker
- * error visible in the tool output.
+ * The container CLI must be available on PATH (default "docker"; use
+ * "podman" for podman). Remote daemons are supported through the usual
+ * environment (DOCKER_HOST, CONTAINER_HOST, ...), which is inherited from the
+ * process environment.
  */
-export function createDockerBashOperations(options: { image: string; cwd: string }): BashOperations {
+export function createDockerBashOperations(options: { image: string; cwd: string; command?: string }): BashOperations {
+	const cli = options.command ?? "docker";
 	return {
 		exec: async (command, cwd, { onData, signal, timeout, env }) => {
 			const timeoutMs = resolveTimeoutMs(timeout);
@@ -198,7 +201,7 @@ export function createDockerBashOperations(options: { image: string; cwd: string
 				"-lc",
 				command,
 			];
-			const child = spawn("docker", args, {
+			const child = spawn(cli, args, {
 				cwd,
 				env: env ?? getShellEnv(),
 				stdio: ["ignore", "pipe", "pipe"],
