@@ -51,7 +51,24 @@ function estimateTokens(text: string): number {
 	return Math.ceil(text.length / 4); // rough estimate: 4 chars per token
 }
 
-function chunkText(text: string, source: string): KBEntry[] {
+/** Score knowledge-base chunks by keyword overlap with the query (0 = no match). */
+export function scoreChunks(query: string, entries: KBEntry[]): Array<{ entry: KBEntry; score: number }> {
+	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	if (words.length === 0) return [];
+	return entries
+		.map((entry) => {
+			const text = entry.chunk.toLowerCase();
+			let score = 0;
+			for (const word of words) {
+				if (text.includes(word)) score++;
+			}
+			return { entry, score };
+		})
+		.filter((s) => s.score > 0)
+		.sort((a, b) => b.score - a.score);
+}
+
+export function chunkText(text: string, source: string): KBEntry[] {
 	const entries: KBEntry[] = [];
 	let start = 0;
 
@@ -242,19 +259,7 @@ export default function (pi: ExtensionAPI) {
 			const limit = params.limit ?? 10;
 
 			// Keyword scoring
-			const scored = index.entries
-				.map((entry) => {
-					const text = entry.chunk.toLowerCase();
-					const words = query.split(/\s+/).filter(Boolean);
-					let score = 0;
-					for (const word of words) {
-						if (text.includes(word)) score++;
-					}
-					return { entry, score };
-				})
-				.filter((s) => s.score > 0)
-				.sort((a, b) => b.score - a.score)
-				.slice(0, limit);
+			const scored = scoreChunks(query, index.entries).slice(0, limit);
 
 			if (scored.length === 0) {
 				return { content: [{ type: "text", text: "No matching documents found." }], details: { count: 0 } };

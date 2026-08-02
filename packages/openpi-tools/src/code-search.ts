@@ -62,7 +62,7 @@ async function checkRipgrep(pi: ExtensionAPI): Promise<boolean> {
 	}
 }
 
-async function rgSearch(
+export async function rgSearch(
 	pi: ExtensionAPI,
 	query: string,
 	options: { language?: string; pathScope?: string; maxResults?: number },
@@ -96,7 +96,7 @@ async function rgSearch(
 	};
 }
 
-async function grepSearch(
+export async function grepSearch(
 	pi: ExtensionAPI,
 	query: string,
 	options: { language?: string; pathScope?: string; maxResults?: number },
