@@ -3668,28 +3668,28 @@ export function CapabilitiesSurface({
 										<strong>{capabilities.mcp.tools.length}</strong>
 									</div>
 								</div>
-								{capabilities.mcp.servers.length > 0 && (
+								{(capabilities.mcp.servers?.length ?? 0) > 0 && (
 									<div className="capability-list compact">
-										{capabilities.mcp.servers.map((server) => (
-											<div className="capability-row" key={server.name}>
+										{capabilities.mcp.servers?.map((server) => (
+											<div className="capability-row" key={server?.name ?? "unknown"}>
 												<span
 													className={`capability-icon mcp ${
-														server.status === "connected" ? "online" : ""
+														server?.status === "connected" ? "online" : ""
 													}`}
 												>
 													<Cable size={16} />
 												</span>
 												<div className="capability-copy">
-													<strong>{server.name}</strong>
+													<strong>{server?.name ?? "MCP server"}</strong>
 													<code>
-														{server.status === "connected"
-															? `${server.toolCount} tool(s)`
-															: server.status === "starting"
+														{server?.status === "connected"
+															? `${server?.toolCount ?? 0} tool(s)`
+															: server?.status === "starting"
 																? "starting"
-																: (server.error ?? "error")}
+																: (server?.error ?? "error")}
 													</code>
 												</div>
-												<span className="active-indicator">{server.status}</span>
+												<span className="active-indicator">{server?.status ?? "unknown"}</span>
 											</div>
 										))}
 									</div>
