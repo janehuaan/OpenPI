@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
@@ -170,6 +171,7 @@ export async function createAgentSessionServices(
 	extensionsResult.runtime.pendingProviderRegistrations = [];
 	await modelRuntime.refresh({ allowNetwork: false });
 	diagnostics.push(...applyExtensionFlagValues(resourceLoader, options.extensionFlagValues));
+	diagnostics.push(...providerModelDiagnostics(modelRuntime));
 
 	return {
 		cwd,
@@ -179,6 +181,37 @@ export async function createAgentSessionServices(
 		resourceLoader,
 		diagnostics,
 	};
+}
+
+/**
+ * Warn about providers that have credentials configured (models.json keys)
+ * but no usable models: they will never appear in the model selector.
+ */
+function providerModelDiagnostics(modelRuntime: ModelRuntime): AgentSessionRuntimeDiagnostic[] {
+	const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
+	try {
+		const modelsPath = join(getAgentDir(), "models.json");
+		if (!existsSync(modelsPath)) return diagnostics;
+		const value = JSON.parse(readFileSync(modelsPath, "utf8")) as { providers?: Record<string, unknown> };
+		const providers = value.providers ?? {};
+		for (const [providerId, config] of Object.entries(providers)) {
+			if (typeof config !== "object" || config === null) continue;
+			const record = config as { apiKey?: unknown; baseUrl?: unknown; models?: unknown };
+			const hasCredentials = typeof record.apiKey === "string" || typeof record.baseUrl === "string";
+			if (!hasCredentials) continue;
+			const hasModels = Array.isArray(record.models) && record.models.length > 0;
+			if (hasModels) continue;
+			if (modelRuntime.getModels(providerId).length === 0) {
+				diagnostics.push({
+					type: "warning",
+					message: `Provider "${providerId}" has credentials but no models: add a "models" array to ~/.pi/agent/models.json for this provider.`,
+				});
+			}
+		}
+	} catch {
+		// Diagnostics are best-effort.
+	}
+	return diagnostics;
 }
 
 /**

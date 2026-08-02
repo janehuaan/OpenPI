@@ -16,6 +16,7 @@ import {
 	VERSION,
 } from "./config.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
+import { findMarketplacePackage, MARKETPLACE_PACKAGES } from "./core/marketplace.ts";
 import { DefaultPackageManager } from "./core/package-manager.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
 import { DefaultResourceLoader } from "./core/resource-loader.ts";
@@ -28,7 +29,7 @@ import {
 	quarantineWindowsNativeDependencies,
 } from "./utils/windows-self-update.ts";
 
-export type PackageCommand = "install" | "remove" | "update" | "list";
+export type PackageCommand = "install" | "remove" | "update" | "list" | "market";
 
 type UpdateTarget = { type: "all" } | { type: "self" } | { type: "extensions"; source?: string };
 
@@ -58,6 +59,8 @@ interface PackageCommandOptions {
 	force: boolean;
 	projectTrustOverride?: boolean;
 	help: boolean;
+	/** `pi market install <id>` — resolve the id through the marketplace list. */
+	marketInstall?: boolean;
 	invalidOption?: string;
 	invalidArgument?: string;
 	missingOptionValue?: string;
@@ -84,6 +87,8 @@ function getPackageCommandUsage(command: PackageCommand): string {
 			return `${APP_NAME} update [source|self|pi] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
 		case "list":
 			return `${APP_NAME} list [--approve|--no-approve]`;
+		case "market":
+			return `${APP_NAME} market [install <id>]`;
 	}
 }
 
@@ -106,6 +111,17 @@ Options:
 
 function printPackageCommandHelp(command: PackageCommand): void {
 	switch (command) {
+		case "market":
+			console.log(`${chalk.bold("Usage:")}
+  ${APP_NAME} market [install <id>]
+
+List or install built-in marketplace packages (MCP servers, skills, repositories).
+
+Examples:
+  ${APP_NAME} market
+  ${APP_NAME} market install mcp-filesystem
+`);
+			break;
 		case "install":
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("install")}
@@ -183,12 +199,18 @@ Options:
 }
 
 function parsePackageCommand(args: string[]): PackageCommandOptions | undefined {
-	const [rawCommand, ...rest] = args;
+	let [rawCommand, ...rest] = args;
 	let command: PackageCommand | undefined;
 	if (rawCommand === "uninstall") {
 		command = "remove";
 	} else if (rawCommand === "install" || rawCommand === "remove" || rawCommand === "update" || rawCommand === "list") {
 		command = rawCommand;
+	} else if (rawCommand === "market") {
+		command = "market";
+		// `pi market` lists; `pi market install <id>` installs by marketplace id.
+		if (rest[0] === "install") {
+			rest = rest.slice(1);
+		}
 	}
 	if (!command) {
 		return undefined;
@@ -360,6 +382,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 		invalidArgument,
 		missingOptionValue,
 		conflictingOptions,
+		marketInstall: command === "market" && source !== undefined,
 	};
 }
 
@@ -751,6 +774,32 @@ export async function handlePackageCommand(
 					}
 				}
 
+				return true;
+			}
+
+			case "market": {
+				if (options.marketInstall) {
+					const pkg = findMarketplacePackage(source!);
+					if (!pkg) {
+						console.error(
+							chalk.red(`Unknown marketplace package "${source}". Run ${APP_NAME} market to list packages.`),
+						);
+						process.exitCode = 1;
+						return true;
+					}
+					await packageManager.installAndPersist(pkg.source, { local: false });
+					console.log(chalk.green(`Installed ${pkg.name} (${pkg.source})`));
+					return true;
+				}
+
+				console.log(chalk.bold("Marketplace packages:"));
+				for (const pkg of MARKETPLACE_PACKAGES) {
+					console.log(`  ${chalk.cyan(pkg.id)}  [${pkg.kind}] ${pkg.name}`);
+					console.log(chalk.dim(`    ${pkg.description}`));
+					console.log(chalk.dim(`    ${pkg.source}`));
+				}
+				console.log();
+				console.log(chalk.dim(`Install with: ${APP_NAME} market install <id>`));
 				return true;
 			}
 
