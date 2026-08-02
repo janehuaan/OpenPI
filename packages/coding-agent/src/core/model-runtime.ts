@@ -33,6 +33,7 @@ import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
 import { getAgentDir } from "../config.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { ModelConfig } from "./model-config.ts";
+import { withModelsJsonEndpoint } from "./models-json-catalog.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
 	type AuthStatus,
@@ -200,7 +201,15 @@ export class ModelRuntime implements Models {
 			return;
 		}
 		try {
-			this.models.setProvider(composeModelProvider(providerId, base, this.config, extension));
+			const composed = composeModelProvider(providerId, base, this.config, extension);
+			// OpenAI-compatible providers configured in models.json without a
+			// static models array discover their models from GET {baseUrl}/models.
+			const config = this.config.getProvider(providerId);
+			if (!base && !extension && config?.baseUrl && config.apiKey && !Array.isArray(config.models)) {
+				this.models.setProvider(withModelsJsonEndpoint(composed, config));
+			} else {
+				this.models.setProvider(composed);
+			}
 			this.compositionErrors.delete(providerId);
 		} catch (error) {
 			this.compositionErrors.set(providerId, error instanceof Error ? error.message : String(error));
