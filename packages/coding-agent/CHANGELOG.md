@@ -4,6 +4,8 @@
 
 ### Added
 
+- Built-in marketplace: `pi market` lists and installs official MCP servers, skills collections, and pi ecosystem packages.
+- OpenAI-compatible providers configured in `models.json` without a static `models` array now auto-discover models from `GET {baseUrl}/models` on refresh; startup diagnostics warn when a configured provider still has no models.
 - Builtin security gate: zero-config tool-call interception before extension handlers, with strict/confirm/permissive/bypass modes, session-level confirmation caching, and an audit log at `<cwd>/.pi/security/audit.jsonl`. Enable via `--security-mode` or `settings.json` `securityMode`.
 - Native MCP support: `settings.json` `mcpServers` starts stdio or streamable-HTTP MCP servers and merges their tools into the agent tool registry. RPC capabilities report real server status instead of name heuristics.
 - `sub_agent` tool: delegate a task to an isolated in-process sub-agent sharing the parent model/auth, with its own transcript and a restricted tool set (turn limit via `maxSteps`).
