@@ -44,6 +44,8 @@ export interface MemoryConfig {
 	vectorSearch: boolean;
 	/** Blend weight for vector score in hybrid search (0–1). Default 0.55. */
 	vectorAlpha: number;
+	/** Semantic embedding rerank (requires OPENPI_EMBEDDING_API_KEY; falls back silently). Default true. */
+	semanticSearch: boolean;
 	/** Auto backup before maintain / idle organize. Default true. */
 	autoBackup: boolean;
 	/** Keep last N full backups (archives never deleted). Default 40. */
@@ -111,6 +113,7 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
 	pinTypes: ["user", "feedback"],
 	vectorSearch: true,
 	vectorAlpha: 0.55,
+	semanticSearch: true,
 	autoBackup: true,
 	maxBackups: 40,
 	idleOrganize: true,

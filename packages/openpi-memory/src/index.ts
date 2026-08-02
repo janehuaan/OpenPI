@@ -29,6 +29,7 @@ import {
 	saveMeta,
 	shouldMaintain,
 } from "./maintain.ts";
+import { loadSemanticEmbedderOptions, SemanticEmbedder, semanticRerank } from "./semantic.ts";
 import { formatSelectiveSnapshot, selectSnapshotEntries } from "./snapshot.ts";
 import {
 	deleteTopic,
@@ -188,13 +189,31 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 										"",
 									hybridOpts(memoryDir(ctx.cwd)),
 								);
+				// Optional semantic rerank: blends embedding similarity with the
+				// hybrid/BM25 ranking when an embedding API key is configured.
+				let finalMatched = matched;
+				if (config.semanticSearch && matched.length > 0 && params.keyword?.trim()) {
+					const embedderOptions = loadSemanticEmbedderOptions();
+					if (embedderOptions) {
+						const reranked = await semanticRerank(
+							new SemanticEmbedder(embedderOptions),
+							params.keyword,
+							matched,
+							(entry) => `${entry.type} ${entry.key} ${entry.value}`,
+							(entry) => `${entry.type}:${entry.key}`,
+							{ alpha: config.vectorAlpha, maxCandidates: 50 },
+						);
+						if (reranked) finalMatched = reranked;
+					}
+				}
+
 				const text =
-					matched.length === 0
+					finalMatched.length === 0
 						? "No memories found."
-						: matched.map((entry) => `[${entry.type}] ${entry.key}: ${entry.value}`).join("\n");
+						: finalMatched.map((entry) => `[${entry.type}] ${entry.key}: ${entry.value}`).join("\n");
 				return {
 					content: [{ type: "text", text }],
-					details: { count: matched.length, action, scope, hybrid: config.vectorSearch },
+					details: { count: finalMatched.length, action, scope, hybrid: config.vectorSearch },
 				};
 			}
 
