@@ -142,6 +142,7 @@ export interface RpcCapabilities {
 		extensionPaths: string[];
 		commands: string[];
 		tools: string[];
+		servers: Array<{ name: string; status: "starting" | "connected" | "error"; toolCount: number; error?: string }>;
 	};
 }
 

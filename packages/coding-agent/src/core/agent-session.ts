@@ -90,6 +90,7 @@ import {
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { McpManager } from "./mcp/mcp-manager.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -339,6 +340,7 @@ export class AgentSession {
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _builtinSecurity?: BuiltinSecurity;
+	private _mcpManager?: McpManager;
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
 	private _extensionAbortHandler?: () => void;
 	private _extensionShutdownHandler?: ShutdownHandler;
@@ -377,6 +379,9 @@ export class AgentSession {
 		this._builtinSecurity = securityMode
 			? new BuiltinSecurity({ mode: securityMode, cwd: config.cwd, agentDir: getAgentDir() })
 			: undefined;
+		const mcpServers = this.settingsManager.getGlobalSettings().mcpServers;
+		this._mcpManager =
+			mcpServers && Object.keys(mcpServers).length > 0 ? new McpManager(mcpServers, config.cwd) : undefined;
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -392,6 +397,25 @@ export class AgentSession {
 
 	get modelRuntime(): ModelRuntime {
 		return this._modelRuntime;
+	}
+
+	/** MCP server manager for this session (undefined when no servers configured). */
+	get mcpManager(): McpManager | undefined {
+		return this._mcpManager;
+	}
+
+	/** Start configured MCP servers and merge their tools into the tool registry. */
+	async startMcp(): Promise<void> {
+		if (!this._mcpManager) return;
+		await this._mcpManager.start();
+		this._refreshToolRegistry();
+	}
+
+	/** Close all MCP client connections. */
+	async stopMcp(): Promise<void> {
+		if (!this._mcpManager) return;
+		await this._mcpManager.stop();
+		this._refreshToolRegistry();
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -874,6 +898,7 @@ export class AgentSession {
 		} catch {
 			// Dispose must succeed even if an abort hook throws.
 		}
+		void this.stopMcp();
 
 		this._extensionRunner.invalidate(
 			"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
@@ -2498,8 +2523,10 @@ export class AgentSession {
 			(!allowedToolNames || allowedToolNames.has(name)) && !excludedToolNames?.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
+		const mcpTools = this._mcpManager?.getRegisteredTools() ?? [];
 		const allCustomTools = [
 			...registeredTools,
+			...mcpTools,
 			...this._customTools.map((definition) => ({
 				definition,
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),

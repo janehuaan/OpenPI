@@ -7,6 +7,7 @@ import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
+import type { McpServersConfig } from "./mcp/mcp-types.ts";
 import type { SecurityMode } from "./security/builtin-security.ts";
 
 export interface CompactionSettings {
@@ -129,6 +130,8 @@ export interface Settings {
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	/** Builtin security gate mode. When set, tool calls are checked before extensions run. */
 	securityMode?: SecurityMode;
+	/** MCP servers to start and expose their tools to the agent. */
+	mcpServers?: McpServersConfig;
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */

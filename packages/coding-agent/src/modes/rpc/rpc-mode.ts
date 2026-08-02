@@ -119,6 +119,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					.map((tool) => tool.name),
 			),
 		];
+		const mcpStatus = session.mcpManager?.getStatus();
 
 		return {
 			skills: skillsResult.skills.map((skill) => ({
@@ -146,12 +147,13 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				})),
 			],
 			mcp: {
-				configured: mcpPackages.length > 0,
-				loaded: mcpExtensions.length > 0 || mcpTools.length > 0,
+				configured: mcpStatus?.configured ?? mcpPackages.length > 0,
+				loaded: mcpStatus?.loaded ?? (mcpExtensions.length > 0 || mcpTools.length > 0),
 				packageSources: mcpPackages.map((entry) => entry.source),
 				extensionPaths: mcpExtensions.map((extension) => extension.path),
 				commands: mcpCommands,
-				tools: mcpTools,
+				tools: mcpStatus ? mcpStatus.tools : mcpTools,
+				servers: mcpStatus?.servers ?? [],
 			},
 		};
 	};

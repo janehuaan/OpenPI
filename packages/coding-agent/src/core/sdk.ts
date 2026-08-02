@@ -386,6 +386,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		securityMode: options.securityMode,
 		sessionStartEvent: options.sessionStartEvent,
 	});
+	await session.startMcp();
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {
