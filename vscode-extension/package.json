@@ -1,0 +1,60 @@
+{
+	"name": "openpi-vscode",
+	"displayName": "OpenPI",
+	"description": "Open the pi coding agent in a terminal and send selections to it",
+	"version": "0.1.0",
+	"publisher": "earendil-works",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": ["Other"],
+	"activationEvents": ["onCommand:openpi.openInTerminal", "onCommand:openpi.sendSelection"],
+	"main": "./out/extension.js",
+	"contributes": {
+		"commands": [
+			{
+				"command": "openpi.openInTerminal",
+				"title": "OpenPI: Open pi in Terminal",
+				"icon": "$(terminal)"
+			},
+			{
+				"command": "openpi.sendSelection",
+				"title": "OpenPI: Send Selection to pi",
+				"icon": "$(send)"
+			}
+		],
+		"menus": {
+			"editor/context": [
+				{
+					"command": "openpi.sendSelection",
+					"when": "editorHasSelection"
+				}
+			]
+		},
+		"configuration": {
+			"title": "OpenPI",
+			"properties": {
+				"openpi.cliPath": {
+					"type": "string",
+					"default": "",
+					"description": "Absolute path to the pi CLI. Empty uses 'pi' from PATH (or ./pi-test.sh in the repo)."
+				},
+				"openpi.resume": {
+					"type": "boolean",
+					"default": true,
+					"description": "Start pi with --resume when a session exists for the workspace."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"compile": "tsc -p .",
+		"vscode:prepublish": "npm run compile"
+	},
+	"devDependencies": {
+		"@types/node": "22.19.19",
+		"@types/vscode": "1.90.0",
+		"typescript": "5.9.3"
+	}
+}
