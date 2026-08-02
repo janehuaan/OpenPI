@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.80.8] - 2026-07-24
+
 ### Breaking Changes
 
 - Changed runtime authentication to provider-scoped `Models.checkAuth()`, `getAuth()`, `login()`, and `logout()` APIs. `checkAuth()` now returns `AuthCheck | undefined`, and API-key auth resolvers no longer receive a model.

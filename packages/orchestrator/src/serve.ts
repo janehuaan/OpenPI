@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { getSocketPath } from "./config.ts";
-import { handleIpcRequest, openRpcStream } from "./handler.ts";
+import { handleIpcRequest, openRpcStream, setShutdownHandler } from "./handler.ts";
 import { startIpcServer } from "./ipc/server.ts";
 import { getRadiusOrchestratorBaseUrl, isRadiusEnabled, radiusPresence } from "./radius.ts";
 import { supervisor } from "./supervisor.ts";
+import { taskScheduler } from "./task-scheduler.ts";
 
 export async function serve(): Promise<void> {
 	const socketPath = getSocketPath();
@@ -16,7 +17,6 @@ export async function serve(): Promise<void> {
 	);
 
 	try {
-		await supervisor.recoverAfterRestart();
 		if (isRadiusEnabled()) {
 			const machine = await radiusPresence.start();
 			console.log(`radius integration enabled: ${socketPath} -> ${getRadiusOrchestratorBaseUrl()}`);
@@ -26,6 +26,8 @@ export async function serve(): Promise<void> {
 		} else {
 			console.log("radius integration disabled: login radius in ~/.pi/agent/auth.json or set RADIUS_API_KEY");
 		}
+		await supervisor.recoverAfterRestart();
+		taskScheduler.start();
 	} catch (error) {
 		server.close();
 		if (existsSync(socketPath)) {
@@ -44,7 +46,9 @@ export async function serve(): Promise<void> {
 		}
 
 		shutdownPromise = (async () => {
+			setShutdownHandler(undefined);
 			server.close();
+			taskScheduler.stop();
 			await supervisor.shutdown();
 			await radiusPresence.stop();
 			if (existsSync(socketPath)) {
@@ -55,6 +59,10 @@ export async function serve(): Promise<void> {
 		await shutdownPromise;
 		process.exit(exitCode);
 	};
+
+	setShutdownHandler(() => {
+		void shutdown(0);
+	});
 
 	process.on("SIGINT", () => {
 		void shutdown(0);

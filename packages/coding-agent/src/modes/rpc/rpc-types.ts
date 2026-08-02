@@ -69,7 +69,13 @@ export type RpcCommand =
 	| { id?: string; type: "get_messages" }
 
 	// Commands (available for invocation via prompt)
-	| { id?: string; type: "get_commands" };
+	| { id?: string; type: "get_commands" }
+
+	// Capabilities
+	| { id?: string; type: "get_capabilities" }
+	| { id?: string; type: "reload_resources" }
+	| { id?: string; type: "install_package"; source: string; local?: boolean }
+	| { id?: string; type: "remove_package"; source: string; local?: boolean };
 
 // ============================================================================
 // RPC Slash Command (for get_commands response)
@@ -85,6 +91,58 @@ export interface RpcSlashCommand {
 	source: "extension" | "prompt" | "skill";
 	/** Source metadata for the owning resource */
 	sourceInfo: SourceInfo;
+}
+
+export interface RpcCapabilitySkill {
+	name: string;
+	description: string;
+	filePath: string;
+	disableModelInvocation: boolean;
+	sourceInfo: SourceInfo;
+}
+
+export interface RpcCapabilityExtension {
+	path: string;
+	commands: string[];
+	tools: string[];
+	sourceInfo: SourceInfo;
+}
+
+export interface RpcCapabilityTool {
+	name: string;
+	description: string;
+	active: boolean;
+	sourceInfo: SourceInfo;
+}
+
+export interface RpcConfiguredPackage {
+	source: string;
+	scope: "user" | "project";
+	filtered: boolean;
+	installedPath?: string;
+}
+
+export interface RpcCapabilityDiagnostic {
+	resource: "skill" | "extension";
+	type: "warning" | "error" | "collision";
+	message: string;
+	path?: string;
+}
+
+export interface RpcCapabilities {
+	skills: RpcCapabilitySkill[];
+	extensions: RpcCapabilityExtension[];
+	tools: RpcCapabilityTool[];
+	packages: RpcConfiguredPackage[];
+	diagnostics: RpcCapabilityDiagnostic[];
+	mcp: {
+		configured: boolean;
+		loaded: boolean;
+		packageSources: string[];
+		extensionPaths: string[];
+		commands: string[];
+		tools: string[];
+	};
 }
 
 // ============================================================================
@@ -217,6 +275,18 @@ export type RpcResponse =
 			command: "get_commands";
 			success: true;
 			data: { commands: RpcSlashCommand[] };
+	  }
+
+	// Capabilities
+	| { id?: string; type: "response"; command: "get_capabilities"; success: true; data: RpcCapabilities }
+	| { id?: string; type: "response"; command: "reload_resources"; success: true; data: RpcCapabilities }
+	| { id?: string; type: "response"; command: "install_package"; success: true; data: RpcCapabilities }
+	| {
+			id?: string;
+			type: "response";
+			command: "remove_package";
+			success: true;
+			data: RpcCapabilities & { removed: boolean };
 	  }
 
 	// Error response (any command can fail)

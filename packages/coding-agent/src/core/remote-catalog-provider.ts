@@ -60,7 +60,12 @@ export function withRemoteCatalog(provider: Provider, catalogBaseUrl: string = D
 					});
 					if (context.signal?.aborted) return;
 					const checkedAt = Date.now();
-					if (response.status === 404 || response.status === 501) {
+					if (
+						response.status === 401 ||
+						response.status === 403 ||
+						response.status === 404 ||
+						response.status === 501
+					) {
 						await context.store.write({ models: dynamicModels, checkedAt });
 						return;
 					}

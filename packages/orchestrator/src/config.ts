@@ -67,3 +67,7 @@ export function getInstancesPath(): string {
 export function getSocketPath(): string {
 	return join(getOrchestratorDir(), "orchestrator.sock");
 }
+
+export function getTaskLogsDir(): string {
+	return join(getOrchestratorDir(), "task-logs");
+}

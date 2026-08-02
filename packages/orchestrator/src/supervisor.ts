@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto";
-import type {
-	AgentSessionEvent,
-	AgentSessionEventListener,
-	RpcCommand,
-	RpcExtensionUIRequest,
-	RpcExtensionUIResponse,
-	RpcResponse,
+import { existsSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { resolve } from "node:path";
+
+import {
+	type AgentSessionEvent,
+	type AgentSessionEventListener,
+	type RpcCommand,
+	type RpcExtensionUIRequest,
+	type RpcExtensionUIResponse,
+	type RpcResponse,
+	type SessionInfo,
+	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { radiusPresence } from "./radius.ts";
 import { createRpcProcessInstance, type RpcProcessInstance } from "./rpc-process.ts";
 import { getInstance, loadInstances, removeInstance, saveInstances, upsertInstance } from "./storage.ts";
-import type { InstanceRecord, InstanceStatus } from "./types.ts";
+import type { AgentMode, InstanceRecord, InstanceStatus } from "./types.ts";
 
 interface LiveInstanceResources {
 	rpcProcess?: RpcProcessInstance;
@@ -28,7 +33,32 @@ interface LiveInstance {
 }
 
 function cloneInstance(record: InstanceRecord): InstanceRecord {
-	return { ...record };
+	return { ...record, mode: record.mode === "code" ? "code" : "work" };
+}
+
+function sessionPathKey(path: string): string {
+	try {
+		return realpathSync(path);
+	} catch {
+		return resolve(path);
+	}
+}
+
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+function sessionLabel(session: SessionInfo): string | undefined {
+	const name = session.name?.trim();
+	if (name) {
+		return name;
+	}
+	const firstMessage = session.firstMessage.trim();
+	return firstMessage ? firstMessage.slice(0, 80) : undefined;
 }
 
 // Only refresh persisted session metadata after commands that can plausibly change
@@ -62,6 +92,8 @@ function isGetStateSuccess(
 
 export class OrchestratorSupervisor {
 	private readonly liveInstances = new Map<string, LiveInstance>();
+	private readonly resumePromises = new Map<string, Promise<InstanceRecord | undefined>>();
+	private sessionRefreshPromise: Promise<void> | undefined;
 
 	private setStatus(live: LiveInstance, status: InstanceStatus): void {
 		live.record = {
@@ -151,6 +183,7 @@ export class OrchestratorSupervisor {
 		this.updateRecord(live, {
 			sessionId: response.data.sessionId,
 			sessionFile: response.data.sessionFile,
+			label: response.data.sessionName ?? live.record.label,
 		});
 	}
 
@@ -178,10 +211,112 @@ export class OrchestratorSupervisor {
 		try {
 			await this.cleanupAcquiredResources(live);
 		} finally {
-			this.setStatus(live, "stopped");
+			this.liveInstances.delete(live.record.id);
+			removeInstance(live.record.id);
+		}
+		throw error;
+	}
+
+	private async failResume(live: LiveInstance, error: unknown): Promise<never> {
+		live.record = { ...live.record, autoResume: false };
+		this.setStatus(live, "error");
+		try {
+			await this.cleanupAcquiredResources(live);
+		} finally {
 			this.liveInstances.delete(live.record.id);
 		}
 		throw error;
+	}
+
+	private createLiveInstance(record: InstanceRecord): LiveInstance {
+		return {
+			record,
+			resources: {
+				radiusPiId: record.radiusPiId,
+				sessionId: record.sessionId,
+			},
+			subscribers: new Set(),
+		};
+	}
+
+	private async activateInstance(live: LiveInstance, sessionFile?: string): Promise<InstanceRecord> {
+		const rpcProcess = createRpcProcessInstance({ cwd: live.record.cwd, mode: live.record.mode, sessionFile });
+		this.bindRpcProcess(live, rpcProcess);
+		await this.syncInstanceRecord(live);
+		const registeredRecord = await radiusPresence.registerPi(live.record);
+		this.updateRecord(live, { radiusPiId: registeredRecord.radiusPiId });
+		this.setStatus(live, "online");
+		return cloneInstance(live.record);
+	}
+
+	private async resumeStoredInstance(instanceId: string): Promise<InstanceRecord | undefined> {
+		const stored = getInstance(instanceId);
+		if (!stored) {
+			return undefined;
+		}
+		if (!stored.sessionFile || !existsSync(stored.sessionFile) || !isDirectory(stored.cwd)) {
+			removeInstance(instanceId);
+			return undefined;
+		}
+
+		const live = this.createLiveInstance({
+			...stored,
+			status: "starting",
+			radiusPiId: undefined,
+			autoResume: true,
+			lastSeenAt: new Date().toISOString(),
+		});
+		this.liveInstances.set(instanceId, live);
+		upsertInstance(live.record);
+		try {
+			return await this.activateInstance(live, stored.sessionFile);
+		} catch (error) {
+			return await this.failResume(live, error);
+		}
+	}
+
+	private async suspendInstance(instanceId: string, autoResume: boolean): Promise<InstanceRecord | undefined> {
+		const pendingResume = this.resumePromises.get(instanceId);
+		if (pendingResume) {
+			try {
+				await pendingResume;
+			} catch {
+				// The failed resume already persisted its error state.
+			}
+		}
+
+		const live = this.liveInstances.get(instanceId);
+		if (!live) {
+			const stored = getInstance(instanceId);
+			if (!stored) {
+				return undefined;
+			}
+			const stopped = {
+				...stored,
+				status: "stopped" as const,
+				radiusPiId: undefined,
+				autoResume,
+				lastSeenAt: new Date().toISOString(),
+			};
+			upsertInstance(stopped);
+			return cloneInstance(stopped);
+		}
+
+		this.setStatus(live, "stopping");
+		try {
+			await this.cleanupAcquiredResources(live);
+		} finally {
+			live.record = {
+				...live.record,
+				status: "stopped",
+				radiusPiId: undefined,
+				autoResume,
+				lastSeenAt: new Date().toISOString(),
+			};
+			this.liveInstances.delete(instanceId);
+			upsertInstance(live.record);
+		}
+		return cloneInstance(live.record);
 	}
 
 	updateInstance(instance: InstanceRecord): void {
@@ -241,17 +376,109 @@ export class OrchestratorSupervisor {
 		return [...this.liveInstances.values()].map((live) => cloneInstance(live.record));
 	}
 
+	private async refreshSessionIndex(): Promise<void> {
+		const sessions = await SessionManager.listAll();
+		const storedBySession = new Map<string, InstanceRecord>();
+		const sessionlessLiveInstances: InstanceRecord[] = [];
+		for (const instance of loadInstances()) {
+			if (!instance.sessionFile) {
+				if (this.liveInstances.has(instance.id)) {
+					sessionlessLiveInstances.push(instance);
+				}
+				continue;
+			}
+			if (!existsSync(instance.sessionFile) || !isDirectory(instance.cwd)) {
+				continue;
+			}
+			const key = sessionPathKey(instance.sessionFile);
+			if (!storedBySession.has(key)) {
+				storedBySession.set(key, instance);
+			}
+		}
+
+		for (const session of sessions) {
+			if (!existsSync(session.path) || !isDirectory(session.cwd)) {
+				continue;
+			}
+			const key = sessionPathKey(session.path);
+			const stored = storedBySession.get(key);
+			if (stored) {
+				storedBySession.set(key, {
+					...stored,
+					cwd: session.cwd,
+					sessionId: session.id,
+					sessionFile: session.path,
+					label: sessionLabel(session) ?? stored.label,
+				});
+				continue;
+			}
+			storedBySession.set(key, {
+				id: randomUUID(),
+				status: "stopped",
+				mode: "work",
+				cwd: session.cwd,
+				createdAt: session.created.toISOString(),
+				lastSeenAt: session.modified.toISOString(),
+				label: sessionLabel(session),
+				sessionId: session.id,
+				sessionFile: session.path,
+				autoResume: false,
+			});
+		}
+		saveInstances([...sessionlessLiveInstances, ...storedBySession.values()]);
+	}
+
+	async waitForSessionRefresh(): Promise<void> {
+		await this.sessionRefreshPromise;
+	}
+
 	async recoverAfterRestart(): Promise<void> {
 		const recoveredAt = new Date().toISOString();
-		const instances = loadInstances().map((instance) => ({
-			...instance,
-			status: instance.status === "online" || instance.status === "starting" ? "stopped" : instance.status,
-			lastSeenAt: recoveredAt,
-		}));
-		for (const instance of instances) {
-			await radiusPresence.disconnectPi(instance);
+		const autoResumeIds = new Set<string>();
+		const storedBySession = new Map<string, InstanceRecord>();
+		for (const instance of loadInstances()) {
+			if (!instance.sessionFile || !existsSync(instance.sessionFile) || !isDirectory(instance.cwd)) {
+				try {
+					await radiusPresence.disconnectPi(instance);
+				} catch (error) {
+					console.error(`Failed to disconnect stale Radius Pi ${instance.id}: ${String(error)}`);
+				}
+				continue;
+			}
+			const key = sessionPathKey(instance.sessionFile);
+			if (storedBySession.has(key)) {
+				continue;
+			}
+			if (instance.autoResume ?? (instance.status === "online" || instance.status === "starting")) {
+				autoResumeIds.add(instance.id);
+			}
+			try {
+				await radiusPresence.disconnectPi(instance);
+			} catch (error) {
+				console.error(`Failed to disconnect Radius Pi ${instance.id}: ${String(error)}`);
+			}
+			storedBySession.set(key, {
+				...instance,
+				status: "stopped",
+				radiusPiId: undefined,
+				autoResume: autoResumeIds.has(instance.id),
+				lastSeenAt: recoveredAt,
+			});
 		}
-		saveInstances(instances);
+
+		saveInstances([...storedBySession.values()]);
+
+		for (const instanceId of autoResumeIds) {
+			try {
+				await this.resumeInstance(instanceId);
+			} catch (error) {
+				console.error(`Failed to restore Pi instance ${instanceId}: ${String(error)}`);
+			}
+		}
+
+		this.sessionRefreshPromise = this.refreshSessionIndex().catch((error) => {
+			console.error(`Failed to refresh Pi session index: ${String(error)}`);
+		});
 	}
 
 	listInstances(): InstanceRecord[] {
@@ -267,58 +494,104 @@ export class OrchestratorSupervisor {
 		return stored ? cloneInstance(stored) : undefined;
 	}
 
-	async spawnInstance(options: { cwd: string; label?: string }): Promise<InstanceRecord> {
+	async spawnInstance(options: { cwd: string; label?: string; mode: AgentMode }): Promise<InstanceRecord> {
 		const now = new Date().toISOString();
-		const live: LiveInstance = {
-			record: {
-				id: randomUUID(),
-				status: "starting",
-				cwd: options.cwd,
-				createdAt: now,
-				lastSeenAt: now,
-				label: options.label,
-			},
-			resources: {},
-			subscribers: new Set(),
-		};
+		const live = this.createLiveInstance({
+			id: randomUUID(),
+			status: "starting",
+			mode: options.mode,
+			cwd: options.cwd,
+			createdAt: now,
+			lastSeenAt: now,
+			label: options.label,
+			autoResume: true,
+		});
 		this.liveInstances.set(live.record.id, live);
 		upsertInstance(live.record);
 
 		try {
-			const rpcProcess = createRpcProcessInstance({ cwd: options.cwd });
-			this.bindRpcProcess(live, rpcProcess);
-			await this.syncInstanceRecord(live);
-			const registeredRecord = await radiusPresence.registerPi(live.record);
-			this.updateRecord(live, { radiusPiId: registeredRecord.radiusPiId });
-			this.setStatus(live, "online");
-			return cloneInstance(live.record);
+			return await this.activateInstance(live);
 		} catch (error) {
 			return await this.failSpawn(live, error);
 		}
 	}
 
 	async stopInstance(instanceId: string): Promise<InstanceRecord | undefined> {
+		return this.suspendInstance(instanceId, false);
+	}
+
+	async resumeInstance(instanceId: string): Promise<InstanceRecord | undefined> {
 		const live = this.liveInstances.get(instanceId);
-		if (!live) {
-			return undefined;
+		if (live) {
+			return cloneInstance(live.record);
+		}
+		const pending = this.resumePromises.get(instanceId);
+		if (pending) {
+			return pending;
+		}
+		const resume = this.resumeStoredInstance(instanceId);
+		this.resumePromises.set(instanceId, resume);
+		try {
+			return await resume;
+		} finally {
+			this.resumePromises.delete(instanceId);
+		}
+	}
+
+	async renameInstance(instanceId: string, name: string): Promise<InstanceRecord | undefined> {
+		const nextName = name.replace(/[\r\n]+/g, " ").trim();
+		if (!nextName) {
+			throw new Error("Session name cannot be empty");
 		}
 
-		this.setStatus(live, "stopping");
-		try {
-			await this.cleanupAcquiredResources(live);
-		} finally {
-			live.record = {
-				...live.record,
-				status: "stopped",
-				lastSeenAt: new Date().toISOString(),
-			};
-			this.liveInstances.delete(instanceId);
-			removeInstance(instanceId);
+		const live = this.liveInstances.get(instanceId);
+		if (live) {
+			const rpcProcess = this.getRpcProcess(live);
+			if (!rpcProcess) {
+				return undefined;
+			}
+			const response = await rpcProcess.send({ type: "set_session_name", name: nextName });
+			if (!response.success) {
+				throw new Error(response.error);
+			}
+			this.updateRecord(live, { label: nextName });
+			return cloneInstance(live.record);
 		}
-		return cloneInstance(live.record);
+
+		const stored = getInstance(instanceId);
+		if (!stored) {
+			return undefined;
+		}
+		if (!stored.sessionFile || !existsSync(stored.sessionFile)) {
+			removeInstance(instanceId);
+			return undefined;
+		}
+		SessionManager.open(stored.sessionFile).appendSessionInfo(nextName);
+		const renamed = { ...stored, label: nextName, lastSeenAt: new Date().toISOString() };
+		upsertInstance(renamed);
+		return cloneInstance(renamed);
+	}
+
+	async deleteInstance(instanceId: string): Promise<boolean> {
+		const existing = this.getInstance(instanceId);
+		if (!existing) {
+			return false;
+		}
+		await this.suspendInstance(instanceId, false);
+		if (existing.sessionFile && existsSync(existing.sessionFile)) {
+			const session = SessionManager.open(existing.sessionFile);
+			const header = session.getHeader();
+			if (!header || header.id !== existing.sessionId || !existing.sessionFile.endsWith(".jsonl")) {
+				throw new Error("Refusing to delete an unrecognized Pi session file");
+			}
+			unlinkSync(existing.sessionFile);
+		}
+		removeInstance(instanceId);
+		return true;
 	}
 
 	async handleRpc(instanceId: string, command: RpcCommand): Promise<RpcResponse | undefined> {
+		await this.resumeInstance(instanceId);
 		const live = this.liveInstances.get(instanceId);
 		const rpcProcess = live ? this.getRpcProcess(live) : undefined;
 		if (!live || !rpcProcess) {
@@ -332,9 +605,28 @@ export class OrchestratorSupervisor {
 		return response;
 	}
 
+	async handleRpcBatch(instanceId: string, commands: RpcCommand[]): Promise<RpcResponse[] | undefined> {
+		await this.resumeInstance(instanceId);
+		const live = this.liveInstances.get(instanceId);
+		const rpcProcess = live ? this.getRpcProcess(live) : undefined;
+		if (!live || !rpcProcess) {
+			return undefined;
+		}
+
+		const responses = await Promise.all(commands.map((command) => rpcProcess.send(command)));
+		if (commands.some(shouldRefreshSessionMetadata)) {
+			await this.syncInstanceRecord(live);
+		}
+		return responses;
+	}
+
 	async shutdown(): Promise<void> {
 		for (const instanceId of [...this.liveInstances.keys()]) {
-			await this.stopInstance(instanceId);
+			try {
+				await this.suspendInstance(instanceId, true);
+			} catch (error) {
+				console.error(`Failed to suspend Pi instance ${instanceId}: ${String(error)}`);
+			}
 		}
 	}
 }

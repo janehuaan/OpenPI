@@ -34,7 +34,6 @@ import type {
 	TextContent,
 } from "@earendil-works/pi-ai/compat";
 import {
-	clampThinkingLevel,
 	cleanupSessionResources,
 	getSupportedThinkingLevels,
 	isContextOverflow,
@@ -274,8 +273,9 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 // Constants
 // ============================================================================
 
-/** Standard thinking levels */
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+/** Thinking controls exposed to sessions, ordered from least to most intensive. */
+const ALL_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const THINKING_LEVELS: ThinkingLevel[] = ALL_THINKING_LEVELS.slice(0, 5);
 
 // ============================================================================
 // AgentSession Class
@@ -1574,7 +1574,7 @@ export class AgentSession {
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 
-		// Re-clamp thinking level for new model's capabilities
+		// Reapply the session preference for the new model.
 		this.setThinkingLevel(thinkingLevel);
 
 		await this._emitModelSelect(model, previousModel, "set");
@@ -1620,7 +1620,7 @@ export class AgentSession {
 		// Apply thinking level.
 		// - Explicit scoped model thinking level overrides current session level
 		// - Undefined scoped model thinking level inherits the current session preference
-		// setThinkingLevel clamps to model capabilities.
+		// Extended levels are normalized only when the new model does not expose them.
 		this.setThinkingLevel(thinkingLevel);
 
 		await this._emitModelSelect(next.model, currentModel, "cycle");
@@ -1645,7 +1645,7 @@ export class AgentSession {
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
 
-		// Re-clamp thinking level for new model's capabilities
+		// Reapply the session preference for the new model.
 		this.setThinkingLevel(thinkingLevel);
 
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
@@ -1659,7 +1659,8 @@ export class AgentSession {
 
 	/**
 	 * Set thinking level.
-	 * Clamps to model capabilities based on available thinking levels.
+	 * Base levels are valid for every model. Extended levels are normalized to
+	 * the closest model-declared level when unavailable.
 	 * Saves to session and settings only if the level actually changes.
 	 */
 	setThinkingLevel(level: ThinkingLevel): void {
@@ -1688,7 +1689,7 @@ export class AgentSession {
 
 	/**
 	 * Cycle to next thinking level.
-	 * @returns New level, or undefined if model doesn't support thinking
+	 * @returns New level, or undefined if no model is selected
 	 */
 	cycleThinkingLevel(): ThinkingLevel | undefined {
 		if (!this.supportsThinking()) return undefined;
@@ -1704,18 +1705,26 @@ export class AgentSession {
 
 	/**
 	 * Get available thinking levels for current model.
-	 * The provider will clamp to what the specific model supports internally.
+	 * Base controls are always available. Extended controls require model support.
 	 */
 	getAvailableThinkingLevels(): ThinkingLevel[] {
 		if (!this.model) return THINKING_LEVELS;
-		return getSupportedThinkingLevels(this.model) as ThinkingLevel[];
+		const modelLevels = new Set(getSupportedThinkingLevels(this.model) as ThinkingLevel[]);
+		return ALL_THINKING_LEVELS.filter(
+			(level) =>
+				THINKING_LEVELS.includes(level) ||
+				modelLevels.has(level) ||
+				((level === "xhigh" || level === "max") &&
+					this.model?.thinkingLevelMap?.[level] !== undefined &&
+					this.model.thinkingLevelMap[level] !== null),
+		);
 	}
 
 	/**
-	 * Check if current model supports thinking/reasoning.
+	 * Check if thinking controls can be used for the current session.
 	 */
 	supportsThinking(): boolean {
-		return !!this.model?.reasoning;
+		return this.model !== undefined;
 	}
 
 	private _getThinkingLevelForModelSwitch(explicitLevel?: ThinkingLevel): ThinkingLevel {
@@ -1728,8 +1737,19 @@ export class AgentSession {
 		return this.thinkingLevel;
 	}
 
-	private _clampThinkingLevel(level: ThinkingLevel, _availableLevels: ThinkingLevel[]): ThinkingLevel {
-		return this.model ? (clampThinkingLevel(this.model, level) as ThinkingLevel) : "off";
+	private _clampThinkingLevel(level: ThinkingLevel, availableLevels: ThinkingLevel[]): ThinkingLevel {
+		const requestedIndex = ALL_THINKING_LEVELS.indexOf(level);
+		if (requestedIndex === -1) return availableLevels[0] ?? "off";
+
+		for (let index = requestedIndex; index < ALL_THINKING_LEVELS.length; index++) {
+			const candidate = ALL_THINKING_LEVELS[index];
+			if (availableLevels.includes(candidate)) return candidate;
+		}
+		for (let index = requestedIndex - 1; index >= 0; index--) {
+			const candidate = ALL_THINKING_LEVELS[index];
+			if (availableLevels.includes(candidate)) return candidate;
+		}
+		return availableLevels[0] ?? "off";
 	}
 
 	// =========================================================================

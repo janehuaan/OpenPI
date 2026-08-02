@@ -1,5 +1,10 @@
 /**
- * Memory Extension
+ * Memory Extension (example wrapper)
+ *
+ * Prefer the first-party package:
+ *   packages/openpi-memory
+ *
+ * This example remains for discovery; production path is @earendil-works/openpi-memory.
  *
  * Implements a file-based memory system for persistent cross-session knowledge.
  * Inspired by Claude Code's memdir architecture.

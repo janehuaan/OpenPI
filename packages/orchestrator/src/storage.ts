@@ -39,7 +39,11 @@ export function loadInstances(): InstanceRecord[] {
 	}
 
 	const data = readFileSync(instancesPath, "utf-8");
-	return JSON.parse(data) as InstanceRecord[];
+	const instances = JSON.parse(data) as Array<InstanceRecord & { mode?: InstanceRecord["mode"] }>;
+	return instances.map((instance) => ({
+		...instance,
+		mode: instance.mode === "code" ? "code" : "work",
+	}));
 }
 
 export function saveInstances(instances: InstanceRecord[]): void {

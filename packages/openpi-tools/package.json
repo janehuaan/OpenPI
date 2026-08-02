@@ -1,0 +1,51 @@
+{
+	"name": "@earendil-works/openpi-tools",
+	"version": "0.80.8",
+	"description": "Personal agent tools for OpenPI (web search, web fetch, code search, knowledge base, session tasks)",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"openpi",
+		"tools"
+	],
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./src/web-search.ts",
+			"./src/web-fetch.ts",
+			"./src/code-search.ts",
+			"./src/knowledge-base.ts",
+			"./src/tasks.ts",
+			"./src/task-command.ts"
+		],
+		"skills": [
+			"./skills"
+		],
+		"permissions": {
+			"network": true,
+			"fs": "project",
+			"shell": true,
+			"env": true
+		}
+	},
+	"files": [
+		"src",
+		"scripts",
+		"skills",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"test": "node --experimental-strip-types scripts/email-fetch.ts --help && node --experimental-strip-types scripts/calendar-today.ts --help && node --experimental-strip-types scripts/notify.ts --help"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "^0.80.7",
+		"@earendil-works/pi-coding-agent": "^0.80.7",
+		"@earendil-works/pi-tui": "^0.80.7",
+		"typebox": "^1.1.38"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"private": true
+}

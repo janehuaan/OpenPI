@@ -7,6 +7,7 @@ dist/
 packages/*/dist/
 packages/*/dist-chrome/
 packages/*/dist-firefox/
+packages/*/src-tauri/target/
 *.cpuprofile
 
 # Environment
@@ -39,3 +40,27 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+
+# Packaged desktop Pi runtime (generated)
+packages/openpi-desktop/runtime/node_modules/
+packages/openpi-desktop/runtime/package-lock.json
+packages/openpi-desktop/release/
+packages/openpi-desktop/build/speech-recognizer
+packages/openpi-desktop/build/speech-cache/
+packages/openpi-desktop/build/whisper.framework/
+packages/openpi-desktop/build/whisper-framework.sha256
+packages/openpi-desktop/build/ggml-small-q5_1.bin
+packages/openpi-desktop/build/ggml-silero-v6.2.0.bin
+
+# OpenPI runtime data (agent state, not source)
+.pi/intelligence/
+.pi/memory/
+.pi/security/
+.pi/security.json
+.pi/sub-agents.json
+.pi/tasks.json
+.agnes/
+.reasonix/
+data/
+upload_*.jpg
+~/

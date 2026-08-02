@@ -160,6 +160,13 @@ interface PiManifest {
 	skills?: string[];
 	prompts?: string[];
 	themes?: string[];
+	/** Optional declared permissions for install-time review. */
+	permissions?: {
+		network?: boolean | string;
+		fs?: boolean | string;
+		shell?: boolean | string;
+		env?: boolean | string;
+	};
 }
 
 interface ResourceAccumulator {
@@ -1018,6 +1025,47 @@ export class DefaultPackageManager implements PackageManager {
 	async installAndPersist(source: string, options?: { local?: boolean }): Promise<void> {
 		await this.install(source, options);
 		this.addSourceToSettings(source, options);
+		this.reportPackagePermissions(source, options);
+	}
+
+	private reportPackagePermissions(source: string, options?: { local?: boolean }): void {
+		try {
+			const parsed = this.parseSource(source);
+			let packageRoot: string | undefined;
+			if (parsed.type === "local") {
+				packageRoot = this.resolvePath(parsed.path);
+			} else if (parsed.type === "npm") {
+				const scope: SourceScope = options?.local ? "project" : "user";
+				const base = this.getBaseDirForScope(scope);
+				const candidate = join(base, "npm", "node_modules", parsed.name);
+				if (existsSync(candidate)) packageRoot = candidate;
+			} else if (parsed.type === "git") {
+				const scope: SourceScope = options?.local ? "project" : "user";
+				const base = this.getBaseDirForScope(scope);
+				// Best-effort: git packages live under git/<host>/...
+				const gitRoot = join(base, "git");
+				if (existsSync(gitRoot)) packageRoot = gitRoot;
+			}
+			if (!packageRoot || !existsSync(packageRoot)) {
+				console.log(`Package ${source} installed. Review source before trusting full system access.`);
+				return;
+			}
+			const manifest = this.readPiManifest(packageRoot);
+			const permissions = manifest?.permissions;
+			if (!permissions || Object.keys(permissions).length === 0) {
+				console.log(
+					`Package ${source} does not declare pi.permissions. Review source before trusting full system access.`,
+				);
+				return;
+			}
+			const summary = Object.entries(permissions)
+				.filter(([, value]) => value !== undefined)
+				.map(([key, value]) => `${key}=${String(value)}`)
+				.join(", ");
+			console.log(`Package ${source} declared permissions: ${summary}`);
+		} catch {
+			// Best-effort advisory only; never fail install.
+		}
 	}
 
 	async remove(source: string, options?: { local?: boolean }): Promise<void> {
@@ -2105,7 +2153,7 @@ export class DefaultPackageManager implements PackageManager {
 		const manifest = this.readPiManifest(packageRoot);
 		if (manifest) {
 			for (const resourceType of RESOURCE_TYPES) {
-				const entries = manifest[resourceType as keyof PiManifest];
+				const entries = manifest[resourceType];
 				this.addManifestEntries(
 					entries,
 					packageRoot,
@@ -2139,7 +2187,7 @@ export class DefaultPackageManager implements PackageManager {
 		metadata: PathMetadata,
 	): void {
 		const manifest = this.readPiManifest(packageRoot);
-		const entries = manifest?.[resourceType as keyof PiManifest];
+		const entries = manifest?.[resourceType];
 		if (entries) {
 			this.addManifestEntries(entries, packageRoot, resourceType, target, metadata);
 			return;
@@ -2208,7 +2256,7 @@ export class DefaultPackageManager implements PackageManager {
 		resourceType: ResourceType,
 	): { allFiles: string[]; enabledByManifest: Set<string> } {
 		const manifest = this.readPiManifest(packageRoot);
-		const entries = manifest?.[resourceType as keyof PiManifest];
+		const entries = manifest?.[resourceType];
 		if (entries && entries.length > 0) {
 			const allFiles = this.collectFilesFromManifestEntries(entries, packageRoot, resourceType);
 			const manifestPatterns = entries.filter(isOverridePattern);

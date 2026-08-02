@@ -932,8 +932,11 @@ function buildParams(
 		compat.supportsToolReferences,
 		normalizeToolName,
 	);
-	let immediateTools = toolPlacement.immediate;
-	let deferredTools = [...toolPlacement.deferred.values()];
+	// Sort tools by name for deterministic serialization (required for prompt caching)
+	// See: https://github.com/Piebald-AI/claude-code-system-prompts/blob/main/system-prompts/data-prompt-caching-design-optimization.md
+	const sortByName = (tools: Tool[]) => [...tools].sort((a, b) => a.name.localeCompare(b.name));
+	let immediateTools = sortByName(toolPlacement.immediate);
+	let deferredTools = sortByName([...toolPlacement.deferred.values()]);
 	if (immediateTools.length === 0 && deferredTools.length > 0) {
 		immediateTools = deferredTools;
 		deferredTools = [];
@@ -954,12 +957,13 @@ function buildParams(
 	};
 
 	// For OAuth tokens, we MUST include Claude Code identity
+	// Place cache_control on the last system block to cache tools + system together
+	// (tools render before system in the API request)
 	if (isOAuthToken) {
 		params.system = [
 			{
 				type: "text",
 				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				...(cacheControl ? { cache_control: cacheControl } : {}),
 			},
 		];
 		if (context.systemPrompt) {
@@ -987,13 +991,8 @@ function buildParams(
 
 	if (immediateTools.length > 0 || deferredTools.length > 0) {
 		params.tools = [
-			...convertTools(
-				immediateTools,
-				isOAuthToken,
-				compat.supportsEagerToolInputStreaming,
-				compat.supportsCacheControlOnTools ? cacheControl : undefined,
-			),
-			...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, undefined, true),
+			...convertTools(immediateTools, isOAuthToken, compat.supportsEagerToolInputStreaming),
+			...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, true),
 		];
 	}
 
@@ -1261,12 +1260,11 @@ function convertTools(
 	tools: Tool[],
 	isOAuthToken: boolean,
 	supportsEagerToolInputStreaming: boolean,
-	cacheControl?: CacheControlEphemeral,
 	deferLoading = false,
 ): Anthropic.Messages.Tool[] {
 	if (!tools) return [];
 
-	return tools.map((tool, index) => {
+	return tools.map((tool) => {
 		const schema = tool.parameters as { properties?: unknown; required?: string[] };
 
 		return {
@@ -1279,7 +1277,6 @@ function convertTools(
 				required: schema.required ?? [],
 			},
 			...(deferLoading ? { defer_loading: true } : {}),
-			...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
 		};
 	});
 }

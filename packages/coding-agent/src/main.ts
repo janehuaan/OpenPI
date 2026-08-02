@@ -45,6 +45,7 @@ import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
+import { handleTaskCommand } from "./task-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
@@ -504,6 +505,14 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 
+	try {
+		if (await handleTaskCommand(args)) return;
+	} catch (error) {
+		console.error(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+		process.exitCode = 1;
+		return;
+	}
+
 	const parsed = parseArgs(args);
 	if (parsed.diagnostics.length > 0) {
 		for (const d of parsed.diagnostics) {
@@ -787,10 +796,23 @@ export async function main(args: string[], options?: MainOptions) {
 
 	time("resolveModelScope");
 	reportDiagnostics(runtime.diagnostics);
-	if (runtime.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
-		if (runtime.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to load extension"))) {
-			console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
-		}
+	// Optional packages/providers often fail (auth 401, network). Never hard-kill the process for
+	// extension load failures — desktop RPC and interactive sessions must still start.
+	const extensionLoadErrors = runtime.diagnostics.filter(
+		(diagnostic) => diagnostic.type === "error" && diagnostic.message.includes("Failed to load extension"),
+	);
+	const fatalErrors = runtime.diagnostics.filter(
+		(diagnostic) => diagnostic.type === "error" && !diagnostic.message.includes("Failed to load extension"),
+	);
+	if (extensionLoadErrors.length > 0) {
+		console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
+		console.error(
+			chalk.yellow(
+				`Continuing without ${extensionLoadErrors.length} failed extension(s). Other tools/providers remain available.`,
+			),
+		);
+	}
+	if (fatalErrors.length > 0) {
 		process.exit(1);
 	}
 	time("createAgentSession");

@@ -62,20 +62,38 @@ describe("AgentSession model and extension characterization", () => {
 
 		await harness.session.cycleModel();
 		expect(harness.session.model?.id).toBe("faux-2");
-		expect(harness.session.thinkingLevel).toBe("off");
+		expect(harness.session.thinkingLevel).toBe("high");
 
 		await harness.session.cycleModel();
 		expect(harness.session.model?.id).toBe("faux-1");
 		expect(harness.session.thinkingLevel).toBe("high");
 	});
 
-	it("clamps thinking levels to model capabilities and cycles available levels", async () => {
+	it("keeps base thinking levels available for models without reasoning metadata", async () => {
 		const harness = await createHarness({ models: [{ id: "faux-1", reasoning: false }] });
 		harnesses.push(harness);
 
+		expect(harness.session.getAvailableThinkingLevels()).toEqual(["off", "minimal", "low", "medium", "high"]);
 		harness.session.setThinkingLevel("high");
-		expect(harness.session.thinkingLevel).toBe("off");
-		expect(harness.session.cycleThinkingLevel()).toBeUndefined();
+		expect(harness.session.thinkingLevel).toBe("high");
+		expect(harness.session.cycleThinkingLevel()).toBe("off");
+	});
+
+	it("keeps model-declared extended levels when reasoning metadata is missing", async () => {
+		const harness = await createHarness({ models: [{ id: "faux-1", reasoning: false }] });
+		harnesses.push(harness);
+		harness.getModel().thinkingLevelMap = { xhigh: "xhigh" };
+
+		expect(harness.session.getAvailableThinkingLevels()).toEqual([
+			"off",
+			"minimal",
+			"low",
+			"medium",
+			"high",
+			"xhigh",
+		]);
+		harness.session.setThinkingLevel("xhigh");
+		expect(harness.session.thinkingLevel).toBe("xhigh");
 	});
 
 	it("cycles xhigh before max when both are supported", async () => {

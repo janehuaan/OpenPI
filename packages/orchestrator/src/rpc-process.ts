@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
 	AgentSessionEvent,
 	RpcCommand,
@@ -10,16 +10,29 @@ import type {
 	RpcResponse,
 } from "@earendil-works/pi-coding-agent";
 import { isBunBinary } from "./config.ts";
+import type { AgentMode } from "./types.ts";
+
+const CODE_MODE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "code_search", "tasks", "memory"];
+const CODE_MODE_PROMPT =
+	"Code mode is active. Work as a repository coding agent: inspect the current worktree before editing, follow project instructions, keep changes scoped, preserve unrelated work, and run the narrowest relevant validation before reporting completion.";
+
+export function buildRpcProcessArgs(mode: AgentMode, sessionFile?: string): string[] {
+	const profileArgs =
+		mode === "code" ? ["--tools", CODE_MODE_TOOLS.join(","), "--append-system-prompt", CODE_MODE_PROMPT] : [];
+	return [...profileArgs, ...(sessionFile ? ["--session", sessionFile] : [])];
+}
 
 interface PendingRequest {
 	resolve(response: RpcResponse): void;
 	reject(error: Error): void;
 }
 
-const require = createRequire(import.meta.url);
-
 function toError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
+}
+
+export function resolveRpcEntryPath(): string {
+	return fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
 }
 
 export class RpcProcessInstance {
@@ -34,8 +47,8 @@ export class RpcProcessInstance {
 	private readonly exitListeners = new Set<(error?: Error) => void>();
 	private uiRequestHandler: ((request: RpcExtensionUIRequest) => void) | undefined;
 
-	constructor(options: { cwd: string }) {
-		const rpcCommand = this.getSpawnCommand();
+	constructor(options: { cwd: string; mode: AgentMode; sessionFile?: string }) {
+		const rpcCommand = this.getSpawnCommand(options.mode, options.sessionFile);
 		this.process = spawn(rpcCommand.command, rpcCommand.args, {
 			cwd: options.cwd,
 			env: process.env,
@@ -47,16 +60,17 @@ export class RpcProcessInstance {
 		this.attachListeners();
 	}
 
-	private getSpawnCommand(): { command: string; args: string[] } {
+	private getSpawnCommand(mode: AgentMode, sessionFile?: string): { command: string; args: string[] } {
+		const profileArgs = buildRpcProcessArgs(mode, sessionFile);
 		if (isBunBinary) {
 			return {
 				command: join(dirname(process.execPath), process.platform === "win32" ? "pi.exe" : "pi"),
-				args: ["--mode", "rpc"],
+				args: ["--mode", "rpc", ...profileArgs],
 			};
 		}
 		return {
 			command: process.execPath,
-			args: [require.resolve("@earendil-works/pi-coding-agent/rpc-entry")],
+			args: [resolveRpcEntryPath(), ...profileArgs],
 		};
 	}
 
@@ -196,6 +210,10 @@ export class RpcProcessInstance {
 	}
 }
 
-export function createRpcProcessInstance(options: { cwd: string }): RpcProcessInstance {
+export function createRpcProcessInstance(options: {
+	cwd: string;
+	mode: AgentMode;
+	sessionFile?: string;
+}): RpcProcessInstance {
 	return new RpcProcessInstance(options);
 }

@@ -1,0 +1,13 @@
+{
+  "name": "openpi-desktop-runtime",
+  "private": true,
+  "type": "module",
+  "description": "Bundled Pi runtime for OpenPI Desktop (coding-agent + orchestrator)",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "file:../../../../../../var/folders/ns/rs63fhmn6sj6mhdwx0df74680000gn/T/openpi-packs-NdsxMh/earendil-works-pi-agent-core-0.80.8.tgz",
+    "@earendil-works/pi-ai": "file:../../../../../../var/folders/ns/rs63fhmn6sj6mhdwx0df74680000gn/T/openpi-packs-NdsxMh/earendil-works-pi-ai-0.80.8.tgz",
+    "@earendil-works/pi-coding-agent": "file:../../../../../../var/folders/ns/rs63fhmn6sj6mhdwx0df74680000gn/T/openpi-packs-NdsxMh/earendil-works-pi-coding-agent-0.80.8.tgz",
+    "@earendil-works/pi-orchestrator": "file:../../../../../../var/folders/ns/rs63fhmn6sj6mhdwx0df74680000gn/T/openpi-packs-NdsxMh/earendil-works-pi-orchestrator-0.80.8.tgz",
+    "@earendil-works/pi-tui": "file:../../../../../../var/folders/ns/rs63fhmn6sj6mhdwx0df74680000gn/T/openpi-packs-NdsxMh/earendil-works-pi-tui-0.80.8.tgz"
+  }
+}

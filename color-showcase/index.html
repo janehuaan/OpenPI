@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="八组中国古典配色在同一产品界面中的应用对比。" />
+  <title>观色 · 中国古典配色实验室</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8f5;
+      --surface: #ffffff;
+      --surface-soft: #e8eeeb;
+      --surface-strong: #dce7e4;
+      --text: #243337;
+      --muted: #657477;
+      --border: #d5ddda;
+      --primary: #354a4f;
+      --primary-contrast: #ffffff;
+      --accent: #c53d32;
+      --accent-soft: #f2dcd8;
+      --support: #577568;
+      --gold: #c49336;
+      --shadow: rgba(36, 51, 55, 0.1);
+      --focus: rgba(197, 61, 50, 0.26);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--bg); }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background: var(--bg);
+      font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+      letter-spacing: 0;
+      transition: color 260ms ease, background-color 260ms ease;
+    }
+
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-columns: 286px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      transition: background-color 260ms ease, border-color 260ms ease;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 76px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 auto;
+      color: var(--primary-contrast);
+      background: var(--primary);
+      border-radius: 8px;
+      font-family: "Songti SC", "STSong", serif;
+      font-size: 22px;
+      font-weight: 700;
+      transition: color 260ms ease, background-color 260ms ease;
+    }
+
+    .brand-name { font-size: 16px; font-weight: 760; }
+    .brand-subtitle { margin-top: 2px; color: var(--muted); font-size: 11px; }
+
+    .theme-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px 10px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .theme-count {
+      padding: 2px 7px;
+      color: var(--primary);
+      background: var(--surface-soft);
+      border-radius: 999px;
+    }
+
+    .theme-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding: 0 10px 18px;
+      overflow-y: auto;
+    }
+
+    .theme-button {
+      width: 100%;
+      min-height: 58px;
+      display: grid;
+      grid-template-columns: 5px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 10px 7px 5px;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+    }
+
+    .theme-button:hover { background: var(--surface-soft); }
+    .theme-button:active { transform: scale(0.985); }
+    .theme-button.active { background: var(--surface-soft); border-color: var(--border); }
+
+    .active-rail {
+      width: 3px;
+      height: 28px;
+      background: transparent;
+      border-radius: 2px;
+    }
+
+    .theme-button.active .active-rail { background: var(--accent); }
+    .theme-title { display: block; font-size: 13px; font-weight: 680; }
+    .theme-era { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    .mini-swatches { display: flex; gap: 3px; }
+    .mini-swatches i {
+      display: block;
+      width: 13px;
+      height: 26px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      border-radius: 3px;
+    }
+
+    .sidebar-note {
+      margin-top: auto;
+      padding: 14px 20px 18px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      font-size: 10px;
+      line-height: 1.6;
+    }
+
+    .workspace { min-width: 0; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      min-height: 76px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px clamp(20px, 3vw, 42px);
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px) saturate(140%);
+    }
+
+    .search {
+      position: relative;
+      width: min(420px, 44vw);
+    }
+
+    .search-symbol {
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      translate: 0 -50%;
+      color: var(--muted);
+      font-size: 16px;
+      pointer-events: none;
+    }
+
+    .search input {
+      width: 100%;
+      height: 42px;
+      padding: 0 14px 0 38px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+    }
+
+    .search input::placeholder { color: var(--muted); }
+    .topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      cursor: pointer;
+    }
+
+    .icon-button:hover { color: var(--accent); border-color: var(--accent); }
+
+    .avatar {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      margin-left: 4px;
+      color: var(--primary-contrast);
+      background: var(--primary);
+      border-radius: 50%;
+      font-family: "Songti SC", "STSong", serif;
+      font-weight: 700;
+    }
+
+    .main-content {
+      width: min(1220px, 100%);
+      margin: 0 auto;
+      padding: 30px clamp(20px, 3vw, 42px) 46px;
+    }
+
+    .theme-intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 24px;
+      padding-bottom: 26px;
+    }
+
+    .eyebrow {
+      margin-bottom: 8px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    h1 {
+      margin: 0;
+      font-family: "Songti SC", "STSong", serif;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      line-height: 1.18;
+    }
+
+    .intro-copy {
+      max-width: 660px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .primary-button {
+      min-height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 17px;
+      color: var(--primary-contrast);
+      background: var(--primary);
+      border: 0;
+      border-radius: 7px;
+      box-shadow: 0 8px 18px var(--shadow);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .primary-button:hover { background: var(--accent); }
+    .primary-button:active { transform: scale(0.98); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-block: 1px solid var(--border);
+    }
+
+    .metric { min-width: 0; padding: 20px 22px; border-right: 1px solid var(--border); }
+    .metric:first-child { padding-left: 0; }
+    .metric:last-child { border-right: 0; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { margin-top: 8px; font-size: 26px; font-weight: 760; }
+    .metric-trend { margin-left: 7px; color: var(--support); font-size: 10px; font-weight: 700; }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.75fr);
+      gap: 24px;
+      padding-top: 24px;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 12px 30px var(--shadow);
+      transition: background-color 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
+    }
+
+    .panel-header {
+      min-height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title { font-size: 14px; font-weight: 760; }
+    .panel-meta { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    .segmented {
+      display: flex;
+      padding: 3px;
+      background: var(--surface-soft);
+      border-radius: 6px;
+    }
+
+    .segment {
+      min-width: 50px;
+      height: 28px;
+      padding: 0 10px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .segment.active { color: var(--text); background: var(--surface); box-shadow: 0 2px 8px var(--shadow); }
+
+    .chart-area {
+      height: 248px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px 20px 14px;
+    }
+
+    .chart-summary { display: flex; align-items: baseline; gap: 9px; }
+    .chart-total { font-size: 24px; font-weight: 760; }
+    .chart-caption { color: var(--muted); font-size: 10px; }
+
+    .bars {
+      height: 148px;
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      align-items: end;
+      gap: 8px;
+      padding-top: 12px;
+      border-bottom: 1px solid var(--border);
+      background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 36px, var(--border) 37px);
+    }
+
+    .bar {
+      min-height: 10px;
+      background: var(--surface-strong);
+      border-radius: 3px 3px 0 0;
+      transition: height 350ms ease, background-color 260ms ease;
+    }
+
+    .bar:nth-child(3n) { background: var(--primary); }
+    .bar:nth-child(7) { background: var(--accent); }
+    .bar:hover { background: var(--gold); }
+
+    .chart-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; }
+
+    .task-list { padding: 4px 18px 12px; }
+    .task-row {
+      min-height: 58px;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .task-row:last-child { border-bottom: 0; }
+
+    .task-check {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .task-name { font-size: 12px; font-weight: 650; }
+    .task-detail { margin-top: 3px; color: var(--muted); font-size: 9px; }
+
+    .tag {
+      padding: 4px 8px;
+      color: var(--support);
+      background: color-mix(in srgb, var(--support) 13%, var(--surface));
+      border: 1px solid color-mix(in srgb, var(--support) 24%, var(--border));
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .palette-panel { overflow: hidden; }
+    .large-swatches { display: grid; grid-template-columns: repeat(5, 1fr); height: 106px; }
+    .large-swatch { position: relative; cursor: pointer; }
+    .large-swatch::after {
+      content: attr(data-short);
+      position: absolute;
+      left: 50%;
+      bottom: 9px;
+      translate: -50% 0;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 8px;
+      font-weight: 750;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+    .large-swatch:hover::after { opacity: 1; }
+
+    .color-list { padding: 8px 18px 12px; }
+    .color-row {
+      width: 100%;
+      min-height: 44px;
+      display: grid;
+      grid-template-columns: 14px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 0;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .color-row:last-child { border-bottom: 0; }
+    .color-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .color-name { font-size: 11px; font-weight: 650; }
+    .color-hex { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+    .color-row:hover .color-hex { color: var(--accent); }
+
+    .composer { margin-top: 24px; }
+    .composer-body { padding: 16px 18px; }
+    .composer textarea {
+      width: 100%;
+      min-height: 76px;
+      resize: vertical;
+      padding: 12px 13px;
+      color: var(--text);
+      background: var(--surface-soft);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      line-height: 1.6;
+    }
+    .composer textarea:focus { background: var(--surface); border-color: var(--accent); }
+    .composer-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .composer-hint { color: var(--muted); font-size: 9px; }
+    .composer-actions .primary-button { min-height: 36px; margin-left: auto; padding-inline: 14px; }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 40;
+      padding: 10px 14px;
+      color: var(--primary-contrast);
+      background: var(--primary);
+      border-radius: 6px;
+      box-shadow: 0 10px 28px var(--shadow);
+      font-size: 11px;
+      opacity: 0;
+      translate: 0 10px;
+      pointer-events: none;
+      transition: opacity 180ms ease, translate 180ms ease;
+    }
+    .toast.show { opacity: 1; translate: 0 0; }
+
+    @media (max-width: 920px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+      .brand { min-height: 66px; }
+      .theme-heading { padding-top: 12px; }
+      .theme-list { flex-direction: row; overflow-x: auto; padding-bottom: 12px; }
+      .theme-button { min-width: 198px; }
+      .sidebar-note { display: none; }
+      .topbar { top: 0; min-height: 62px; }
+      .content-grid { grid-template-columns: 1fr; }
+      .palette-panel { order: -1; }
+    }
+
+    @media (max-width: 640px) {
+      .topbar { padding-inline: 16px; }
+      .search { width: 100%; }
+      .topbar-actions .icon-button { display: none; }
+      .avatar { flex: 0 0 auto; }
+      .main-content { padding: 24px 16px 34px; }
+      .theme-intro { grid-template-columns: 1fr; align-items: start; }
+      .theme-intro .primary-button { width: 100%; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric { padding: 16px 12px; border-bottom: 1px solid var(--border); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(3), .metric:nth-child(4) { border-bottom: 0; }
+      .metric:nth-child(3) { padding-left: 0; }
+      .metric-value { font-size: 22px; }
+      .content-grid { gap: 16px; padding-top: 16px; }
+      .composer { margin-top: 16px; }
+      .bars { gap: 4px; }
+      .panel-header { padding-inline: 14px; }
+      .task-list, .color-list { padding-inline: 14px; }
+      .toast { right: 16px; bottom: 16px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="配色选择">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">色</div>
+        <div>
+          <div class="brand-name">观色</div>
+          <div class="brand-subtitle">中国古典配色实验室</div>
+        </div>
+      </div>
+      <div class="theme-heading">
+        <span>八组主题</span>
+        <span class="theme-count">16</span>
+      </div>
+      <div class="theme-list" id="themeList"></div>
+      <div class="sidebar-note">同一界面、同一层级、同一内容。仅切换颜色系统，观察它们在真实产品中的表现。</div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <label class="search">
+          <span class="search-symbol" aria-hidden="true">⌕</span>
+          <input type="search" placeholder="搜索项目、笔记或任务" aria-label="搜索" />
+        </label>
+        <div class="topbar-actions">
+          <button class="icon-button" type="button" title="通知" aria-label="通知">◌</button>
+          <button class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
+          <div class="avatar" title="个人账户">观</div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <section class="theme-intro" aria-labelledby="themeName">
+          <div>
+            <div class="eyebrow" id="themeMood">清雅 · 克制 · 文人气</div>
+            <h1 id="themeName">月白 · 黛青 · 朱砂</h1>
+            <p class="intro-copy" id="themeDescription">月白铺底，黛青立骨，朱砂点睛。适合生产力工具、知识管理与需要长期使用的桌面应用。</p>
+          </div>
+          <button class="primary-button" type="button" id="applyButton"><span aria-hidden="true">＋</span> 新建任务</button>
+        </section>
+
+        <section class="metrics" aria-label="今日概览">
+          <div class="metric"><div class="metric-label">今日完成</div><div class="metric-value">12<span class="metric-trend">↑ 18%</span></div></div>
+          <div class="metric"><div class="metric-label">专注时间</div><div class="metric-value">4.6<span class="metric-trend">小时</span></div></div>
+          <div class="metric"><div class="metric-label">知识条目</div><div class="metric-value">286<span class="metric-trend">+7</span></div></div>
+          <div class="metric"><div class="metric-label">连续记录</div><div class="metric-value">24<span class="metric-trend">天</span></div></div>
+        </section>
+
+        <div class="content-grid">
+          <div>
+            <section class="panel" aria-labelledby="activityTitle">
+              <div class="panel-header">
+                <div><div class="panel-title" id="activityTitle">创作活跃度</div><div class="panel-meta">最近十二个月的有效产出</div></div>
+                <div class="segmented" role="group" aria-label="时间范围">
+                  <button class="segment" type="button">周</button>
+                  <button class="segment active" type="button">月</button>
+                  <button class="segment" type="button">年</button>
+                </div>
+              </div>
+              <div class="chart-area">
+                <div class="chart-summary"><span class="chart-total">1,284</span><span class="chart-caption">条记录与任务</span></div>
+                <div class="bars" aria-label="月度活跃度柱状图">
+                  <i class="bar" style="height: 31%"></i><i class="bar" style="height: 46%"></i><i class="bar" style="height: 55%"></i><i class="bar" style="height: 42%"></i><i class="bar" style="height: 68%"></i><i class="bar" style="height: 61%"></i><i class="bar" style="height: 88%"></i><i class="bar" style="height: 72%"></i><i class="bar" style="height: 78%"></i><i class="bar" style="height: 64%"></i><i class="bar" style="height: 82%"></i><i class="bar" style="height: 96%"></i>
+                </div>
+                <div class="chart-labels"><span>八月</span><span>十一月</span><span>二月</span><span>五月</span><span>七月</span></div>
+              </div>
+            </section>
+
+            <section class="panel composer" aria-labelledby="taskTitle">
+              <div class="panel-header"><div><div class="panel-title" id="taskTitle">今日要事</div><div class="panel-meta">保持克制，只留下真正重要的事情</div></div><span class="tag">3 项进行中</span></div>
+              <div class="task-list">
+                <label class="task-row"><input class="task-check" type="checkbox" checked /><span><span class="task-name">整理产品设计规范</span><span class="task-detail">OpenPI Desktop · 上午 10:30</span></span><span class="tag">已完成</span></label>
+                <label class="task-row"><input class="task-check" type="checkbox" /><span><span class="task-name">审阅微信桥接交互流程</span><span class="task-detail">协作项目 · 下午 14:00</span></span><span class="tag">进行中</span></label>
+                <label class="task-row"><input class="task-check" type="checkbox" /><span><span class="task-name">完善个人智能体记忆策略</span><span class="task-detail">研究任务 · 今天</span></span><span class="tag">待处理</span></label>
+              </div>
+              <div class="composer-body">
+                <textarea aria-label="快速记录" placeholder="写下一条想法，或让智能体处理一项任务……"></textarea>
+                <div class="composer-actions"><span class="composer-hint">支持自然语言任务与 Markdown</span><button class="primary-button" type="button">发送 <span aria-hidden="true">↗</span></button></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="panel palette-panel" aria-labelledby="paletteTitle">
+            <div class="panel-header"><div><div class="panel-title" id="paletteTitle">当前色谱</div><div class="panel-meta">点击颜色复制 HEX 色值</div></div><span class="tag" id="paletteTag">宋韵</span></div>
+            <div class="large-swatches" id="largeSwatches"></div>
+            <div class="color-list" id="colorList"></div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">已复制色值</div>
+
+  <script>
+    const themes = [
+      {
+        id: "moon",
+        name: "月白 · 黛青 · 朱砂",
+        era: "宋韵",
+        mood: "清雅 · 克制 · 文人气",
+        description: "月白铺底，黛青立骨，朱砂点睛。适合生产力工具、知识管理与需要长期使用的桌面应用。",
+        colors: [
+          ["月白", "#F7F8F5"], ["黛青", "#354A4F"], ["朱砂", "#C53D32"], ["竹青", "#577568"], ["赤金", "#C49336"]
+        ],
+        vars: { bg: "#F7F8F5", surface: "#FFFFFF", soft: "#E8EEEB", strong: "#DCE7E4", text: "#243337", muted: "#657477", border: "#D5DDDA", primary: "#354A4F", contrast: "#FFFFFF", accent: "#C53D32", accentSoft: "#F2DCD8", support: "#577568", gold: "#C49336", shadow: "rgba(36,51,55,.10)", focus: "rgba(197,61,50,.26)" }
+      },
+      {
+        id: "sky",
+        name: "天青 · 赭石 · 米白",
+        era: "汝窑",
+        mood: "温润 · 安静 · 器物感",
+        description: "雨过天青与温厚赭石形成冷暖平衡，适合生活方式、阅读、文化内容与高端服务界面。",
+        colors: [
+          ["米白", "#F4F1E8"], ["天青", "#6F9F9B"], ["赭石", "#9C5333"], ["茶青", "#536B66"], ["赤金", "#C59A4A"]
+        ],
+        vars: { bg: "#F4F1E8", surface: "#FCFBF7", soft: "#E5E9E2", strong: "#D3E0DC", text: "#293A37", muted: "#687773", border: "#D8D8CE", primary: "#527975", contrast: "#FFFFFF", accent: "#9C5333", accentSoft: "#EDDED4", support: "#536B66", gold: "#C59A4A", shadow: "rgba(41,58,55,.10)", focus: "rgba(156,83,51,.25)" }
+      },
+      {
+        id: "stone",
+        name: "石青 · 藤黄 · 墨色",
+        era: "丹青",
+        mood: "明朗 · 庄重 · 秩序感",
+        description: "以矿物石青建立秩序，藤黄照亮信息层级，胭脂用于重要状态，适合数据平台与内容门户。",
+        colors: [
+          ["素白", "#F5F6F2"], ["石青", "#266B75"], ["藤黄", "#D5A72E"], ["墨色", "#273238"], ["胭脂", "#A63842"]
+        ],
+        vars: { bg: "#F5F6F2", surface: "#FFFFFF", soft: "#E7EEEE", strong: "#CFE1E1", text: "#273238", muted: "#68777A", border: "#D5DEDD", primary: "#266B75", contrast: "#FFFFFF", accent: "#A63842", accentSoft: "#F0DADC", support: "#4F7668", gold: "#D5A72E", shadow: "rgba(39,50,56,.10)", focus: "rgba(38,107,117,.25)" }
+      },
+      {
+        id: "bamboo",
+        name: "竹青 · 藕荷 · 象牙白",
+        era: "闺雅",
+        mood: "柔和 · 文雅 · 亲和力",
+        description: "竹青稳定空间，藕荷增加温度，杏黄作为轻快点缀，适合健康、教育与个人生活应用。",
+        colors: [
+          ["象牙白", "#F7F4EF"], ["竹青", "#577568"], ["藕荷", "#B98D9B"], ["杏黄", "#D9A441"], ["墨绿", "#304A40"]
+        ],
+        vars: { bg: "#F7F4EF", surface: "#FFFFFF", soft: "#EBEDE7", strong: "#DCE5DD", text: "#30413A", muted: "#727A75", border: "#DDDCD5", primary: "#577568", contrast: "#FFFFFF", accent: "#A96F82", accentSoft: "#F0E0E5", support: "#687F64", gold: "#D9A441", shadow: "rgba(48,65,58,.10)", focus: "rgba(169,111,130,.25)" }
+      },
+      {
+        id: "night",
+        name: "玄青 · 霁蓝 · 赤金",
+        era: "夜宴",
+        mood: "深沉 · 精密 · 科技感",
+        description: "玄青构成沉静夜色，霁蓝承载交互，赤金控制节奏。适合开发工具、监控平台和深色桌面应用。",
+        colors: [
+          ["玄青", "#171F27"], ["霁蓝", "#4F8DA6"], ["赤金", "#D0A654"], ["月影", "#DFE7E5"], ["朱砂", "#C75B50"]
+        ],
+        vars: { bg: "#171F27", surface: "#202A33", soft: "#293640", strong: "#334754", text: "#EDF2F0", muted: "#9BA9AC", border: "#35434D", primary: "#4F8DA6", contrast: "#FFFFFF", accent: "#D0A654", accentSoft: "#493F2D", support: "#70A58F", gold: "#D0A654", shadow: "rgba(0,0,0,.25)", focus: "rgba(208,166,84,.30)" }
+      },
+      {
+        id: "rouge",
+        name: "胭脂 · 鸦青 · 月白",
+        era: "宫墙",
+        mood: "华贵 · 坚定 · 仪式感",
+        description: "胭脂不作大面积铺陈，只用于关键动作；鸦青承担结构，缃色提亮。适合品牌、金融与会员产品。",
+        colors: [
+          ["月白", "#F5F3ED"], ["鸦青", "#424C50"], ["胭脂", "#9D2933"], ["缃色", "#D9B45B"], ["青灰", "#71817D"]
+        ],
+        vars: { bg: "#F5F3ED", surface: "#FFFEFA", soft: "#EAE9E3", strong: "#DDDAD1", text: "#30383B", muted: "#737B7D", border: "#DAD8D0", primary: "#424C50", contrast: "#FFFFFF", accent: "#9D2933", accentSoft: "#EEDADC", support: "#647A73", gold: "#D9B45B", shadow: "rgba(48,56,59,.11)", focus: "rgba(157,41,51,.25)" }
+      },
+      {
+        id: "pine",
+        name: "松花 · 苍绿 · 檀色",
+        era: "山林",
+        mood: "自然 · 书卷 · 松弛感",
+        description: "苍绿取自山林，松花色提供柔和光感，檀色让界面保持温度，适合写作、园艺和慢生活产品。",
+        colors: [
+          ["霜白", "#F3F5EE"], ["苍绿", "#58705D"], ["松花", "#B5A84D"], ["檀色", "#8B5148"], ["苔青", "#76806A"]
+        ],
+        vars: { bg: "#F3F5EE", surface: "#FCFDF9", soft: "#E7EADF", strong: "#DCE2D2", text: "#344039", muted: "#717A72", border: "#D6DACE", primary: "#58705D", contrast: "#FFFFFF", accent: "#8B5148", accentSoft: "#EBDDD8", support: "#6C7F68", gold: "#B5A84D", shadow: "rgba(52,64,57,.10)", focus: "rgba(139,81,72,.25)" }
+      },
+      {
+        id: "violet",
+        name: "绛紫 · 雪青 · 银灰",
+        era: "云锦",
+        mood: "含蓄 · 精致 · 艺术感",
+        description: "绛紫收敛而不甜腻，雪青调和冷感，秋香点出细节。适合作品集、创意工具与审美消费产品。",
+        colors: [
+          ["银灰", "#F5F4F6"], ["绛紫", "#6D3C55"], ["雪青", "#A9A1B8"], ["秋香", "#A79A38"], ["烟墨", "#413942"]
+        ],
+        vars: { bg: "#F5F4F6", surface: "#FFFFFF", soft: "#ECE9EE", strong: "#E0DAE4", text: "#413942", muted: "#79717B", border: "#DDD8DF", primary: "#6D3C55", contrast: "#FFFFFF", accent: "#8E536C", accentSoft: "#EEDFE5", support: "#647A73", gold: "#A79A38", shadow: "rgba(65,57,66,.10)", focus: "rgba(109,60,85,.25)" }
+      },
+      {
+        id: "cold-gray",
+        name: "纯白冷灰",
+        era: "极简",
+        mood: "精密 · 克制 · 科技感",
+        description: "纯白打底配冷灰文字，电光蓝作为唯一强调色。适合开发工具、数据平台与追求效率的应用。",
+        colors: [
+          ["纯白", "#FAFAFA"], ["电光蓝", "#0055FF"], ["冷灰", "#667788"], ["深空", "#111111"], ["浅灰", "#E8EAED"]
+        ],
+        vars: { bg: "#FAFAFA", surface: "#FFFFFF", soft: "#F0F1F3", strong: "#E0E3E8", text: "#111111", muted: "#667788", border: "#E0E3E8", primary: "#0055FF", contrast: "#FFFFFF", accent: "#0055FF", accentSoft: "#E8EEFF", support: "#3A7BD5", gold: "#C49A3C", shadow: "rgba(17,17,17,.08)", focus: "rgba(0,85,255,.25)" }
+      },
+      {
+        id: "linen",
+        name: "暖灰亚麻",
+        era: "现代",
+        mood: "温润 · 纸感 · 亲和力",
+        description: "底色带纸感的暖灰，陶土红强调色比纯蓝更有温度。适合日常生产力工具与内容阅读。",
+        colors: [
+          ["亚麻", "#F4F2EE"], ["陶土红", "#B85C38"], ["灰棕", "#8B8178"], ["纸白", "#FDFCFA"], ["炭灰", "#2A2824"]
+        ],
+        vars: { bg: "#F4F2EE", surface: "#FDFCF9", soft: "#EAE8E3", strong: "#DDDAD3", text: "#2A2824", muted: "#8B8178", border: "#D9D6CE", primary: "#5C5347", contrast: "#FFFFFF", accent: "#B85C38", accentSoft: "#F0DDD5", support: "#6B8E6A", gold: "#C49A3C", shadow: "rgba(42,40,36,.10)", focus: "rgba(184,92,56,.25)" }
+      },
+      {
+        id: "midnight",
+        name: "深空暗银",
+        era: "暗色",
+        mood: "深沉 · 精密 · 专业感",
+        description: "深空底色配电光蓝交互，银灰文字保持可读性。适合开发工具、监控面板与夜间使用场景。",
+        colors: [
+          ["深空", "#0C0E11"], ["电光蓝", "#6B9FFF"], ["银灰", "#5E6470"], ["暗银", "#14171C"], ["亮白", "#DDE1E6"]
+        ],
+        vars: { bg: "#0C0E11", surface: "#14171C", soft: "#1C2027", strong: "#252A33", text: "#DDE1E6", muted: "#5E6470", border: "#252A33", primary: "#6B9FFF", contrast: "#0C0E11", accent: "#6B9FFF", accentSoft: "#1A2535", support: "#5E9A6A", gold: "#C4A35A", shadow: "rgba(0,0,0,.35)", focus: "rgba(107,159,255,.30)" }
+      },
+      {
+        id: "mist-gold",
+        name: "雾灰暖金",
+        era: "轻奢",
+        mood: "克制 · 温暖 · 品质感",
+        description: "雾灰底上点缀琥珀金色，不喧宾夺主但有存在感。适合品牌官网、高端服务与会员产品。",
+        colors: [
+          ["雾灰", "#F3F1ED"], ["琥珀金", "#C4884A"], ["暖灰", "#9B9590"], ["纸白", "#FDFCF9"], ["炭褐", "#2C2A27"]
+        ],
+        vars: { bg: "#F3F1ED", surface: "#FDFCF9", soft: "#EBE8E2", strong: "#DDD9D1", text: "#2C2A27", muted: "#9B9590", border: "#D9D5CD", primary: "#5A544C", contrast: "#FFFFFF", accent: "#C4884A", accentSoft: "#F0E0CC", support: "#6B8E6A", gold: "#C4884A", shadow: "rgba(44,42,39,.10)", focus: "rgba(196,136,74,.25)" }
+      },
+      {
+        id: "ice-blue",
+        name: "冰蓝月影",
+        era: "清新",
+        mood: "冷静 · 通透 · 信任感",
+        description: "冰蓝建立专业信任感，月影辅助色保持克制。适合金融、健康、教育等需要建立信任的产品。",
+        colors: [
+          ["月影", "#F2F5F8"], ["冰蓝", "#3A7BD5"], ["灰蓝", "#8BA4C0"], ["深蓝", "#1A2332"], ["浅蓝", "#D6E4F0"]
+        ],
+        vars: { bg: "#F2F5F8", surface: "#FFFFFF", soft: "#EBEFF3", strong: "#D6E4F0", text: "#1A2332", muted: "#8BA4C0", border: "#D0D9E3", primary: "#3A7BD5", contrast: "#FFFFFF", accent: "#3A7BD5", accentSoft: "#D6E4F0", support: "#4A8B6A", gold: "#C49A3C", shadow: "rgba(26,35,50,.08)", focus: "rgba(58,123,213,.25)" }
+      },
+      {
+        id: "ink-amber",
+        name: "墨绿琥珀",
+        era: "自然",
+        mood: "沉静 · 有机 · 书卷气",
+        description: "墨绿为底，琥珀色提亮信息层级。适合写作、研究、知识管理与慢生活产品。",
+        colors: [
+          ["纸白", "#F2F4EF"], ["墨绿", "#1E2A20"], ["琥珀", "#8B6914"], ["苔绿", "#4A6741"], ["浅绿", "#D6E4D0"]
+        ],
+        vars: { bg: "#F2F4EF", surface: "#FAFBF7", soft: "#EAEDE4", strong: "#D6E4D0", text: "#1E2A20", muted: "#6B7A68", border: "#D0D6CA", primary: "#2D4A30", contrast: "#FFFFFF", accent: "#8B6914", accentSoft: "#F0E4CC", support: "#4A6741", gold: "#C49A3C", shadow: "rgba(30,42,32,.10)", focus: "rgba(139,105,20,.25)" }
+      },
+      {
+        id: "charcoal-coral",
+        name: "炭灰珊瑚",
+        era: "现代",
+        mood: "活力 · 克制 · 年轻感",
+        description: "炭灰提供稳定框架，珊瑚色带来活力但不刺眼。适合社交、创意、生活方式与消费产品。",
+        colors: [
+          ["浅灰", "#F4F5F7"], ["珊瑚", "#E07A5F"], ["钢灰", "#7A8290"], ["炭黑", "#1D1E21"], ["米白", "#FFFFFF"]
+        ],
+        vars: { bg: "#F4F5F7", surface: "#FFFFFF", soft: "#EBEEF2", strong: "#D6DAE0", text: "#1D1E21", muted: "#7A8290", border: "#D6DAE0", primary: "#3A3D45", contrast: "#FFFFFF", accent: "#E07A5F", accentSoft: "#F5E0DA", support: "#4A8B6A", gold: "#C49A3C", shadow: "rgba(29,30,33,.08)", focus: "rgba(224,122,95,.25)" }
+      },
+      {
+        id: "obsidian-amethyst",
+        name: "黑曜紫晶",
+        era: "暗色",
+        mood: "神秘 · 精致 · 数字艺术",
+        description: "黑曜石底色配紫晶强调色，低饱和但富有层次。适合创意工具、作品集与数字艺术产品。",
+        colors: [
+          ["黑曜", "#0D0D12"], ["紫晶", "#9D8DF1"], ["暗紫", "#5C5A6E"], ["暗银", "#16161D"], ["月白", "#E0DEF4"]
+        ],
+        vars: { bg: "#0D0D12", surface: "#16161D", soft: "#1E1E28", strong: "#262633", text: "#E0DEF4", muted: "#5C5A6E", border: "#262633", primary: "#9D8DF1", contrast: "#0D0D12", accent: "#9D8DF1", accentSoft: "#1E1A30", support: "#6BC49A", gold: "#C4A35A", shadow: "rgba(0,0,0,.40)", focus: "rgba(157,141,241,.30)" }
+      }
+    ];
+
+    const themeList = document.getElementById("themeList");
+    const largeSwatches = document.getElementById("largeSwatches");
+    const colorList = document.getElementById("colorList");
+    const toast = document.getElementById("toast");
+    let activeTheme = themes[0];
+    let toastTimer;
+
+    function renderThemeButtons() {
+      themeList.innerHTML = themes.map((theme) => `
+        <button class="theme-button ${theme.id === activeTheme.id ? "active" : ""}" type="button" data-theme="${theme.id}" aria-pressed="${theme.id === activeTheme.id}">
+          <span class="active-rail" aria-hidden="true"></span>
+          <span><span class="theme-title">${theme.name}</span><span class="theme-era">${theme.era} · ${theme.mood.split(" · ")[0]}</span></span>
+          <span class="mini-swatches" aria-hidden="true">${theme.colors.slice(1, 5).map((color) => `<i style="background:${color[1]}"></i>`).join("")}</span>
+        </button>
+      `).join("");
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove("show"), 1500);
+    }
+
+    async function copyColor(hex, name) {
+      try {
+        await navigator.clipboard.writeText(hex);
+      } catch {
+        const input = document.createElement("textarea");
+        input.value = hex;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+      }
+      showToast(`已复制 ${name} ${hex}`);
+    }
+
+    function renderPalette(theme) {
+      largeSwatches.innerHTML = theme.colors.map(([name, hex]) => `<button class="large-swatch" type="button" style="background:${hex};border:0" data-hex="${hex}" data-name="${name}" data-short="${name}" title="复制 ${name} ${hex}" aria-label="复制 ${name} ${hex}"></button>`).join("");
+      colorList.innerHTML = theme.colors.map(([name, hex]) => `
+        <button class="color-row" type="button" data-hex="${hex}" data-name="${name}">
+          <i class="color-dot" style="background:${hex};border:1px solid color-mix(in srgb, ${hex} 70%, #777)"></i>
+          <span class="color-name">${name}</span>
+          <span class="color-hex">${hex}</span>
+        </button>
+      `).join("");
+    }
+
+    function applyTheme(id) {
+      const theme = themes.find((item) => item.id === id);
+      if (!theme) return;
+      activeTheme = theme;
+      const root = document.documentElement;
+      const v = theme.vars;
+      root.style.setProperty("--bg", v.bg);
+      root.style.setProperty("--surface", v.surface);
+      root.style.setProperty("--surface-soft", v.soft);
+      root.style.setProperty("--surface-strong", v.strong);
+      root.style.setProperty("--text", v.text);
+      root.style.setProperty("--muted", v.muted);
+      root.style.setProperty("--border", v.border);
+      root.style.setProperty("--primary", v.primary);
+      root.style.setProperty("--primary-contrast", v.contrast);
+      root.style.setProperty("--accent", v.accent);
+      root.style.setProperty("--accent-soft", v.accentSoft);
+      root.style.setProperty("--support", v.support);
+      root.style.setProperty("--gold", v.gold);
+      root.style.setProperty("--shadow", v.shadow);
+      root.style.setProperty("--focus", v.focus);
+      root.style.colorScheme = theme.id === "night" ? "dark" : "light";
+      document.getElementById("themeName").textContent = theme.name;
+      document.getElementById("themeMood").textContent = theme.mood;
+      document.getElementById("themeDescription").textContent = theme.description;
+      document.getElementById("paletteTag").textContent = theme.era;
+      renderThemeButtons();
+      renderPalette(theme);
+      window.localStorage.setItem("classical-color-theme", id);
+    }
+
+    themeList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-theme]");
+      if (button) applyTheme(button.dataset.theme);
+    });
+
+    document.addEventListener("click", (event) => {
+      const colorButton = event.target.closest("[data-hex]");
+      if (colorButton) copyColor(colorButton.dataset.hex, colorButton.dataset.name);
+    });
+
+    document.querySelectorAll(".segment").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.querySelectorAll(".bar").forEach((bar) => {
+          bar.style.height = `${24 + Math.round(Math.random() * 72)}%`;
+        });
+      });
+    });
+
+    document.getElementById("applyButton").addEventListener("click", () => showToast("已打开新建任务入口"));
+
+    const requestedTheme = new URLSearchParams(window.location.search).get("theme");
+    const savedTheme = window.localStorage.getItem("classical-color-theme");
+    const initialTheme = themes.some((theme) => theme.id === requestedTheme) ? requestedTheme : savedTheme;
+    applyTheme(themes.some((theme) => theme.id === initialTheme) ? initialTheme : "linen");
+  </script>
+</body>
+</html>

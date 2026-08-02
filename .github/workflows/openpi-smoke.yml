@@ -1,0 +1,65 @@
+name: OpenPI Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/openpi-*/**"
+      - "packages/orchestrator/**"
+      - "packages/coding-agent/src/task-cli.ts"
+      - ".github/workflows/openpi-smoke.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/openpi-*/**"
+      - "packages/orchestrator/**"
+      - "packages/coding-agent/src/task-cli.ts"
+      - ".github/workflows/openpi-smoke.yml"
+
+concurrency:
+  group: openpi-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openpi-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build orchestrator + coding-agent
+        run: |
+          npm run build --workspace @earendil-works/pi-tui
+          npm run build --workspace @earendil-works/pi-ai
+          npm run build --workspace @earendil-works/pi-agent-core
+          npm run build --workspace @earendil-works/pi-coding-agent
+          npm run build --workspace @earendil-works/pi-orchestrator
+
+      - name: OpenPI package tests
+        run: |
+          npm test --workspace @earendil-works/openpi-bootstrap
+          npm test --workspace @earendil-works/openpi-memory
+          npm test --workspace @earendil-works/openpi-intelligence
+          npm test --workspace @earendil-works/openpi-security
+          npm test --workspace @earendil-works/openpi-chat
+          npm test --workspace @earendil-works/openpi-desktop
+          npm test --workspace @earendil-works/pi-orchestrator
+          npm test --workspace @earendil-works/openpi-tools
+
+      - name: Bootstrap dry-run
+        run: node --experimental-strip-types packages/openpi-bootstrap/src/cli.ts --dry-run --no-autostart
+
+      - name: Adapter scripts smoke
+        run: |
+          node --experimental-strip-types packages/openpi-tools/scripts/email-fetch.ts --help
+          node --experimental-strip-types packages/openpi-tools/scripts/calendar-today.ts --help
+          node --experimental-strip-types packages/openpi-tools/scripts/notify.ts --help

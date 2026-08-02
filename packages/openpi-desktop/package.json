@@ -1,0 +1,43 @@
+{
+	"name": "@earendil-works/openpi-desktop",
+	"version": "0.80.8",
+	"private": true,
+	"description": "Electron desktop app for OpenPI personal agent (no CLI required)",
+	"type": "module",
+	"main": "electron/main.mjs",
+	"scripts": {
+		"build:speech-helper": "node scripts/build-speech-helper.mjs",
+		"dev": "npm run build:speech-helper && concurrently -k \"vite --port 5179\" \"wait-on tcp:5179 && electron .\"",
+		"dev:web": "vite --port 5179",
+		"build": "vite build",
+		"start": "npm run build:speech-helper && OPENPI_DESKTOP_PROD=1 electron .",
+		"desktop": "npm run build:speech-helper && npm run build && OPENPI_DESKTOP_PROD=1 electron .",
+		"test": "vitest --run",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"bundle:runtime": "node scripts/bundle-runtime.mjs",
+		"pack:dir": "npm run build:speech-helper && npm run bundle:runtime && npm run build && electron-builder --dir --config electron-builder.yml",
+		"pack:mac": "npm run build:speech-helper && npm run bundle:runtime && npm run build && electron-builder --mac --config electron-builder.yml",
+		"install:local": "npm run pack:mac && node scripts/install-local.mjs"
+	},
+	"dependencies": {
+		"@radix-ui/react-popover": "1.1.19",
+		"@radix-ui/react-select": "2.3.3",
+		"clsx": "2.1.1",
+		"cmdk": "1.1.1",
+		"lucide-react": "0.468.0",
+		"react": "19.1.1",
+		"react-dom": "19.1.1",
+		"tailwind-merge": "3.6.0"
+	},
+	"devDependencies": {
+		"@types/react": "19.1.10",
+		"@types/react-dom": "19.1.7",
+		"concurrently": "9.2.1",
+		"electron": "37.2.0",
+		"electron-builder": "26.0.12",
+		"typescript": "5.9.3",
+		"vite": "8.0.16",
+		"vitest": "4.1.9",
+		"wait-on": "8.0.4"
+	}
+}

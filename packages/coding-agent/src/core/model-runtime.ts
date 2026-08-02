@@ -227,8 +227,7 @@ export class ModelRuntime implements Models {
 
 	private async runAvailabilityRefresh(): Promise<void> {
 		const providers = this.models.getProviders();
-		const [available, checks, credentials] = await Promise.all([
-			this.models.getAvailable(),
+		const [checks, credentials] = await Promise.all([
 			Promise.all(
 				providers.map(
 					async (provider): Promise<[string, AuthCheck | undefined]> => [
@@ -240,14 +239,25 @@ export class ModelRuntime implements Models {
 			this.credentials.list(),
 		]);
 		const auth = new Map(checks);
-		const configuredProviders = new Set(
+		const authedProviderIds = new Set(
 			checks
 				.filter((entry): entry is [string, AuthCheck] => entry[1] !== undefined)
 				.map(([providerId]) => providerId),
 		);
+		// Also include providers configured with an API key in models.json (even without auth.json storage)
+		const modelsConfiguredProviders = new Set(
+			this.config
+				.getProviderIds()
+				.filter(
+					(providerId) =>
+						configuredRequestAuthStatus(this.config.getProvider(providerId), undefined)?.configured ?? false,
+				),
+		);
+		const configuredProviders = new Set([...authedProviderIds, ...modelsConfiguredProviders]);
+		const all = [...this.models.getModels()];
 		this.snapshot = {
-			all: [...this.models.getModels()],
-			available: [...available],
+			all,
+			available: all.filter((model) => configuredProviders.has(model.provider)),
 			configuredProviders,
 			storedProviders: new Set(credentials.map((entry) => entry.providerId)),
 			auth,

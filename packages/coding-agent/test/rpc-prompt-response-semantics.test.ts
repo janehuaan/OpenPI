@@ -190,6 +190,69 @@ describe("RPC prompt response semantics", () => {
 		rpcIo.lineHandler = undefined;
 	});
 
+	it("returns the current capability snapshot", async () => {
+		const { lineHandler, cleanup } = await startRpcMode({ withAuth: false, responseDelayMs: 0 });
+
+		try {
+			lineHandler(JSON.stringify({ id: "capabilities", type: "get_capabilities" }));
+
+			await vi.waitFor(() => {
+				expect(parseOutputLines(rpcIo.outputLines)).toContainEqual({
+					id: "capabilities",
+					type: "response",
+					command: "get_capabilities",
+					success: true,
+					data: {
+						skills: [],
+						extensions: [],
+						tools: expect.arrayContaining([
+							expect.objectContaining({
+								name: "read",
+								active: true,
+								sourceInfo: expect.objectContaining({ source: "builtin" }),
+							}),
+							expect.objectContaining({ name: "grep", active: false }),
+						]),
+						packages: [],
+						diagnostics: [],
+						mcp: {
+							configured: false,
+							loaded: false,
+							packageSources: [],
+							extensionPaths: [],
+							commands: [],
+							tools: [],
+						},
+					},
+				});
+			});
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("rejects resource reload while the agent is working", async () => {
+		const { lineHandler, cleanup } = await startRpcMode({ withAuth: true, responseDelayMs: 100 });
+
+		try {
+			lineHandler(JSON.stringify({ id: "stream", type: "prompt", message: "Start" }));
+			await vi.waitFor(() => expect(getPromptResponses(rpcIo.outputLines, "stream")).toHaveLength(1));
+
+			lineHandler(JSON.stringify({ id: "reload", type: "reload_resources" }));
+			await vi.waitFor(() => {
+				expect(parseOutputLines(rpcIo.outputLines)).toContainEqual({
+					id: "reload",
+					type: "response",
+					command: "reload_resources",
+					success: false,
+					error: "Cannot reload resources while the agent is working",
+				});
+			});
+		} finally {
+			await cleanup();
+		}
+	});
+
 	it("emits one failure response when prompt preflight rejects", async () => {
 		const { lineHandler, cleanup } = await startRpcMode({
 			withAuth: false,

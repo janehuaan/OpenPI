@@ -1,0 +1,65 @@
+.composer-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 0 0 auto;
+}
+
+.speech-button {
+	position: relative;
+	width: 34px;
+	height: 34px;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text-tertiary);
+	display: grid;
+	place-items: center;
+	cursor: pointer;
+	flex: 0 0 auto;
+	transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.speech-button:hover:not(:disabled) {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+.speech-button:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.speech-button.starting,
+.speech-button.listening {
+	border-color: color-mix(in srgb, var(--danger) 22%, transparent);
+	background: var(--danger-soft);
+	color: var(--danger);
+}
+
+.speech-button.listening::after {
+	position: absolute;
+	inset: -3px;
+	border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+	border-radius: 9px;
+	content: "";
+	pointer-events: none;
+	animation: speech-listening-pulse 1.5s ease-out infinite;
+}
+
+@keyframes speech-listening-pulse {
+	0% { opacity: 0.75; transform: scale(0.92); }
+	70%, 100% { opacity: 0; transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.speech-button {
+		transition: none;
+	}
+
+	.speech-button.listening::after {
+		animation: none;
+		opacity: 1;
+		transform: none;
+	}
+}

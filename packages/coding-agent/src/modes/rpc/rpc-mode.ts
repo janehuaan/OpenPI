@@ -12,6 +12,7 @@
  */
 
 import * as crypto from "node:crypto";
+import { getAgentDir } from "../../config.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type {
 	ExtensionUIContext,
@@ -25,10 +26,12 @@ import {
 	waitForRawStdoutBackpressure,
 	writeRawStdout,
 } from "../../core/output-guard.ts";
+import { DefaultPackageManager } from "../../core/package-manager.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import type {
+	RpcCapabilities,
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -73,6 +76,84 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 	const error = (id: string | undefined, command: string, message: string): RpcResponse => {
 		return { id, type: "response", command, success: false, error: message };
+	};
+
+	const getCapabilities = (): RpcCapabilities => {
+		const skillsResult = session.resourceLoader.getSkills();
+		const extensionsResult = session.resourceLoader.getExtensions();
+		const activeTools = new Set(session.getActiveToolNames());
+		const packages = new DefaultPackageManager({
+			cwd: session.sessionManager.getCwd(),
+			agentDir: getAgentDir(),
+			settingsManager: session.settingsManager,
+		}).listConfiguredPackages();
+		const extensions = extensionsResult.extensions.map((extension) => ({
+			path: extension.path,
+			commands: [...extension.commands.keys()],
+			tools: [...extension.tools.keys()],
+			sourceInfo: extension.sourceInfo,
+		}));
+		const tools = session.getAllTools().map((tool) => ({
+			name: tool.name,
+			description: tool.description,
+			active: activeTools.has(tool.name),
+			sourceInfo: tool.sourceInfo,
+		}));
+		const isMcpValue = (value: string): boolean => /(^|[/@._-])mcp([/@._-]|$)/i.test(value);
+		const mcpPackages = packages.filter((entry) => isMcpValue(entry.source));
+		const mcpExtensions = extensions.filter(
+			(extension) =>
+				isMcpValue(extension.path) ||
+				isMcpValue(extension.sourceInfo.source) ||
+				extension.commands.some(isMcpValue) ||
+				extension.tools.some(isMcpValue),
+		);
+		const mcpCommands = [...new Set(mcpExtensions.flatMap((extension) => extension.commands).filter(isMcpValue))];
+		const mcpTools = [
+			...new Set(
+				tools
+					.filter(
+						(tool) =>
+							isMcpValue(tool.name) || isMcpValue(tool.sourceInfo.source) || isMcpValue(tool.sourceInfo.path),
+					)
+					.map((tool) => tool.name),
+			),
+		];
+
+		return {
+			skills: skillsResult.skills.map((skill) => ({
+				name: skill.name,
+				description: skill.description,
+				filePath: skill.filePath,
+				disableModelInvocation: skill.disableModelInvocation,
+				sourceInfo: skill.sourceInfo,
+			})),
+			extensions,
+			tools,
+			packages,
+			diagnostics: [
+				...skillsResult.diagnostics.map((diagnostic) => ({
+					resource: "skill" as const,
+					type: diagnostic.type,
+					message: diagnostic.message,
+					path: diagnostic.path,
+				})),
+				...extensionsResult.errors.map((diagnostic) => ({
+					resource: "extension" as const,
+					type: "error" as const,
+					message: diagnostic.error,
+					path: diagnostic.path,
+				})),
+			],
+			mcp: {
+				configured: mcpPackages.length > 0,
+				loaded: mcpExtensions.length > 0 || mcpTools.length > 0,
+				packageSources: mcpPackages.map((entry) => entry.source),
+				extensionPaths: mcpExtensions.map((extension) => extension.path),
+				commands: mcpCommands,
+				tools: mcpTools,
+			},
+		};
 	};
 
 	// Pending extension UI requests waiting for response
@@ -483,6 +564,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "get_available_models": {
+				await session.modelRuntime.reloadConfig();
 				const models = await session.modelRuntime.getAvailable();
 				return success(id, "get_available_models", { models });
 			}
@@ -684,6 +766,60 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				}
 
 				return success(id, "get_commands", { commands });
+			}
+
+			// =================================================================
+			// Capabilities
+			// =================================================================
+
+			case "get_capabilities": {
+				return success(id, "get_capabilities", getCapabilities());
+			}
+
+			case "reload_resources": {
+				if (!session.isIdle) {
+					return error(id, "reload_resources", "Cannot reload resources while the agent is working");
+				}
+				await session.reload();
+				return success(id, "reload_resources", getCapabilities());
+			}
+
+			case "install_package": {
+				if (!session.isIdle) {
+					return error(id, "install_package", "Cannot install a package while the agent is working");
+				}
+				const source = command.source.trim();
+				if (!source) {
+					return error(id, "install_package", "Package source cannot be empty");
+				}
+				const packageManager = new DefaultPackageManager({
+					cwd: session.sessionManager.getCwd(),
+					agentDir: getAgentDir(),
+					settingsManager: session.settingsManager,
+				});
+				await packageManager.installAndPersist(source, { local: command.local });
+				await session.waitForIdle();
+				await session.reload();
+				return success(id, "install_package", getCapabilities());
+			}
+
+			case "remove_package": {
+				if (!session.isIdle) {
+					return error(id, "remove_package", "Cannot remove a package while the agent is working");
+				}
+				const source = command.source.trim();
+				if (!source) {
+					return error(id, "remove_package", "Package source cannot be empty");
+				}
+				const packageManager = new DefaultPackageManager({
+					cwd: session.sessionManager.getCwd(),
+					agentDir: getAgentDir(),
+					settingsManager: session.settingsManager,
+				});
+				const removed = await packageManager.removeAndPersist(source, { local: command.local });
+				await session.waitForIdle();
+				await session.reload();
+				return success(id, "remove_package", { ...getCapabilities(), removed });
 			}
 
 			default: {

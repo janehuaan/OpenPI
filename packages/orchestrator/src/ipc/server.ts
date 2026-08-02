@@ -14,6 +14,9 @@ import {
 	type RpcReadyResponse,
 	type RpcRequest,
 	type RpcStreamRequest,
+	type SessionDeleteRequest,
+	type SessionMutationResponse,
+	type SessionRenameRequest,
 	type SpawnRequest,
 	type SpawnResponse,
 	type StatusRequest,
@@ -29,6 +32,12 @@ export interface IpcRequestHandler {
 	(request: StatusRequest): Promise<StatusResponse | ErrorResponse> | StatusResponse | ErrorResponse;
 	(request: RpcRequest): Promise<RpcBridgeResponse | ErrorResponse> | RpcBridgeResponse | ErrorResponse;
 	(request: RpcStreamRequest): Promise<RpcReadyResponse | ErrorResponse> | RpcReadyResponse | ErrorResponse;
+	(
+		request: SessionRenameRequest,
+	): Promise<SessionMutationResponse | ErrorResponse> | SessionMutationResponse | ErrorResponse;
+	(
+		request: SessionDeleteRequest,
+	): Promise<SessionMutationResponse | ErrorResponse> | SessionMutationResponse | ErrorResponse;
 	(request: OrchestratorRequest): Promise<OrchestratorResponse> | OrchestratorResponse;
 	openRpcStream(
 		instanceId: string,
@@ -94,6 +103,15 @@ export async function startIpcServer(handler: IpcRequestHandler): Promise<Server
 
 					socket.write(encodeMessage(response));
 					let rpcRequestQueue = Promise.resolve();
+					const writeRpcError = (rpcError: unknown): void => {
+						socket.write(
+							encodeMessage({
+								type: "error",
+								ok: false,
+								error: rpcError instanceof Error ? rpcError.message : String(rpcError),
+							}),
+						);
+					};
 					socket.on("data", (rpcChunk: Buffer | string) => {
 						buffer += rpcChunk.toString();
 						for (;;) {
@@ -106,29 +124,22 @@ export async function startIpcServer(handler: IpcRequestHandler): Promise<Server
 							if (!rpcLine) {
 								continue;
 							}
+							const rpcRequest = JSON.parse(rpcLine) as
+								| RpcRequest["command"]
+								| { type: "extension_ui_response" };
+							if (rpcRequest.type === "extension_ui_response") {
+								void rpcStream.handleRequest(rpcRequest).catch(writeRpcError);
+								continue;
+							}
 							rpcRequestQueue = rpcRequestQueue
 								.then(async () => {
 									try {
-										await rpcStream.handleRequest(JSON.parse(rpcLine));
+										await rpcStream.handleRequest(rpcRequest);
 									} catch (rpcError: unknown) {
-										socket.write(
-											encodeMessage({
-												type: "error",
-												ok: false,
-												error: rpcError instanceof Error ? rpcError.message : String(rpcError),
-											}),
-										);
+										writeRpcError(rpcError);
 									}
 								})
-								.catch((rpcError: Error) => {
-									socket.write(
-										encodeMessage({
-											type: "error",
-											ok: false,
-											error: rpcError.message,
-										}),
-									);
-								});
+								.catch(writeRpcError);
 						}
 					});
 					socket.once("close", () => rpcStream.close());

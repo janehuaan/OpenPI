@@ -324,6 +324,7 @@ export {
 	type InteractiveModeOptions,
 	type ModelInfo,
 	type PrintModeOptions,
+	type RpcCapabilities,
 	RpcClient,
 	type RpcClientOptions,
 	type RpcCommand,

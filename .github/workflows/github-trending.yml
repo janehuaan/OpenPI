@@ -1,0 +1,135 @@
+name: GitHub Trending Scraper
+
+on:
+  schedule:
+    # Run daily at 08:00 UTC (16:00 CST)
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-trending:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Scrape GitHub Trending
+        run: |
+          cat > /tmp/scrape.py << 'SCRIPT'
+          import urllib.request
+          import json
+          import re
+          from datetime import date
+          
+          def fetch_trending(since='daily'):
+              url = f'https://github.com/trending?since={since}'
+              print(f"Fetching {url}...")
+              
+              headers = {
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.5',
+              }
+              
+              req = urllib.request.Request(url, headers=headers)
+              
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      html = response.read().decode('utf-8')
+              except Exception as e:
+                  print(f"Error fetching {url}: {e}")
+                  return []
+              
+              repos = []
+              articles = re.findall(r'<article\s+class="Box-row">(.*?)</article>', html, re.DOTALL)
+              
+              for article in articles:
+                  repo = {}
+                  
+                  # Extract hrefs and get repo path (second match)
+                  all_hrefs = re.findall(r'href="/([^"\s]+)"', article)
+                  
+                  if len(all_hrefs) >= 2 and '/' in all_hrefs[1] and not all_hrefs[1].startswith('login'):
+                      repo['name'] = all_hrefs[1]
+                  else:
+                      continue
+                  
+                  # Description
+                  desc_match = re.search(r'<p\s+class="col-9[^"]*">\s*([^<]+)', article, re.DOTALL)
+                  repo['description'] = desc_match.group(1).strip() if desc_match else None
+                  
+                  # Language
+                  lang_match = re.search(r'<span\s+itemprop="programmingLanguage">\s*([^<]+)\s*</span>', article)
+                  repo['language'] = lang_match.group(1).strip() if lang_match else None
+                  
+                  # Stars today
+                  stars_match = re.search(r'float-sm-right[^>]*>\s*([^<]+)\s*<', article)
+                  repo['starsToday'] = stars_match.group(1).strip() if stars_match else None
+                  
+                  repos.append(repo)
+              
+              print(f"Found {len(repos)} repositories for {since}")
+              return repos
+          
+          def main():
+              periods = ['daily', 'weekly', 'monthly']
+              results = {}
+              
+              for period in periods:
+                  results[period] = fetch_trending(period)
+              
+              output = {
+                  'date': str(date.today()),
+                  **results
+              }
+              
+              # Save individual day file
+              date_str = str(date.today())
+              with open(f'/tmp/trending-{date_str}.json', 'w') as f:
+                  json.dump(output, f, indent=2, ensure_ascii=False)
+              
+              # Load or create index
+              index_path = '/tmp/trending-index.json'
+              index = {}
+              if __import__('os').path.exists(index_path):
+                  with open(index_path, 'r') as f:
+                      index = json.load(f)
+              
+              index[date_str] = output
+              
+              # Keep only last 90 days
+              cutoff = date.today() - __import__('datetime').timedelta(days=90)
+              filtered = {k: v for k, v in index.items() if __import__('datetime').date.fromisoformat(k) >= cutoff}
+              
+              with open(index_path, 'w') as f:
+                  json.dump(filtered, f, indent=2, ensure_ascii=False)
+              
+              print('Scraping complete.')
+          
+          main()
+          SCRIPT
+
+          python3 /tmp/scrape.py
+
+      - name: Save trending data
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          mkdir -p data/trending
+          cp /tmp/trending-${DATE}.json data/trending/${DATE}.json 2>/dev/null || true
+          cp /tmp/trending-index.json data/trending/index.json
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/trending/
+          git diff --staged --quiet || git commit -m "chore(trending): update GitHub trending data ($(date -u +%Y-%m-%d))"
+          git push

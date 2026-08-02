@@ -232,7 +232,8 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} update [source|self|pi]   Update pi (use --all for pi and extensions)
   ${APP_NAME} list                      List installed extensions from settings
   ${APP_NAME} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
-  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config
+  ${APP_NAME} task <command>             Manage persistent scheduled agent tasks
+  ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config/task
 
 ${chalk.bold("Options:")}
   --provider <name>              Provider name (default: google)

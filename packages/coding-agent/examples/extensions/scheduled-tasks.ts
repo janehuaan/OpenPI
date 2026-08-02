@@ -1,13 +1,21 @@
 /**
  * Scheduled Tasks Extension
  *
- * Provides cron-based scheduling for pi agent tasks. Supports one-time and
- * recurring schedules with environment variable injection.
+ * DEPRECATED as the primary scheduler. Prefer the orchestrator:
+ *   pi task create --title ... --prompt ... --cron "0 9 * * *"
+ *   pi task daemon status
+ *
+ * This extension remains as a lightweight project-local experiment only.
+ * It is not the product always-on task runner.
  *
  * Usage:
  *   pi --extension examples/extensions/scheduled-tasks.ts
  */
 
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -41,8 +49,6 @@ function generateId(): string {
 
 function loadTasks(repoRoot: string): ScheduledTask[] {
 	try {
-		const fs = require("fs");
-		const path = require("path");
 		const filePath = path.join(repoRoot, TASKS_FILE);
 		if (!fs.existsSync(filePath)) return [];
 		return JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -53,8 +59,6 @@ function loadTasks(repoRoot: string): ScheduledTask[] {
 
 function saveTasks(repoRoot: string, tasks: ScheduledTask[]): void {
 	try {
-		const fs = require("fs");
-		const path = require("path");
 		const filePath = path.join(repoRoot, TASKS_FILE);
 		fs.writeFileSync(filePath, JSON.stringify(tasks, null, 2), "utf-8");
 	} catch {
@@ -279,6 +283,92 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `Deleted task: ${deleted.title}` }],
 				details: { id: deleted.id },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "schedule_daemon",
+		label: "Schedule Daemon",
+		description: "Start, stop, or inspect the persistent background scheduler for this project.",
+		promptSnippet: "Use schedule_daemon to keep scheduled tasks running after pi exits",
+		parameters: Type.Object({ action: Type.String({ description: "start, stop, or status" }) }),
+		async execute(_id, params, _signal, _update, ctx) {
+			const repoRoot = await getRepoRoot(pi, ctx.cwd);
+			if (!repoRoot)
+				return {
+					content: [{ type: "text", text: "Not in a Git project." }],
+					details: { action: params.action, running: false, pid: 0 },
+				};
+			const pidFile = path.join(repoRoot, ".pi", "scheduler.pid");
+			const readPid = (): number => {
+				try {
+					return Number(fs.readFileSync(pidFile, "utf8").trim()) || 0;
+				} catch {
+					return 0;
+				}
+			};
+			const alive = (pid: number): boolean => {
+				if (!pid) return false;
+				try {
+					process.kill(pid, 0);
+					return true;
+				} catch {
+					return false;
+				}
+			};
+			const existingPid = readPid();
+			if (params.action === "status") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: alive(existingPid) ? `Scheduler running (pid ${existingPid}).` : "Scheduler stopped.",
+						},
+					],
+					details: { action: params.action, running: alive(existingPid), pid: existingPid },
+				};
+			}
+			if (params.action === "stop") {
+				if (alive(existingPid)) process.kill(existingPid, "SIGTERM");
+				try {
+					fs.unlinkSync(pidFile);
+				} catch {
+					/* Already absent. */
+				}
+				return {
+					content: [{ type: "text", text: "Scheduler stopped." }],
+					details: { action: params.action, running: false, pid: existingPid },
+				};
+			}
+			if (params.action !== "start")
+				return {
+					content: [{ type: "text", text: "Action must be start, stop, or status." }],
+					details: { action: params.action, running: alive(existingPid), pid: existingPid },
+				};
+			if (alive(existingPid))
+				return {
+					content: [{ type: "text", text: `Scheduler already running (pid ${existingPid}).` }],
+					details: { action: params.action, running: true, pid: existingPid },
+				};
+			const daemon = fileURLToPath(new URL("./scheduler-daemon.mjs", import.meta.url));
+			const piEntry = process.argv[1];
+			if (!piEntry)
+				return {
+					content: [{ type: "text", text: "Cannot resolve pi CLI entry." }],
+					details: { action: params.action, running: false, pid: 0 },
+				};
+			fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+			const child = spawn(process.execPath, [daemon, repoRoot, path.resolve(piEntry)], {
+				cwd: repoRoot,
+				detached: true,
+				env: process.env,
+				stdio: "ignore",
+			});
+			child.unref();
+			return {
+				content: [{ type: "text", text: `Scheduler started (pid ${child.pid ?? 0}).` }],
+				details: { action: params.action, running: true, pid: child.pid ?? 0 },
 			};
 		},
 	});

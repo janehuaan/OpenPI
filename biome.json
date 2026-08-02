@@ -28,6 +28,9 @@
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
+			"packages/openpi-desktop/web/**/*.ts",
+			"packages/openpi-desktop/web/**/*.tsx",
+			"packages/openpi-desktop/test/**/*.{ts,mjs}",
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",
@@ -35,5 +38,26 @@
 			"!packages/mom/data/**/*",
 			"!!**/node_modules"
 		]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/openpi-desktop/web/**/*.tsx", "packages/openpi-desktop/web/**/*.ts"],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"recommended": false
+					},
+					"correctness": {
+						"useExhaustiveDependencies": "off",
+						"noUnusedVariables": "off",
+						"noUnusedImports": "off"
+					},
+					"suspicious": {
+						"noArrayIndexKey": "off",
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		}
+	]
 }

@@ -1,0 +1,37 @@
+{
+	"name": "@earendil-works/openpi-intelligence",
+	"version": "0.80.8",
+	"description": "Agent intelligence layer for OpenPI (context, plan, sub-agents)",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"openpi",
+		"intelligence"
+	],
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"test": "vitest --run"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "^0.80.7",
+		"typebox": "^1.1.38"
+	},
+	"devDependencies": {
+		"typebox": "1.1.38",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"private": true
+}

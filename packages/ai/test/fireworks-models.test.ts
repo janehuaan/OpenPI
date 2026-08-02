@@ -129,8 +129,9 @@ function createAnthropicModel(): Model<"anthropic-messages"> {
 	};
 }
 
-function createContext(tools: Tool[] = [tool]): Context {
+function createContext(tools: Tool[] = [tool], systemPrompt = "You are a helpful assistant."): Context {
 	return {
+		systemPrompt,
 		messages: [{ role: "user", content: "Use the tool", timestamp: Date.now() }],
 		...(tools.length > 0 ? { tools } : {}),
 	};
@@ -235,8 +236,9 @@ describe("Fireworks Anthropic session affinity and tool compat", () => {
 		const request = await captureAnthropicRequest(model, createContext());
 
 		const tools = getTools(request.body);
-		const lastTool = tools[tools.length - 1];
-		expect(lastTool.cache_control).toBeUndefined();
+		for (const t of tools) {
+			expect(t.cache_control).toBeUndefined();
+		}
 	});
 
 	it("omits eager_input_streaming on tools for Fireworks models", async () => {
@@ -249,14 +251,22 @@ describe("Fireworks Anthropic session affinity and tool compat", () => {
 		}
 	});
 
-	it("sends cache_control on tools for native Anthropic models", async () => {
+	it("sends cache_control on system block for native Anthropic models", async () => {
 		const model = createAnthropicModel();
 		const request = await captureAnthropicRequest(model, createContext());
 
+		// cache_control is placed on the last system block to cache tools + system together
+		const systemBlocks = request.body.system as Array<{ cache_control?: { type: string } }>;
+		expect(Array.isArray(systemBlocks)).toBe(true);
+		const lastSystemBlock = systemBlocks[systemBlocks.length - 1];
+		expect(lastSystemBlock?.cache_control).toBeDefined();
+		expect(lastSystemBlock?.cache_control?.type).toBe("ephemeral");
+
+		// Tools should NOT have cache_control (it's on the system block instead)
 		const tools = getTools(request.body);
-		const lastTool = tools[tools.length - 1];
-		expect(lastTool.cache_control).toBeDefined();
-		expect((lastTool.cache_control as { type: string }).type).toBe("ephemeral");
+		for (const t of tools) {
+			expect(t.cache_control).toBeUndefined();
+		}
 	});
 
 	it("sends eager_input_streaming on tools for native Anthropic models", async () => {

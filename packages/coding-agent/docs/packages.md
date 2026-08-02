@@ -112,6 +112,24 @@ pi install git:git@github.com:user/repo@v1.0.0
 
 Local paths point to files or directories on disk and are added to settings without copying. Relative paths are resolved against the settings file they appear in. If the path is a file, it loads as a single extension. If it is a directory, pi loads resources using package rules.
 
+## Optional permissions metadata
+
+Packages may declare a `pi.permissions` object for install-time review. Pi prints the declaration after `pi install` and warns when it is missing. This is advisory metadata only (not an enforcement sandbox).
+
+```json
+{
+  "pi": {
+    "extensions": ["./src/index.ts"],
+    "permissions": {
+      "network": true,
+      "fs": "project",
+      "shell": "gate",
+      "env": false
+    }
+  }
+}
+```
+
 ## Creating a Pi Package
 
 Add a `pi` manifest to `package.json` or use conventional directories. Include the `pi-package` keyword for discoverability.

@@ -175,7 +175,7 @@ export const FIREWORKS_MODELS = {
 		baseUrl: "https://api.fireworks.ai/inference",
 		compat: {"sendSessionAffinityHeaders":true,"supportsEagerToolInputStreaming":false,"supportsCacheControlOnTools":false,"supportsLongCacheRetention":false},
 		reasoning: true,
-		input: ["text"],
+		input: ["text", "image"],
 		cost: {
 			input: 0.3,
 			output: 1.2,

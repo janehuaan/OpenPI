@@ -1,0 +1,44 @@
+{
+	"name": "@earendil-works/openpi-memory",
+	"version": "0.80.8",
+	"description": "File-based long-term memory for OpenPI personal agent",
+	"type": "module",
+	"keywords": [
+		"pi-package",
+		"openpi",
+		"memory"
+	],
+	"license": "MIT",
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"files": [
+		"src",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"test": "vitest --run",
+		"clean": "shx rm -rf dist"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "^0.80.7",
+		"@earendil-works/pi-coding-agent": "^0.80.7",
+		"typebox": "^1.1.38"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-ai": "^0.80.8",
+		"@earendil-works/pi-coding-agent": "^0.80.8",
+		"typebox": "1.1.38",
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"private": true
+}

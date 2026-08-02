@@ -1,0 +1,53 @@
+appId: works.earendil.openpi
+productName: OpenPI
+directories:
+  output: release
+  buildResources: build
+files:
+  - electron/**/*
+  - dist/**/*
+  - package.json
+  - build/icon.icns
+extraResources:
+  - from: build/icon.icns
+    to: icon.icns
+  - from: build/speech-recognizer
+    to: speech-recognizer
+  - from: build/whisper.framework
+    to: whisper.framework
+  - from: build/ggml-small-q5_1.bin
+    to: ggml-small-q5_1.bin
+  - from: build/ggml-silero-v6.2.0.bin
+    to: ggml-silero-v6.2.0.bin
+  - from: native/whisper-NOTICES.txt
+    to: whisper-NOTICES.txt
+# Runtime node_modules is copied in afterPack (builder ignores **/node_modules by default)
+afterPack: scripts/after-pack.cjs
+extraMetadata:
+  main: electron/main.mjs
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  extendInfo:
+    NSMicrophoneUsageDescription: OpenPI uses the microphone for streaming voice input.
+  target:
+    - target: dmg
+      arch:
+        - x64
+    - target: dir
+      arch:
+        - x64
+  darkModeSupport: true
+  hardenedRuntime: false
+  gatekeeperAssess: false
+dmg:
+  title: OpenPI
+  icon: build/icon.icns
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

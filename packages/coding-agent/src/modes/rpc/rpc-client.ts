@@ -12,7 +12,7 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
-import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
+import type { RpcCapabilities, RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
 
 // ============================================================================
 // Types
@@ -434,6 +434,30 @@ export class RpcClient {
 	async getCommands(): Promise<RpcSlashCommand[]> {
 		const response = await this.send({ type: "get_commands" });
 		return this.getData<{ commands: RpcSlashCommand[] }>(response).commands;
+	}
+
+	/** Get loaded skills, extensions, tools, packages, and MCP adapter state. */
+	async getCapabilities(): Promise<RpcCapabilities> {
+		const response = await this.send({ type: "get_capabilities" });
+		return this.getData(response);
+	}
+
+	/** Reload settings, resources, and extensions in the current session. */
+	async reloadResources(): Promise<RpcCapabilities> {
+		const response = await this.send({ type: "reload_resources" });
+		return this.getData(response);
+	}
+
+	/** Install a Pi package and reload the current session. */
+	async installPackage(source: string, local = false): Promise<RpcCapabilities> {
+		const response = await this.send({ type: "install_package", source, local });
+		return this.getData(response);
+	}
+
+	/** Remove a Pi package and reload the current session. */
+	async removePackage(source: string, local = false): Promise<RpcCapabilities & { removed: boolean }> {
+		const response = await this.send({ type: "remove_package", source, local });
+		return this.getData(response);
 	}
 
 	// =========================================================================

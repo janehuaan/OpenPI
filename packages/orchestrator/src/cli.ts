@@ -18,7 +18,32 @@ const packageJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), 
 
 function printHelp(): void {
 	console.log(
-		`orchestrator v${packageJson.version}\n\nUsage:\n  orchestrator serve\n  orchestrator list\n  orchestrator spawn [--cwd <path>] [--label <label>]\n  orchestrator status <instance-id>\n  orchestrator stop <instance-id>\n  orchestrator rpc <instance-id> <json-command>\n  orchestrator rpc-stream <instance-id>\n  orchestrator --help\n  orchestrator --version\n\nRPC stream stdin expects JSONL RpcCommand or extension_ui_response messages.`,
+		`orchestrator v${packageJson.version}
+
+Usage:
+  orchestrator serve
+  orchestrator health
+  orchestrator shutdown
+  orchestrator list
+  orchestrator spawn [--cwd <path>] [--label <label>]
+  orchestrator status <instance-id>
+  orchestrator stop <instance-id>
+  orchestrator task create --title <title> --prompt <prompt> (--at <rfc3339> | --cron <expression>)
+                           [--timezone <iana>] [--cwd <path>] [--provider <id>] [--model <id>]
+                           [--tools a,b] [--env KEY=VAL]... [--retry-max N] [--retry-backoff-ms N]
+                           [--retry-on failed,interrupted]
+  orchestrator task list
+  orchestrator task show <task-id>
+  orchestrator task run <task-id>
+  orchestrator task runs [task-id]
+  orchestrator task cancel <run-id>
+  orchestrator task pause|resume|delete <task-id>
+  orchestrator rpc <instance-id> <json-command>
+  orchestrator rpc-stream <instance-id>
+  orchestrator --help
+  orchestrator --version
+
+Cron schedules default to UTC. Pass --timezone with an IANA name for local wall-clock cron.`,
 	);
 }
 
@@ -32,6 +57,59 @@ function getFlagValue(args: string[], flag: string): string | undefined {
 		return undefined;
 	}
 	return args[index + 1];
+}
+
+function getRepeatableFlagValues(args: string[], flag: string): string[] {
+	const values: string[] = [];
+	for (let index = 0; index < args.length; index++) {
+		if (args[index] === flag && index + 1 < args.length) {
+			values.push(args[index + 1] as string);
+			index++;
+		}
+	}
+	return values;
+}
+
+function parseEnvFlags(args: string[]): Record<string, string> | undefined {
+	const pairs = getRepeatableFlagValues(args, "--env");
+	if (pairs.length === 0) return undefined;
+	const env: Record<string, string> = {};
+	for (const pair of pairs) {
+		const separator = pair.indexOf("=");
+		if (separator <= 0) throw new Error(`Invalid --env value: ${pair}`);
+		env[pair.slice(0, separator)] = pair.slice(separator + 1);
+	}
+	return env;
+}
+
+function parseRetry(args: string[]):
+	| {
+			maxAttempts: number;
+			backoffMs?: number;
+			retryOn?: Array<"failed" | "interrupted">;
+	  }
+	| undefined {
+	const maxRaw = getFlagValue(args, "--retry-max");
+	if (maxRaw === undefined) return undefined;
+	const maxAttempts = Number(maxRaw);
+	if (!Number.isInteger(maxAttempts) || maxAttempts < 0)
+		throw new Error("--retry-max must be a non-negative integer.");
+	const backoffRaw = getFlagValue(args, "--retry-backoff-ms");
+	const backoffMs = backoffRaw === undefined ? undefined : Number(backoffRaw);
+	if (backoffMs !== undefined && (!Number.isFinite(backoffMs) || backoffMs < 0)) {
+		throw new Error("--retry-backoff-ms must be a non-negative number.");
+	}
+	const retryOnRaw = getFlagValue(args, "--retry-on");
+	const retryOn = retryOnRaw
+		? retryOnRaw.split(",").map((entry) => {
+				const value = entry.trim();
+				if (value !== "failed" && value !== "interrupted") {
+					throw new Error("--retry-on entries must be failed or interrupted.");
+				}
+				return value;
+			})
+		: undefined;
+	return { maxAttempts, backoffMs, retryOn };
 }
 
 async function rpcStream(instanceId: string): Promise<void> {
@@ -94,6 +172,16 @@ async function main(): Promise<void> {
 		return;
 	}
 
+	if (args[0] === "health") {
+		printResponse(await sendIpcRequest({ type: "health" }));
+		return;
+	}
+
+	if (args[0] === "shutdown") {
+		printResponse(await sendIpcRequest({ type: "shutdown" }));
+		return;
+	}
+
 	if (args[0] === "list") {
 		printResponse(await sendIpcRequest({ type: "list" }));
 		return;
@@ -103,6 +191,81 @@ async function main(): Promise<void> {
 		const spawnCwd = getFlagValue(args, "--cwd") ?? cwd();
 		const label = getFlagValue(args, "--label");
 		printResponse(await sendIpcRequest({ type: "spawn", cwd: spawnCwd, label }));
+		return;
+	}
+
+	if (args[0] === "task") {
+		const action = args[1];
+		if (action === "create") {
+			const title = getFlagValue(args, "--title");
+			const prompt = getFlagValue(args, "--prompt");
+			const runAt = getFlagValue(args, "--at");
+			const cron = getFlagValue(args, "--cron");
+			if (!title || !prompt || (!runAt && !cron) || (runAt && cron)) {
+				throw new Error("Task create requires --title, --prompt, and exactly one of --at or --cron.");
+			}
+			const tools = getFlagValue(args, "--tools");
+			const securityMode = getFlagValue(args, "--security-mode");
+			const sandbox = getFlagValue(args, "--sandbox");
+			printResponse(
+				await sendIpcRequest({
+					type: "task_create",
+					title,
+					prompt,
+					cwd: getFlagValue(args, "--cwd"),
+					provider: getFlagValue(args, "--provider"),
+					model: getFlagValue(args, "--model"),
+					tools: tools
+						? tools
+								.split(",")
+								.map((entry) => entry.trim())
+								.filter(Boolean)
+						: undefined,
+					extensions: getRepeatableFlagValues(args, "--extension"),
+					securityMode:
+						securityMode === "strict" || securityMode === "confirm" || securityMode === "permissive"
+							? securityMode
+							: undefined,
+					sandbox: sandbox === "docker" || sandbox === "none" ? sandbox : undefined,
+					dockerImage: getFlagValue(args, "--docker-image"),
+					env: parseEnvFlags(args),
+					retry: parseRetry(args),
+					schedule: runAt
+						? { kind: "once", runAt }
+						: {
+								kind: "cron",
+								expression: cron as string,
+								timezone: getFlagValue(args, "--timezone"),
+							},
+				}),
+			);
+			return;
+		}
+		if (action === "list") {
+			printResponse(await sendIpcRequest({ type: "task_list" }));
+			return;
+		}
+		const taskId = args[2];
+		if (action === "show") {
+			if (!taskId) throw new Error("Task show requires a task id.");
+			printResponse(await sendIpcRequest({ type: "task_show", taskId }));
+			return;
+		}
+		if (action === "cancel") {
+			if (!taskId) throw new Error("Task cancel requires a run id.");
+			printResponse(await sendIpcRequest({ type: "task_cancel", runId: taskId }));
+			return;
+		}
+		if (action === "runs") {
+			printResponse(await sendIpcRequest({ type: "task_runs", taskId }));
+			return;
+		}
+		if (!taskId) throw new Error(`Task ${action ?? "command"} requires a task id.`);
+		if (action === "run") printResponse(await sendIpcRequest({ type: "task_run", taskId }));
+		else if (action === "pause" || action === "resume")
+			printResponse(await sendIpcRequest({ type: "task_pause", taskId, paused: action === "pause" }));
+		else if (action === "delete") printResponse(await sendIpcRequest({ type: "task_delete", taskId }));
+		else throw new Error(`Unknown task command: ${action ?? ""}`);
 		return;
 	}
 

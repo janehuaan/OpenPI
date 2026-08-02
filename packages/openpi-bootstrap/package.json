@@ -1,0 +1,29 @@
+{
+	"name": "@earendil-works/openpi-bootstrap",
+	"version": "0.80.8",
+	"description": "One-click enable OpenPI personal-agent extensions in user settings",
+	"type": "module",
+	"bin": {
+		"openpi-enable": "./src/cli.ts"
+	},
+	"keywords": [
+		"openpi",
+		"bootstrap"
+	],
+	"license": "MIT",
+	"files": [
+		"src",
+		"templates",
+		"README.md"
+	],
+	"scripts": {
+		"test": "vitest --run"
+	},
+	"devDependencies": {
+		"vitest": "4.1.9"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"private": true
+}

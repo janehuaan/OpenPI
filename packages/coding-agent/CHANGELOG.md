@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.80.8] - 2026-07-24
+
+### Fixed
+
+- Extension load failures (e.g. npm provider package auth 401) no longer hard-exit the process. RPC/desktop sessions continue without the failed extension instead of dying with `RPC process exited`.
+
 ### Breaking Changes
 
 - Replaced the SDK's `CreateAgentSessionOptions.authStorage` and `modelRegistry` options with the async `modelRuntime` option. `AuthStorage` and its storage backends are no longer exported; use `ModelRuntime` (or a custom pi-ai `CredentialStore`), or `readStoredCredential()` for one-off reads of auth.json.
@@ -12,6 +18,8 @@
 
 ### Added
 
+- Added RPC capability discovery and resource/package management for skills, extensions, tools, and extension-backed MCP adapters.
+- Added `pi task` commands for creating, inspecting, running, pausing, resuming, cancelling, and deleting persistent scheduled tasks with automatic orchestrator startup.
 - Added `ModelRuntime` as the canonical async SDK and internal model/auth facade while preserving the synchronous extension-facing `ModelRegistry` API. `ModelRuntime.create()` accepts any pi-ai `CredentialStore` through its `credentials` option.
 - Added provider-owned `/login` discovery directly from registered pi-ai providers, including ambient auth status and informational links.
 - Added file-backed dynamic catalogs in `models-store.json`, per-provider pi.dev catalog overlays, and Radius gateway support including offline migration from legacy credential-cached catalogs.
