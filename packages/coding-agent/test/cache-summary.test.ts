@@ -63,7 +63,14 @@ describe("computeCacheSummary", () => {
 				id: "b",
 				parentId: null,
 				timestamp: "2026-01-01T00:00:00.000Z",
-				message: { role: "toolResult", content: [{ type: "text", text: "out" }], timestamp: 2 },
+				message: {
+					role: "toolResult",
+					toolCallId: "call-1",
+					toolName: "read",
+					isError: false,
+					content: [{ type: "text", text: "out" }],
+					timestamp: 2,
+				},
 			},
 		];
 		const summary = computeCacheSummary(entries);
