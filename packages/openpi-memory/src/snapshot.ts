@@ -102,7 +102,9 @@ export function formatSelectiveSnapshot(
 			// Always expand digests; expand others when user asks for continuity or body is short
 			const shouldExpand = isDigest || continuity || (type === "project" && rawBody.length <= 1200);
 			if (!shouldExpand) continue;
-			const cleaned = stripTopicBoilerplate(rawBody).slice(0, isDigest || continuity ? 2500 : 600);
+			// Keep injected bodies compact: large per-turn injection dilutes the
+			// prompt-cache hit rate (cacheRead / (input + cacheRead + cacheWrite)).
+			const cleaned = stripTopicBoilerplate(rawBody).slice(0, isDigest || continuity ? 1200 : 400);
 			if (cleaned.length < 8) continue;
 			for (const bl of cleaned.split("\n")) {
 				if (bl.trim()) lines.push(`  ${bl}`);
