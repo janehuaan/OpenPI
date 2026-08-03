@@ -3172,21 +3172,28 @@ input.ui-command-input:focus-visible {
 .chat-statusbar {
 	display: flex;
 	justify-content: space-between;
-	align-items: center;
+	align-items: flex-start;
 	gap: 12px;
 	padding: 5px 16px;
 	border-top: 1px solid var(--border);
 	font-size: 11px;
 	color: var(--text-tertiary);
 	user-select: none;
-	flex-wrap: wrap;
 }
-.statusbar-left,
-.statusbar-right {
+.statusbar-left {
 	display: flex;
 	align-items: center;
 	gap: 14px;
 	min-width: 0;
+	flex-shrink: 0;
+}
+.statusbar-right {
+	display: flex;
+	align-items: center;
+	gap: 6px 14px;
+	flex-wrap: wrap;
+	min-width: 0;
+	justify-content: flex-end;
 }
 .statusbar-left span,
 .statusbar-right span {
@@ -3194,12 +3201,12 @@ input.ui-command-input:focus-visible {
 	align-items: center;
 	gap: 4px;
 	white-space: nowrap;
-	max-width: 220px;
+	max-width: 260px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 @media (max-width: 900px) {
 	.chat-statusbar { padding: 4px 12px; }
-	.statusbar-right { gap: 10px; }
-	.statusbar-right span { max-width: 130px; }
+	.statusbar-left { display: none; }
+	.statusbar-right span { max-width: 150px; }
 }

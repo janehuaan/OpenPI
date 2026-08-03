@@ -2118,6 +2118,8 @@ export function ChatSurface({
 		: undefined;
 	const fmtTokens = (n: number) =>
 		n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
+	const fmtCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+	const workspaceLabel = workspace ? workspace.split(/[\\/]/).pop() || workspace : "—";
 
 	return (
 		<section className="chat-surface">
@@ -2739,9 +2741,9 @@ export function ChatSurface({
 			</div>
 			<div className="chat-statusbar">
 				<div className="statusbar-left">
-					<span title="项目目录">
+					<span title={workspace ?? "项目目录"}>
 						<Folder size={13} />
-						{workspace ?? "—"}
+						{workspaceLabel}
 					</span>
 					<span title="当前模型">
 						<Cpu size={13} />
@@ -2753,8 +2755,8 @@ export function ChatSurface({
 					{avgHit !== undefined && <span title="平均命中率">均 {avgHit}%</span>}
 					{stats && <span title="会话 token">{fmtTokens(stats.tokens.total)} tok</span>}
 					{lastTotal > 0 && <span title="本次 token">+{fmtTokens(lastTotal)}</span>}
-					{lastCost > 0 && <span title="本次费用">${lastCost.toFixed(4)}</span>}
-					{stats && stats.cost > 0 && <span title="会话费用">${stats.cost.toFixed(4)}</span>}
+					{lastCost > 0 && <span title="本次费用">{fmtCost(lastCost)}</span>}
+					{stats && stats.cost > 0 && <span title="会话费用">共 {fmtCost(stats.cost)}</span>}
 					{stats && <span title="对话轮数">{stats.userMessages} 轮</span>}
 					{ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
 					{compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
