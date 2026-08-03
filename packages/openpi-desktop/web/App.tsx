@@ -43,6 +43,7 @@ import type {
 	ConversationModelOption,
 	ConversationSnapshot,
 	ConversationState,
+	ConversationStats,
 	ConversationUiResponse,
 	CreateTaskInput,
 	ImageContent,
@@ -61,6 +62,8 @@ export function App() {
 	}>({ checked: false, enabled: true, busy: false });
 	const [snapshot, setSnapshot] = useState(emptySnapshot);
 	const [conversation, setConversation] = useState<ConversationSnapshot>();
+	const [conversationStats, setConversationStats] = useState<ConversationStats>();
+	const [providerBalance, setProviderBalance] = useState<{ currency: string; totalBalance: number } | null>();
 	const [conversationModels, setConversationModels] = useState<ConversationModelOption[]>([]);
 	const [capabilities, setCapabilities] = useState<ConversationCapabilities>();
 	const [loadingCapabilities, setLoadingCapabilities] = useState(false);
@@ -257,6 +260,31 @@ export function App() {
 		return () => window.clearInterval(timer);
 	}, [refresh, setup.checked, setup.enabled, isStreaming]);
 
+	// Conversation stats + provider balance for the status bar.
+	useEffect(() => {
+		if (!selectedInstanceId) {
+			setConversationStats(undefined);
+			setProviderBalance(undefined);
+			return;
+		}
+		void desktopApi
+			.getConversationStats(selectedInstanceId)
+			.then(setConversationStats)
+			.catch(() => {});
+	}, [selectedInstanceId]);
+
+	useEffect(() => {
+		const provider = conversation?.state.model?.provider;
+		if (!provider) {
+			setProviderBalance(undefined);
+			return;
+		}
+		void desktopApi
+			.getProviderBalance(provider)
+			.then(setProviderBalance)
+			.catch(() => setProviderBalance(undefined));
+	}, [conversation?.state.model?.provider]);
+
 	useEffect(() => {
 		if (!setup.checked || !setup.enabled) return;
 		let disposed = false;
@@ -356,6 +384,9 @@ export function App() {
 					.catch((caught: unknown) => {
 						if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
 					});
+				void desktopApi.getConversationStats(payload.instanceId).then((stats) => {
+					if (!disposed && selectedInstanceIdRef.current === payload.instanceId) setConversationStats(stats);
+				});
 				return;
 			}
 			if (
@@ -1404,6 +1435,8 @@ export function App() {
 						workspace={activeAgentMode === "code" ? activeCodeWorkspace : selectedWorkspace}
 						conversation={conversation}
 						selectedInstance={selectedAgentInstance}
+						stats={conversationStats}
+						providerBalance={providerBalance}
 						optimisticMessage={
 							optimisticMessage &&
 							(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)

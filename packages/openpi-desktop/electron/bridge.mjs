@@ -406,6 +406,44 @@ export function registerBridge(ipcMain, getMainWindow) {
 		return result.canceled ? undefined : result.filePaths[0];
 	});
 
+	ipcMain.handle("openpi:get_conversation_stats", async (_e, { instanceId }) => {
+		const stats = rpcData(await rpc(instanceId, { type: "get_session_stats" }));
+		const settings = readSettingsJson();
+		return {
+			...stats,
+			compaction: {
+				reserveTokens: settings.compaction?.reserveTokens ?? 16384,
+				keepRecentTokens: settings.compaction?.keepRecentTokens ?? 30000,
+			},
+		};
+	});
+
+	ipcMain.handle("openpi:get_provider_balance", async (_e, { provider }) => {
+		try {
+			const modelsPath = join(agentDir(), "models.json");
+			if (!existsSync(modelsPath)) return null;
+			const providers = JSON.parse(readFileSync(modelsPath, "utf8"))?.providers ?? {};
+			const config = providers[provider];
+			if (!config || typeof config !== "object") return null;
+			const baseUrl = config.baseUrl;
+			const apiKey = config.apiKey;
+			if (typeof baseUrl !== "string" || typeof apiKey !== "string") return null;
+			const url = `${baseUrl.replace(/\/+$/, "")}/user/balance`;
+			const response = await fetch(url, {
+				headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
+				signal: AbortSignal.timeout(10_000),
+			});
+			if (!response.ok) return null;
+			const data = await response.json();
+			if (!data || typeof data !== "object") return null;
+			const infos = Array.isArray(data.balance_infos) ? data.balance_infos : [];
+			const usd = infos.find((i) => i?.currency === "USD") ?? infos[0];
+			return usd ? { currency: usd.currency ?? "USD", totalBalance: usd.total_balance ?? 0 } : null;
+		} catch {
+			return null;
+		}
+	});
+
 	ipcMain.handle("openpi:get_conversation", async (_e, { instanceId }) => {
 		if (!instanceId || typeof instanceId !== "string") {
 			throw new Error("缺少对话 instanceId");

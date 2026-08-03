@@ -10,6 +10,7 @@ import type {
 	ConversationModelOption,
 	ConversationSnapshot,
 	ConversationState,
+	ConversationStats,
 	ConversationUiResponse,
 	CreateConversationInput,
 	CreateTaskInput,
@@ -47,6 +48,9 @@ export const desktopApi = {
 	getSnapshot: (opts?: { includeStopped?: boolean }) =>
 		call<DesktopSnapshot>("get_snapshot", { includeStopped: Boolean(opts?.includeStopped) }),
 	getConversation: (instanceId: string) => call<ConversationSnapshot>("get_conversation", { instanceId }),
+	getConversationStats: (instanceId: string) => call<ConversationStats>("get_conversation_stats", { instanceId }),
+	getProviderBalance: (provider: string) =>
+		call<{ currency: string; totalBalance: number } | null>("get_provider_balance", { provider }),
 	getConversationModels: (instanceId: string) =>
 		call<ConversationModelOption[]>("get_conversation_models", { instanceId }),
 	getConversationCapabilities: (instanceId: string) =>

@@ -14,6 +14,7 @@ import {
 	CircleStop,
 	Clapperboard,
 	Clock3,
+	Cpu,
 	Database,
 	Download,
 	ExternalLink,
@@ -111,6 +112,7 @@ import type {
 	ConversationModelOption,
 	ConversationSnapshot,
 	ConversationState,
+	ConversationStats,
 	ConversationUiRequest,
 	ConversationUiResponse,
 	CreateTaskInput,
@@ -1406,6 +1408,8 @@ export function ChatSurface({
 	workspace,
 	conversation,
 	selectedInstance,
+	stats,
+	providerBalance,
 	optimisticMessage,
 	modelOptions,
 	loadingModels,
@@ -1429,6 +1433,8 @@ export function ChatSurface({
 	workspace?: string;
 	conversation?: ConversationSnapshot;
 	selectedInstance?: AgentInstance;
+	stats?: ConversationStats;
+	providerBalance?: { currency: string; totalBalance: number } | null;
 	optimisticMessage?: ConversationMessage;
 	modelOptions: ConversationModelOption[];
 	loadingModels: boolean;
@@ -2098,6 +2104,21 @@ export function ChatSurface({
 		draftInput.current?.focus();
 	}
 
+	// Status-bar metrics derived from session stats + the latest assistant message.
+	const lastAssistant = [...(conversation?.messages ?? [])].reverse().find((m) => m.role === "assistant" && m.usage);
+	const lastUsage = lastAssistant?.usage;
+	const lastTotal = lastUsage ? lastUsage.input + lastUsage.cacheRead + lastUsage.cacheWrite : 0;
+	const lastHit = lastTotal > 0 ? Math.round((lastUsage!.cacheRead / lastTotal) * 100) : undefined;
+	const avgHit =
+		stats && stats.tokens.total > 0 ? Math.round((stats.tokens.cacheRead / stats.tokens.total) * 100) : undefined;
+	const lastCost = lastUsage?.cost?.total ?? 0;
+	const ctxPercent = stats?.contextUsage ? Math.round(stats.contextUsage.percent * 100) : undefined;
+	const compactThreshold = stats?.compaction
+		? stats.compaction.reserveTokens + stats.compaction.keepRecentTokens
+		: undefined;
+	const fmtTokens = (n: number) =>
+		n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
+
 	return (
 		<section className="chat-surface">
 			<header className="surface-header">
@@ -2714,6 +2735,34 @@ export function ChatSurface({
 							)}
 						</div>
 					</div>
+				</div>
+			</div>
+			<div className="chat-statusbar">
+				<div className="statusbar-left">
+					<span title="项目目录">
+						<Folder size={13} />
+						{workspace ?? "—"}
+					</span>
+					<span title="当前模型">
+						<Cpu size={13} />
+						{conversation?.state.model?.id ?? "—"}
+					</span>
+				</div>
+				<div className="statusbar-right">
+					{lastHit !== undefined && <span title="本次命中率">本次 {lastHit}%</span>}
+					{avgHit !== undefined && <span title="平均命中率">均 {avgHit}%</span>}
+					{stats && <span title="会话 token">{fmtTokens(stats.tokens.total)} tok</span>}
+					{lastTotal > 0 && <span title="本次 token">+{fmtTokens(lastTotal)}</span>}
+					{lastCost > 0 && <span title="本次费用">${lastCost.toFixed(4)}</span>}
+					{stats && stats.cost > 0 && <span title="会话费用">${stats.cost.toFixed(4)}</span>}
+					{stats && <span title="对话轮数">{stats.userMessages} 轮</span>}
+					{ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
+					{compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
+					{providerBalance && (
+						<span title="账户余额">
+							余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}
+						</span>
+					)}
 				</div>
 			</div>
 		</section>

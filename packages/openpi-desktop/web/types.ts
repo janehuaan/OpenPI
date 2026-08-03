@@ -86,6 +86,40 @@ export interface ConversationMessage {
 	toolName?: string;
 	isError?: boolean;
 	errorMessage?: string;
+	usage?: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		cost?: { total: number };
+	};
+}
+
+export interface ConversationStats {
+	sessionFile?: string;
+	sessionId: string;
+	userMessages: number;
+	assistantMessages: number;
+	toolCalls: number;
+	toolResults: number;
+	totalMessages: number;
+	tokens: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		total: number;
+	};
+	cost: number;
+	contextUsage?: {
+		tokens: number;
+		contextWindow: number;
+		percent: number;
+	};
+	compaction?: {
+		reserveTokens: number;
+		keepRecentTokens: number;
+	};
 }
 
 export interface ImageContent {
@@ -99,6 +133,8 @@ export interface ConversationState {
 		provider?: string;
 		id?: string;
 		name?: string;
+		contextWindow?: number;
+		reasoning?: boolean;
 	};
 	thinkingLevel: ThinkingLevel;
 	isStreaming: boolean;
