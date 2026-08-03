@@ -23,7 +23,7 @@ function assistantEntry(id: string, usage: { input?: number; cacheRead?: number;
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 		},
-	};
+	} as SessionEntry;
 }
 
 describe("computeCacheSummary", () => {
