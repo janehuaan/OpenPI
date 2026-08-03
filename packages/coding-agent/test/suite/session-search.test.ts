@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,6 +37,7 @@ function labelLine(targetId: string, label: string, timestamp: string): string {
 async function runSearch(sessionDir: string, params: { query: string; limit?: number }) {
 	const tool = createSessionSearchToolDefinition();
 	const ctx = {
+		cwd: sessionDir,
 		sessionManager: { getSessionDir: () => sessionDir },
 	} as unknown as ExtensionContext;
 	const result = await tool.execute("call-1", params, undefined, undefined, ctx);
@@ -111,5 +112,32 @@ describe("session_search", () => {
 		const dir = makeTempDir();
 		const text = await runSearch(dir, { query: "anything" });
 		expect(text).toContain("No past conversation matched");
+	});
+
+	it("includes memory index entries from <cwd>/.pi/memory/MEMORY.md", async () => {
+		const dir = makeTempDir();
+		// Session files with unrelated content.
+		writeFileSync(
+			join(dir, "20260101_zzz.jsonl"),
+			messageLine("m1", "user", "Totally unrelated chat about weather.", "2026-01-01T10:00:00.000Z"),
+		);
+		// Memory index in the project directory.
+		mkdirSync(join(dir, ".pi", "memory"), { recursive: true });
+		writeFileSync(
+			join(dir, ".pi", "memory", "MEMORY.md"),
+			[
+				"# Memory Index",
+				"",
+				"## project",
+				"- [flutter-sandbox] Flutter sandbox runs in a docker container with the host cwd mounted at /work",
+				"",
+			].join("\n"),
+		);
+
+		const text = await runSearch(dir, { query: "flutter sandbox" });
+
+		expect(text).toContain("memory:project");
+		expect(text).toContain("[memory]");
+		expect(text).toContain("flutter-sandbox");
 	});
 });

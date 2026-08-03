@@ -136,8 +136,8 @@ describe("sub-agent", () => {
 		harness.setResponses([fauxAssistantMessage("result alpha"), fauxAssistantMessage("result beta")]);
 
 		const results = await harness.session.runSubAgentTasks([
-			{ description: "task A", prompt: "Say alpha", maxSteps: 1 },
-			{ description: "task B", prompt: "Say beta", maxSteps: 1 },
+			{ description: "task A", prompt: "Say alpha", maxSteps: 1, writePaths: ["alpha-dir"] },
+			{ description: "task B", prompt: "Say beta", maxSteps: 1, writePaths: ["beta-dir"] },
 		]);
 
 		expect(results).toHaveLength(2);
@@ -163,11 +163,34 @@ describe("sub-agent", () => {
 				description: `task ${index}`,
 				prompt: `Say r${index}`,
 				maxSteps: 1,
+				writePaths: [`dir-${index}`],
 			})),
 			2,
 		);
 
 		expect(results).toHaveLength(4);
 		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("runSubAgentTasks fails the preflight for overlapping write scopes", async () => {
+		const harness = await makeHarness();
+
+		await expect(
+			harness.session.runSubAgentTasks([
+				{ description: "task A", prompt: "Do A", writePaths: ["shared"] },
+				{ description: "task B", prompt: "Do B", writePaths: ["shared/sub"] },
+			]),
+		).rejects.toThrow(/preflight failed/);
+	});
+
+	it("runSubAgentTasks fails the preflight when a task omits write_paths", async () => {
+		const harness = await makeHarness();
+
+		await expect(
+			harness.session.runSubAgentTasks([
+				{ description: "task A", prompt: "Do A", writePaths: ["a"] },
+				{ description: "task B", prompt: "Do B" },
+			]),
+		).rejects.toThrow(/preflight failed/);
 	});
 });

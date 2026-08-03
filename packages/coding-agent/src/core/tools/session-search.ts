@@ -9,6 +9,7 @@
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
@@ -151,6 +152,7 @@ function textResult(text: string): AgentToolResult<undefined> {
 }
 
 function shortTimestamp(timestamp: string): string {
+	if (!timestamp) return "";
 	const date = new Date(timestamp);
 	if (Number.isNaN(date.getTime())) return timestamp;
 	return date.toLocaleString("zh-CN", {
@@ -159,6 +161,50 @@ function shortTimestamp(timestamp: string): string {
 		hour: "2-digit",
 		minute: "2-digit",
 	});
+}
+
+interface MemoryEntry {
+	type: string;
+	key: string;
+	value: string;
+}
+
+function parseMemoryIndex(content: string): MemoryEntry[] {
+	const entries: MemoryEntry[] = [];
+	let currentType: string | null = null;
+	for (const line of content.split("\n")) {
+		const heading = line.match(/^##\s+(user|feedback|project|lesson)$/i);
+		if (heading) {
+			currentType = heading[1].toLowerCase();
+			continue;
+		}
+		if (!currentType) continue;
+		const match = line.match(/^\s*-\s*\[([^\]]+)\]\s*(.+)$/);
+		if (match) entries.push({ type: currentType, key: match[1], value: match[2].trim() });
+	}
+	return entries;
+}
+
+/** Memory index entries (project + user-global) as searchable docs. */
+function loadMemoryDocs(cwd: string): SessionDoc[] {
+	const paths = [join(cwd, ".pi", "memory", "MEMORY.md"), join(homedir(), ".pi", "memory", "MEMORY.md")];
+	const docs: SessionDoc[] = [];
+	for (const file of paths) {
+		try {
+			const entries = parseMemoryIndex(readFileSync(file, "utf8"));
+			for (const entry of entries) {
+				docs.push({
+					file: `memory:${entry.type}`,
+					timestamp: "",
+					role: "memory",
+					text: `[${entry.key}] ${entry.value}`,
+				});
+			}
+		} catch {
+			// Index absent or unreadable — skip this source.
+		}
+	}
+	return docs;
 }
 
 export function createSessionSearchToolDefinition(): ToolDefinition<typeof SessionSearchParams, undefined> {
@@ -192,6 +238,7 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 				labelsByFileTarget.set(file, labels);
 				allDocs.push(...docs);
 			}
+			allDocs.push(...loadMemoryDocs(ctx.cwd));
 
 			const queryTokens = tokenize(params.query);
 			if (queryTokens.length === 0) {
@@ -222,10 +269,11 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 
 			const lines: string[] = [];
 			for (const hit of hits) {
-				const fileBase = hit.doc.file.split("/").pop() ?? hit.doc.file;
-				lines.push(
-					`### ${hit.label ?? fileBase} · ${shortTimestamp(hit.doc.timestamp)} · score=${hit.score.toFixed(1)}`,
-				);
+				const fileBase = hit.doc.file.startsWith("memory:")
+					? hit.doc.file
+					: (hit.doc.file.split("/").pop() ?? hit.doc.file);
+				const time = shortTimestamp(hit.doc.timestamp);
+				lines.push(`### ${hit.label ?? fileBase}${time ? ` · ${time}` : ""} · score=${hit.score.toFixed(1)}`);
 				const snippet = hit.doc.text.length > 500 ? `${hit.doc.text.slice(0, 500)}…` : hit.doc.text;
 				lines.push(`[${hit.doc.role}] ${snippet}`);
 				for (const context of hit.context) lines.push(context);

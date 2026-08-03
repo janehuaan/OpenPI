@@ -2801,6 +2801,12 @@ export class AgentSession {
 					description: Type.String({ description: "Short label for this task" }),
 					prompt: Type.String({ description: "Task prompt for the sub-agent" }),
 					maxSteps: Type.Optional(Type.Integer({ description: "Max turns for this sub-agent (default 20)" })),
+					write_paths: Type.Optional(
+						Type.Array(Type.String(), {
+							description:
+								"Write scope: files/dirs this task may edit or write. Tasks with overlapping scopes (or no scope at all) fail the preflight and nothing runs.",
+						}),
+					),
 				}),
 				{ minItems: 2, maxItems: 8, description: "2-8 independent tasks to run in parallel" },
 			),
@@ -2812,18 +2818,35 @@ export class AgentSession {
 			name: PARALLEL_TASKS_TOOL_NAME,
 			label: "Parallel Tasks",
 			description:
-				"Run 2-8 independent sub-agent tasks concurrently and collect each result. Use when several independent investigations or edits can proceed in parallel. One failure does not cancel the others.",
+				"Run 2-8 independent sub-agent tasks concurrently and collect each result. Each task must declare a write_paths scope; overlapping or whole-workspace claims fail the preflight and nothing starts. Use for independent investigations or edits on disjoint paths. One failure does not cancel the others.",
 			promptSnippet: "parallel_tasks - run multiple sub-agent tasks concurrently",
+			promptGuidelines: [
+				"Declare disjoint write_paths for every parallel task; tasks that edit overlapping files (or omit write_paths) are rejected before anything runs.",
+			],
 			parameters: parallelTasksParamsSchema,
 			execute: async (_toolCallId, params) => {
-				const results = await this.runSubAgentTasks(
-					params.tasks.map((task) => ({
-						description: task.description,
-						prompt: task.prompt,
-						maxSteps: task.maxSteps,
-					})),
-					params.maxParallel ?? 4,
-				);
+				let results: Awaited<ReturnType<typeof this.runSubAgentTasks>>;
+				try {
+					results = await this.runSubAgentTasks(
+						params.tasks.map((task) => ({
+							description: task.description,
+							prompt: task.prompt,
+							maxSteps: task.maxSteps,
+							writePaths: task.write_paths,
+						})),
+						params.maxParallel ?? 4,
+					);
+				} catch (error) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: error instanceof Error ? error.message : String(error),
+							},
+						],
+						details: undefined,
+					};
+				}
 				const sections = results.map(({ description, result }) => {
 					const note = result.stoppedEarly ? ` [stopped after ${result.turns} turns]` : ` [${result.turns} turns]`;
 					return `### ${description}${note}\n${result.answer}`;
