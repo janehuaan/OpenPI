@@ -49,6 +49,7 @@ import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
+import { computeCacheSummary } from "./cache-stats.ts";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -695,6 +696,10 @@ export class AgentSession {
 		// Notify all listeners
 		this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
 
+		if (event.type === "agent_end") {
+			this._maybeLogCacheSummary();
+		}
+
 		// Handle session persistence
 		if (event.type === "message_end") {
 			// Check if this is a custom message from extensions
@@ -873,6 +878,27 @@ export class AgentSession {
 				isError: event.isError,
 			};
 			await this._extensionRunner.emit(extensionEvent);
+		}
+	}
+
+	/**
+	 * Log a prompt-cache summary to stderr after each agent run (noisy misses
+	 * only), so users can see when the context cache is not being held.
+	 */
+	private _maybeLogCacheSummary(): void {
+		try {
+			const entries = this.sessionManager.getEntries();
+			const summary = computeCacheSummary(entries);
+			if (!summary.hitRate || summary.requests < 2) return;
+			const pct = Math.round(summary.hitRate * 100);
+			if (pct < 90) {
+				const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
+				console.error(
+					`[cache] ${pct}% hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens across ${summary.requests} requests`,
+				);
+			}
+		} catch {
+			// Best-effort telemetry.
 		}
 	}
 

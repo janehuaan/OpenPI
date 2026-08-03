@@ -139,6 +139,37 @@ export function computeCacheWaste(entries: SessionEntry[], models: ModelPriceSou
 	return scan(entries, models).totals;
 }
 
+/** Aggregate prompt-cache usage across all assistant messages in a session. */
+export function computeCacheSummary(entries: SessionEntry[]): {
+	requests: number;
+	inputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	hitRate: number | undefined; // cacheRead / (input + cacheRead + cacheWrite), undefined when no usage
+} {
+	let requests = 0;
+	let input = 0;
+	let cacheRead = 0;
+	let cacheWrite = 0;
+	for (const entry of entries) {
+		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+		const usage = (entry.message as AssistantMessage).usage;
+		if (!usage) continue;
+		requests++;
+		input += usage.input;
+		cacheRead += usage.cacheRead;
+		cacheWrite += usage.cacheWrite;
+	}
+	const total = input + cacheRead + cacheWrite;
+	return {
+		requests,
+		inputTokens: input,
+		cacheReadTokens: cacheRead,
+		cacheWriteTokens: cacheWrite,
+		hitRate: total > 0 ? cacheRead / total : undefined,
+	};
+}
+
 /**
  * All counted cache misses across a session, keyed by the assistant message
  * (by reference) that paid for them. Used to re-derive transcript notices when

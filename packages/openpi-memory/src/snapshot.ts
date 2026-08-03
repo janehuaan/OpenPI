@@ -1,19 +1,20 @@
-import { queryEntries } from "./store.ts";
 import type { MemoryConfig, MemoryIndexEntry, MemoryType } from "./types.ts";
 
 /**
  * Build the per-turn inject set (proactive cross-session recall):
  * 1. Always pin user/feedback (or config.pinTypes)
  * 2. Prefer recent session-* digests when present
- * 3. Hybrid-rank remaining against the user prompt (no user request needed)
+ * 3. Fill the rest in a stable order (type + key) so the injected prefix is
+ *    byte-stable across turns — relevance ranking per prompt would break the
+ *    provider prompt cache and lose earlier context in long sessions
  * 4. Cap at maxSnapshotEntries
  */
 export function selectSnapshotEntries(
 	entries: MemoryIndexEntry[],
-	prompt: string | undefined,
+	_prompt: string | undefined,
 	config: MemoryConfig,
-	bodyResolver?: (entry: MemoryIndexEntry) => string,
-	memoryDirectory?: string,
+	_bodyResolver?: (entry: MemoryIndexEntry) => string,
+	_memoryDirectory?: string,
 ): MemoryIndexEntry[] {
 	if (entries.length === 0) return [];
 	const pinSet = new Set<MemoryType>(config.pinTypes);
@@ -36,24 +37,16 @@ export function selectSnapshotEntries(
 	// Newest session digests first (cross-chat “what we were doing”)
 	for (const entry of [...digests].reverse()) push(entry);
 
-	const q = prompt?.trim();
-	// Continuity questions: force digests already pinned; also rank everything on prompt
-	if (q && rest.length > 0) {
-		const ranked = queryEntries(rest, q, undefined, bodyResolver, {
-			memoryDirectory,
-			hybrid: config.vectorSearch,
-			alpha: config.vectorAlpha,
-			limit: max * 3,
-			searchArchive: config.searchArchive,
-			archiveSearchLimit: config.archiveSearchLimit,
-			archiveSearchMinScore: config.archiveSearchMinScore,
-		});
-		for (const entry of ranked) push(entry);
-	}
-
-	// Fill remaining budget with newest project/lesson entries
+	// Continuity questions are answered from the pinned digests above;
+	// everything else uses a stable ordering (type + key) so the injected
+	// prefix is byte-stable across turns — unstable relevance ranking breaks
+	// the provider prompt cache and makes long sessions lose earlier context.
 	if (selected.length < max) {
-		for (const entry of [...rest].reverse()) push(entry);
+		const ordered = [...rest].sort((a, b) => {
+			const byType = a.type.localeCompare(b.type);
+			return byType !== 0 ? byType : a.key.localeCompare(b.key);
+		});
+		for (const entry of ordered) push(entry);
 	}
 
 	return selected;
@@ -86,8 +79,7 @@ export function formatSelectiveSnapshot(
 		"Do not claim ignorance of items listed below.",
 		"When the user asks where you left off, answer from session digests and project notes below with concrete names/facts.",
 		"Do not store information derivable from git/codebase.",
-		`Showing ${selected.length} of ${totalAvailable} index entries` +
-			(prompt?.trim() ? " ranked for the current user message." : "."),
+		`Showing ${selected.length} of ${totalAvailable} index entries.`,
 		"",
 	];
 
