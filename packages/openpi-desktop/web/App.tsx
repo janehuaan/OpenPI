@@ -36,6 +36,7 @@ import {
 	normalizeConversationModels,
 } from "./lib/helpers";
 import { hashForView, initialView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
+const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
 import type {
 	AgentInstance,
 	AgentMode,
@@ -196,6 +197,14 @@ export function App() {
 		if (codeWorkspace) window.localStorage.setItem("openpi-code-workspace", codeWorkspace);
 		else window.localStorage.removeItem("openpi-code-workspace");
 	}, [codeWorkspace]);
+
+	// Persist the selected conversation so a reload (Cmd/Ctrl+R) keeps focus
+	// on the project you were working on instead of falling back to the
+	// first online instance.
+	useEffect(() => {
+		if (selectedInstanceId) window.localStorage.setItem(SELECTED_INSTANCE_KEY, selectedInstanceId);
+		else window.localStorage.removeItem(SELECTED_INSTANCE_KEY);
+	}, [selectedInstanceId]);
 
 	useEffect(() => {
 		window.localStorage.setItem(VIEW_STORAGE_KEY, view);
