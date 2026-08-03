@@ -19,7 +19,8 @@ function assistantEntry(id: string, usage: { input?: number; cacheRead?: number;
 				cacheRead: usage.cacheRead ?? 0,
 				cacheWrite: usage.cacheWrite ?? 0,
 				output: 10,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				total: (usage.input ?? 1000) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0) + 10,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 		},
 	};
