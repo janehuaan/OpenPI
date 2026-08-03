@@ -42,16 +42,22 @@ import { transformMessages } from "./transform-messages.ts";
 
 /**
  * Resolve cache retention preference.
- * Defaults to "short" and uses PI_CACHE_RETENTION for backward compatibility.
+ * Defaults to "long" (1h) so idle gaps between turns do not silently drop
+ * the prompt cache; set PI_CACHE_RETENTION=short for the legacy 5-minute
+ * behavior.
  */
 function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
 	if (cacheRetention) {
 		return cacheRetention;
 	}
-	if (getProviderEnvValue("PI_CACHE_RETENTION", env) === "long") {
-		return "long";
+	const value = getProviderEnvValue("PI_CACHE_RETENTION", env);
+	if (value === "short") {
+		return "short";
 	}
-	return "short";
+	if (value === "none") {
+		return "none";
+	}
+	return "long";
 }
 
 function getCacheControl(

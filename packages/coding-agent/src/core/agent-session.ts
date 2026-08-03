@@ -882,23 +882,21 @@ export class AgentSession {
 	}
 
 	/**
-	 * Log a prompt-cache summary to stderr after each agent run (noisy misses
-	 * only), so users can see when the context cache is not being held.
+	 * Log a prompt-cache summary to stderr after each agent run so the hit
+	 * rate is always visible. hitRate is cacheRead / (input + cacheRead +
+	 * cacheWrite): per-turn new content (user message, injections, tool
+	 * results) is cacheWrite and lowers the rate in short sessions by design.
 	 */
 	private _maybeLogCacheSummary(): void {
 		try {
 			const entries = this.sessionManager.getEntries();
 			const summary = computeCacheSummary(entries);
-			if (!summary.hitRate || summary.requests < 2) return;
+			if (!summary.hitRate || summary.requests < 1) return;
 			const pct = Math.round(summary.hitRate * 100);
-			// With a stable prompt prefix the cache should hit ~100% between
-			// model switches/compactions; anything below 97% is a real leak.
-			if (pct < 97) {
-				const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
-				console.error(
-					`[cache] ${pct}% hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens across ${summary.requests} requests`,
-				);
-			}
+			const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
+			console.error(
+				`[cache] ${pct}% hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens across ${summary.requests} requests`,
+			);
 		} catch {
 			// Best-effort telemetry.
 		}
