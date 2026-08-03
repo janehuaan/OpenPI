@@ -533,6 +533,16 @@ export function registerBridge(ipcMain, getMainWindow) {
 
 	ipcMain.handle("openpi:set_conversation_model", async (_e, { instanceId, provider, modelId }) => {
 		await rpc(instanceId, { type: "set_model", provider, modelId });
+		// Persist as the global default so new conversations inherit the
+		// last-selected model instead of falling back to the initial default.
+		try {
+			const settings = readSettingsJson();
+			settings.defaultProvider = provider;
+			settings.defaultModel = modelId;
+			writeSettingsJson(settings);
+		} catch {
+			// Session-level selection succeeded; default persistence is best-effort.
+		}
 		return rpcData(await rpc(instanceId, { type: "get_state" }));
 	});
 
