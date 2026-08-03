@@ -122,6 +122,30 @@ export interface ConversationStats {
 	};
 }
 
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export interface TodoEvidence {
+	kind: "verification" | "review" | "diff" | "files" | "manual";
+	summary: string;
+	command?: string;
+	paths?: string[];
+}
+
+export interface TodoItem {
+	content: string;
+	status: TodoStatus;
+	activeForm?: string;
+	level?: 0 | 1;
+	result?: string;
+	evidence?: TodoEvidence[];
+}
+
+export interface TodoState {
+	updatedAt: string;
+	sessionId?: string;
+	todos: TodoItem[];
+}
+
 export interface ImageContent {
 	type: "image";
 	data: string;

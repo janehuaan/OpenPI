@@ -10,6 +10,7 @@
 ### Added
 
 - Added Work and Code conversation modes with a native project-directory picker and mode-aware conversation starters.
+- Task list panel in chat: shows the agent's persistent task list (progress, current step, per-item status) from `<cwd>/.pi/todos/current.json`, polling every 2s while a conversation is open.
 - Added bundled local Whisper streaming speech-to-text in the chat composer with automatic session continuation and native microphone permissions.
 
 ### Fixed

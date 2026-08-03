@@ -418,6 +418,14 @@ export function registerBridge(ipcMain, getMainWindow) {
 		};
 	});
 
+	ipcMain.handle("openpi:get_session_todo", async (_e, { instanceId }) => {
+		try {
+			return rpcData(await rpc(instanceId, { type: "get_session_todo" }));
+		} catch {
+			return null;
+		}
+	});
+
 	ipcMain.handle("openpi:get_provider_balance", async (_e, { provider }) => {
 		try {
 			const modelsPath = join(agentDir(), "models.json");

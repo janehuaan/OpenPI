@@ -127,4 +127,47 @@ describe("sub-agent", () => {
 		expect(answer).toContain("partial result");
 		expect(answer).toContain("stopped after 1 turns");
 	});
+
+	it("runSubAgentTasks runs multiple sub-agents in parallel and collects results", async () => {
+		const harness = await makeHarness();
+
+		// Two independent one-turn sub-agents; the faux provider serves its
+		// preset responses in order, regardless of completion order.
+		harness.setResponses([fauxAssistantMessage("result alpha"), fauxAssistantMessage("result beta")]);
+
+		const results = await harness.session.runSubAgentTasks([
+			{ description: "task A", prompt: "Say alpha", maxSteps: 1 },
+			{ description: "task B", prompt: "Say beta", maxSteps: 1 },
+		]);
+
+		expect(results).toHaveLength(2);
+		const answers = results.map(({ result }) => result.answer).join(" ");
+		expect(answers).toContain("result alpha");
+		expect(answers).toContain("result beta");
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("runSubAgentTasks respects the maxParallel concurrency cap", async () => {
+		const harness = await makeHarness();
+
+		// 4 tasks with a cap of 2 → served in two waves of 2.
+		harness.setResponses([
+			fauxAssistantMessage("r1"),
+			fauxAssistantMessage("r2"),
+			fauxAssistantMessage("r3"),
+			fauxAssistantMessage("r4"),
+		]);
+
+		const results = await harness.session.runSubAgentTasks(
+			[1, 2, 3, 4].map((index) => ({
+				description: `task ${index}`,
+				prompt: `Say r${index}`,
+				maxSteps: 1,
+			})),
+			2,
+		);
+
+		expect(results).toHaveLength(4);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
 });

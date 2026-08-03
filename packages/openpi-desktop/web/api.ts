@@ -21,6 +21,7 @@ import type {
 	TaskDefinition,
 	TaskRun,
 	ThinkingLevel,
+	TodoState,
 } from "./types";
 
 type OpenPiBridge = {
@@ -49,6 +50,7 @@ export const desktopApi = {
 		call<DesktopSnapshot>("get_snapshot", { includeStopped: Boolean(opts?.includeStopped) }),
 	getConversation: (instanceId: string) => call<ConversationSnapshot>("get_conversation", { instanceId }),
 	getConversationStats: (instanceId: string) => call<ConversationStats>("get_conversation_stats", { instanceId }),
+	getSessionTodo: (instanceId: string) => call<TodoState | null>("get_session_todo", { instanceId }),
 	getProviderBalance: (provider: string) =>
 		call<{ currency: string; totalBalance: number } | null>("get_provider_balance", { provider }),
 	getConversationModels: (instanceId: string) =>

@@ -27,6 +27,7 @@ import {
 	writeRawStdout,
 } from "../../core/output-guard.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import { loadTodoState } from "../../core/tools/todo.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
@@ -653,6 +654,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "get_session_stats": {
 				const stats = session.getSessionStats();
 				return success(id, "get_session_stats", stats);
+			}
+
+			case "get_session_todo": {
+				const cwd = session.sessionManager.getCwd();
+				return success(id, "get_session_todo", loadTodoState(cwd) ?? null);
 			}
 
 			case "export_html": {

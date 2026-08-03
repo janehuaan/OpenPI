@@ -18,6 +18,7 @@ import {
 	SecuritySurface,
 	TasksSurface,
 } from "./components/surfaces";
+import { TodoPanel } from "./components/todo-panel";
 import {
 	type CapabilityTab,
 	type ExtensionNotice,
@@ -36,7 +37,9 @@ import {
 	normalizeConversationModels,
 } from "./lib/helpers";
 import { hashForView, initialView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
+
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
+
 import type {
 	AgentInstance,
 	AgentMode,
@@ -50,6 +53,7 @@ import type {
 	ImageContent,
 	TaskRun,
 	ThinkingLevel,
+	TodoState,
 } from "./types";
 
 export function App() {
@@ -64,6 +68,7 @@ export function App() {
 	const [snapshot, setSnapshot] = useState(emptySnapshot);
 	const [conversation, setConversation] = useState<ConversationSnapshot>();
 	const [conversationStats, setConversationStats] = useState<ConversationStats>();
+	const [todoState, setTodoState] = useState<TodoState>();
 	const [providerBalance, setProviderBalance] = useState<{ currency: string; totalBalance: number } | null>();
 	const [conversationModels, setConversationModels] = useState<ConversationModelOption[]>([]);
 	const [capabilities, setCapabilities] = useState<ConversationCapabilities>();
@@ -293,6 +298,29 @@ export function App() {
 			.then(setProviderBalance)
 			.catch(() => setProviderBalance(undefined));
 	}, [conversation?.state.model?.provider]);
+
+	// Task list panel: poll while a conversation is selected (todo changes come
+	// from agent tool calls, which emit no dedicated desktop event).
+	useEffect(() => {
+		if (!selectedInstanceId || view !== "chat") {
+			setTodoState(undefined);
+			return;
+		}
+		let disposed = false;
+		const poll = () =>
+			void desktopApi
+				.getSessionTodo(selectedInstanceId)
+				.then((state) => {
+					if (!disposed) setTodoState(state ?? undefined);
+				})
+				.catch(() => {});
+		poll();
+		const timer = window.setInterval(poll, 2000);
+		return () => {
+			disposed = true;
+			window.clearInterval(timer);
+		};
+	}, [selectedInstanceId, view]);
 
 	useEffect(() => {
 		if (!setup.checked || !setup.enabled) return;
@@ -1439,47 +1467,51 @@ export function App() {
 						<span>加载中…</span>
 					</div>
 				) : view === "chat" ? (
-					<ChatSurface
-						mode={activeAgentMode}
-						workspace={activeAgentMode === "code" ? activeCodeWorkspace : selectedWorkspace}
-						conversation={conversation}
-						selectedInstance={selectedAgentInstance}
-						stats={conversationStats}
-						providerBalance={providerBalance}
-						optimisticMessage={
-							optimisticMessage &&
-							(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
-								? optimisticMessage.message
-								: undefined
-						}
-						modelOptions={conversationModels}
-						loadingModels={loadingConversationModels}
-						draftRequest={composerDraftRequest}
-						configuring={busy === "set-model" || busy === "set-thinking"}
-						sending={busy === "send-message"}
-						onSend={sendMessage}
-						onError={setError}
-						onModelChange={(model) =>
-							void updateConversationConfiguration("set-model", (instanceId) =>
-								desktopApi.setConversationModel(instanceId, model.provider, model.id),
-							)
-						}
-						onThinkingLevelChange={(level) =>
-							void updateConversationConfiguration("set-thinking", (instanceId) =>
-								desktopApi.setConversationThinkingLevel(instanceId, level),
-							)
-						}
-						onAbort={() =>
-							selectedInstanceId && perform("abort", () => desktopApi.abortConversation(selectedInstanceId))
-						}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onToggleContext={() => setContextOpen((current) => !current)}
-						slashCommands={conversationCommands}
-						turnMeta={turnMeta && turnMeta.instanceId === selectedInstanceId ? turnMeta.message : undefined}
-						onRemember={(text) => rememberFromChat(text)}
-						onCreateTaskFromChat={openTaskFromChat}
-						onNavigate={(next) => setView(next)}
-					/>
+					<>
+						<TodoPanel state={todoState} />
+						<ChatSurface
+							mode={activeAgentMode}
+							workspace={activeAgentMode === "code" ? activeCodeWorkspace : selectedWorkspace}
+							conversation={conversation}
+							selectedInstance={selectedAgentInstance}
+							stats={conversationStats}
+							providerBalance={providerBalance}
+							optimisticMessage={
+								optimisticMessage &&
+								(optimisticMessage.instanceId === undefined ||
+									optimisticMessage.instanceId === selectedInstanceId)
+									? optimisticMessage.message
+									: undefined
+							}
+							modelOptions={conversationModels}
+							loadingModels={loadingConversationModels}
+							draftRequest={composerDraftRequest}
+							configuring={busy === "set-model" || busy === "set-thinking"}
+							sending={busy === "send-message"}
+							onSend={sendMessage}
+							onError={setError}
+							onModelChange={(model) =>
+								void updateConversationConfiguration("set-model", (instanceId) =>
+									desktopApi.setConversationModel(instanceId, model.provider, model.id),
+								)
+							}
+							onThinkingLevelChange={(level) =>
+								void updateConversationConfiguration("set-thinking", (instanceId) =>
+									desktopApi.setConversationThinkingLevel(instanceId, level),
+								)
+							}
+							onAbort={() =>
+								selectedInstanceId && perform("abort", () => desktopApi.abortConversation(selectedInstanceId))
+							}
+							onOpenSidebar={() => setSidebarOpen(true)}
+							onToggleContext={() => setContextOpen((current) => !current)}
+							slashCommands={conversationCommands}
+							turnMeta={turnMeta && turnMeta.instanceId === selectedInstanceId ? turnMeta.message : undefined}
+							onRemember={(text) => rememberFromChat(text)}
+							onCreateTaskFromChat={openTaskFromChat}
+							onNavigate={(next) => setView(next)}
+						/>
+					</>
 				) : view === "tasks" ? (
 					<TasksSurface
 						tasks={tasks}

@@ -103,10 +103,21 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-import { type RunSubAgentTaskOptions, runSubAgentTask, SUB_AGENT_TOOL_NAME } from "./sub-agent.ts";
+import {
+	type ParallelSubAgentTask,
+	type ParallelSubAgentTaskResult,
+	type RunSubAgentTaskOptions,
+	runSubAgentTask,
+	runSubAgentTasks as runSubAgentTasksImpl,
+	SUB_AGENT_TOOL_NAME,
+} from "./sub-agent.ts";
+
+const PARALLEL_TASKS_TOOL_NAME = "parallel_tasks";
+
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createDockerBashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { formatTodos, loadTodoState } from "./tools/todo.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 
 // ============================================================================
@@ -448,6 +459,30 @@ export class AgentSession {
 			: result.answer;
 	}
 
+	/**
+	 * Run several sub-agent tasks in parallel (bounded by `maxParallel`).
+	 * Each sub-agent is independent; one failure does not cancel the others.
+	 */
+	async runSubAgentTasks(tasks: ParallelSubAgentTask[], maxParallel = 4): Promise<ParallelSubAgentTaskResult[]> {
+		const tools = Array.from(this._toolRegistry.values()).filter(
+			(tool) => tool.name !== SUB_AGENT_TOOL_NAME && tool.name !== PARALLEL_TASKS_TOOL_NAME,
+		);
+		return await runSubAgentTasksImpl(
+			{
+				parent: this.agent,
+				tools,
+				security: this._builtinSecurity,
+				confirm: async (reason) => {
+					const ui = this._extensionUIContext;
+					if (ui?.confirm === undefined) return false;
+					return await ui.confirm("Security confirmation (sub-agent)", reason);
+				},
+			},
+			tasks,
+			{ maxParallel },
+		);
+	}
+
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
 		apiKey: string;
 		headers?: Record<string, string>;
@@ -511,6 +546,13 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			// Task list changed → refresh system prompt so the model sees new status
+			// on the next turn (todo_list is read-only and needs no refresh).
+			if (toolCall.name === "todo_write" || toolCall.name === "complete_step") {
+				const validToolNames = Array.from(this._toolRegistry.keys());
+				this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
+				this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
+			}
 			// Builtin security gate runs before extension handlers: zero-config baseline.
 			const security = this._builtinSecurity;
 			if (security) {
@@ -1169,8 +1211,16 @@ export class AgentSession {
 
 		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
 		const loaderAppendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
-		const appendSystemPrompt =
-			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
+		// Inject the persistent task list so the model always sees current progress.
+		const todoState = loadTodoState(this._cwd);
+		const todoBlock = todoState?.todos.some((item) => item.status !== "completed")
+			? `## Current task list\n\n${formatTodos(todoState)}`
+			: undefined;
+		const appendParts = [
+			...(loaderAppendSystemPrompt.length > 0 ? [loaderAppendSystemPrompt.join("\n\n")] : []),
+			...(todoBlock ? [todoBlock] : []),
+		];
+		const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 
@@ -2743,6 +2793,45 @@ export class AgentSession {
 			},
 		};
 		this._baseToolDefinitions.set(SUB_AGENT_TOOL_NAME, subAgentTool);
+
+		// Parallel sub-agents: run 2-8 independent tasks concurrently.
+		const parallelTasksParamsSchema = Type.Object({
+			tasks: Type.Array(
+				Type.Object({
+					description: Type.String({ description: "Short label for this task" }),
+					prompt: Type.String({ description: "Task prompt for the sub-agent" }),
+					maxSteps: Type.Optional(Type.Integer({ description: "Max turns for this sub-agent (default 20)" })),
+				}),
+				{ minItems: 2, maxItems: 8, description: "2-8 independent tasks to run in parallel" },
+			),
+			maxParallel: Type.Optional(
+				Type.Integer({ default: 4, minimum: 1, maximum: 8, description: "Concurrency cap (default 4)" }),
+			),
+		});
+		const parallelTasksTool: ToolDefinition<typeof parallelTasksParamsSchema> = {
+			name: PARALLEL_TASKS_TOOL_NAME,
+			label: "Parallel Tasks",
+			description:
+				"Run 2-8 independent sub-agent tasks concurrently and collect each result. Use when several independent investigations or edits can proceed in parallel. One failure does not cancel the others.",
+			promptSnippet: "parallel_tasks - run multiple sub-agent tasks concurrently",
+			parameters: parallelTasksParamsSchema,
+			execute: async (_toolCallId, params) => {
+				const results = await this.runSubAgentTasks(
+					params.tasks.map((task) => ({
+						description: task.description,
+						prompt: task.prompt,
+						maxSteps: task.maxSteps,
+					})),
+					params.maxParallel ?? 4,
+				);
+				const sections = results.map(({ description, result }) => {
+					const note = result.stoppedEarly ? ` [stopped after ${result.turns} turns]` : ` [${result.turns} turns]`;
+					return `### ${description}${note}\n${result.answer}`;
+				});
+				return { content: [{ type: "text", text: sections.join("\n\n") }], details: undefined };
+			},
+		};
+		this._baseToolDefinitions.set(PARALLEL_TASKS_TOOL_NAME, parallelTasksTool);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {

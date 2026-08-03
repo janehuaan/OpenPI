@@ -81,11 +81,18 @@ export {
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
+import { createCodeIndexToolDefinition } from "./code-index.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
+import { createSessionSearchToolDefinition } from "./session-search.ts";
+import {
+	createCompleteStepToolDefinition,
+	createTodoListToolDefinition,
+	createTodoWriteToolDefinition,
+} from "./todo.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { createWebFetchToolDefinition } from "./web-fetch.ts";
 import { createWebSearchToolDefinition } from "./web-search.ts";
@@ -93,7 +100,21 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls" | "web_fetch" | "web_search";
+export type ToolName =
+	| "read"
+	| "bash"
+	| "edit"
+	| "write"
+	| "grep"
+	| "find"
+	| "ls"
+	| "web_fetch"
+	| "web_search"
+	| "todo_write"
+	| "todo_list"
+	| "complete_step"
+	| "session_search"
+	| "code_index";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -104,6 +125,11 @@ export const allToolNames: Set<ToolName> = new Set([
 	"ls",
 	"web_fetch",
 	"web_search",
+	"todo_write",
+	"todo_list",
+	"complete_step",
+	"session_search",
+	"code_index",
 ]);
 
 export interface ToolsOptions {
@@ -136,6 +162,16 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createWebFetchToolDefinition();
 		case "web_search":
 			return createWebSearchToolDefinition();
+		case "todo_write":
+			return createTodoWriteToolDefinition();
+		case "todo_list":
+			return createTodoListToolDefinition();
+		case "complete_step":
+			return createCompleteStepToolDefinition();
+		case "session_search":
+			return createSessionSearchToolDefinition();
+		case "code_index":
+			return createCodeIndexToolDefinition();
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -161,6 +197,16 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return wrapToolDefinition(createWebFetchToolDefinition());
 		case "web_search":
 			return wrapToolDefinition(createWebSearchToolDefinition());
+		case "todo_write":
+			return wrapToolDefinition(createTodoWriteToolDefinition());
+		case "todo_list":
+			return wrapToolDefinition(createTodoListToolDefinition());
+		case "complete_step":
+			return wrapToolDefinition(createCompleteStepToolDefinition());
+		case "session_search":
+			return wrapToolDefinition(createSessionSearchToolDefinition());
+		case "code_index":
+			return wrapToolDefinition(createCodeIndexToolDefinition());
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -197,6 +243,11 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		ls: createLsToolDefinition(cwd, options?.ls),
 		web_fetch: createWebFetchToolDefinition(),
 		web_search: createWebSearchToolDefinition(),
+		todo_write: createTodoWriteToolDefinition(),
+		todo_list: createTodoListToolDefinition(),
+		complete_step: createCompleteStepToolDefinition(),
+		session_search: createSessionSearchToolDefinition(),
+		code_index: createCodeIndexToolDefinition(),
 	};
 }
 
@@ -229,5 +280,10 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		ls: createLsTool(cwd, options?.ls),
 		web_fetch: wrapToolDefinition(createWebFetchToolDefinition()),
 		web_search: wrapToolDefinition(createWebSearchToolDefinition()),
+		todo_write: wrapToolDefinition(createTodoWriteToolDefinition()),
+		todo_list: wrapToolDefinition(createTodoListToolDefinition()),
+		complete_step: wrapToolDefinition(createCompleteStepToolDefinition()),
+		session_search: wrapToolDefinition(createSessionSearchToolDefinition()),
+		code_index: wrapToolDefinition(createCodeIndexToolDefinition()),
 	};
 }
