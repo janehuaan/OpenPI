@@ -891,7 +891,9 @@ export class AgentSession {
 			const summary = computeCacheSummary(entries);
 			if (!summary.hitRate || summary.requests < 2) return;
 			const pct = Math.round(summary.hitRate * 100);
-			if (pct < 90) {
+			// With a stable prompt prefix the cache should hit ~100% between
+			// model switches/compactions; anything below 97% is a real leak.
+			if (pct < 97) {
 				const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
 				console.error(
 					`[cache] ${pct}% hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens across ${summary.requests} requests`,
