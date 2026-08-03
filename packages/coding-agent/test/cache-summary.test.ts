@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { computeCacheSummary } from "../../src/core/cache-stats.ts";
-import type { SessionEntry } from "../../src/core/session-manager.ts";
+import { computeCacheSummary } from "../src/core/cache-stats.ts";
+import type { SessionEntry } from "../src/core/session-manager.ts";
 
 function assistantEntry(id: string, usage: { input?: number; cacheRead?: number; cacheWrite?: number }): SessionEntry {
 	return {
