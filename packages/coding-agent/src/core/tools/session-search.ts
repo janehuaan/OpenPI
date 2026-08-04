@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { embeddingCachePath, embedTexts, loadEmbeddingConfig, rankBySimilarity } from "./embedding.ts";
 
 interface SessionDoc {
 	file: string;
@@ -145,6 +146,12 @@ const SessionSearchParams = Type.Object({
 	limit: Type.Optional(
 		Type.Integer({ default: 5, minimum: 1, maximum: 10, description: "Max hits to return (default 5)" }),
 	),
+	rerank: Type.Optional(
+		Type.Union([Type.Literal("auto"), Type.Literal("on"), Type.Literal("off")], {
+			description:
+				"Semantic reranking: auto (default) uses embeddings when OPENPI_EMBEDDING_API_KEY is set, on forces it, off disables it",
+		}),
+	),
 });
 
 function textResult(text: string): AgentToolResult<undefined> {
@@ -249,8 +256,25 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 				return textResult(`No past conversation matched "${params.query}".`);
 			}
 
+			// Semantic rerank (optional): BM25 candidates → embedding cosine
+			// reorder. Any embedding failure degrades to plain BM25.
+			let ranked = scored.slice(0, 30);
+			const embeddingConfig = loadEmbeddingConfig();
+			const useSemantic = params.rerank === "on" || (params.rerank !== "off" && embeddingConfig !== null);
+			if (useSemantic && embeddingConfig) {
+				const vectors = await embedTexts(
+					[params.query, ...ranked.map((entry) => entry.doc.text)],
+					embeddingConfig,
+					embeddingCachePath(ctx.cwd),
+				);
+				if (vectors && vectors.length === ranked.length + 1 && vectors[0].length > 0) {
+					const order = rankBySimilarity(vectors[0], vectors.slice(1));
+					ranked = order.map((index) => ranked[index]).filter((entry) => entry !== undefined);
+				}
+			}
+
 			const hits: SessionSearchHit[] = [];
-			for (const { doc, score } of scored.slice(0, params.limit ?? 5)) {
+			for (const { doc, score } of ranked.slice(0, params.limit ?? 5)) {
 				// Find the doc's position within its own file for context.
 				const fileDocs = allDocs.filter((candidate) => candidate.file === doc.file);
 				const index = fileDocs.findIndex(

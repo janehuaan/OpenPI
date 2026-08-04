@@ -193,4 +193,73 @@ describe("sub-agent", () => {
 			]),
 		).rejects.toThrow(/preflight failed/);
 	});
+
+	it("registers the background job tools on the session", async () => {
+		const harness = await makeHarness();
+		const toolNames = harness.session.getAllTools().map((tool) => tool.name);
+		expect(toolNames).toContain("submit_job");
+		expect(toolNames).toContain("wait_job");
+	});
+
+	it("submitJob returns a job id immediately and waitForJob collects the result", async () => {
+		const harness = await makeHarness();
+
+		harness.setResponses([fauxAssistantMessage("background result")]);
+		const jobId = await harness.session.submitJob("Do background work", {
+			description: "bg test",
+			maxSteps: 1,
+		});
+
+		expect(jobId).toMatch(/^job-/);
+
+		const state = await harness.session.waitForJob(jobId, 15000);
+		expect(state.status).toBe("done");
+		expect(state.result).toContain("background result");
+		expect(state.turns).toBe(1);
+	});
+
+	it("wait_job tool formats done/failed/running states", async () => {
+		const { createWaitJobToolDefinition } = await import("../../src/core/background-jobs.ts");
+
+		const done = createWaitJobToolDefinition(async () => ({
+			id: "job-1",
+			createdAt: "",
+			description: "",
+			status: "done" as const,
+			result: "the answer",
+			turns: 3,
+		}));
+		const doneText = (await done.execute("c", { job_id: "job-1" }, undefined, undefined, undefined as never)).content
+			.map((part) => (part.type === "text" ? part.text : ""))
+			.join("");
+		expect(doneText).toContain("done (3 turns)");
+		expect(doneText).toContain("the answer");
+
+		const failed = createWaitJobToolDefinition(async () => ({
+			id: "job-2",
+			createdAt: "",
+			description: "",
+			status: "failed" as const,
+			error: "boom",
+		}));
+		const failedText = (
+			await failed.execute("c", { job_id: "job-2" }, undefined, undefined, undefined as never)
+		).content
+			.map((part) => (part.type === "text" ? part.text : ""))
+			.join("");
+		expect(failedText).toContain("failed: boom");
+
+		const running = createWaitJobToolDefinition(async () => ({
+			id: "job-3",
+			createdAt: "",
+			description: "",
+			status: "running" as const,
+		}));
+		const runningText = (
+			await running.execute("c", { job_id: "job-3", timeout_s: 1 }, undefined, undefined, undefined as never)
+		).content
+			.map((part) => (part.type === "text" ? part.text : ""))
+			.join("");
+		expect(runningText).toContain("still running");
+	});
 });

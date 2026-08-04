@@ -14,7 +14,9 @@
 - Docker sandbox for bash: `settings.json` `bashSandbox.dockerImage` runs every command in a container with the host cwd mounted at `/work`.
 - Task list tools: `todo_write` / `todo_list` / `complete_step` maintain a persistent structured task list at `<cwd>/.pi/todos/current.json`, injected into the system prompt; `complete_step` requires completion evidence (verification/review/diff/files/manual) and rejects evidence-free completions.
 - `parallel_tasks` tool: run 2-8 independent sub-agent tasks concurrently (bounded by `maxParallel`, default 4). Each task must declare disjoint `write_paths`; overlapping or whole-workspace claims fail the preflight and nothing runs. edit/write targets outside a task's scope are rejected at runtime.
-- `session_search` tool: BM25 retrieval over past session transcripts and memory index entries (project `<cwd>/.pi/memory/MEMORY.md` + user-global `~/.pi/memory/MEMORY.md`), message-level hits with surrounding context and session labels.
+- `session_search` tool: BM25 retrieval over past session transcripts and memory index entries (project `<cwd>/.pi/memory/MEMORY.md` + user-global `~/.pi/memory/MEMORY.md`), message-level hits with surrounding context and session labels. Optional semantic reranking when `OPENPI_EMBEDDING_API_KEY` is set (`rerank: auto|on|off`), embedding cache at `<cwd>/.pi/embeddings-cache.json`; any embedding failure degrades to plain BM25.
+- `submit_job` / `wait_job` tools: start a sub-agent task in the background (returns a job id without blocking the turn, persisted to `<cwd>/.pi/jobs/<jobId>.json`) and collect the result later with a timeout.
+- Runtime tools (`sub_agent`, `parallel_tasks`, `submit_job`, `wait_job`) are now active by default in the SDK (previously omitted from the default activation list).
 - `code_index` tool: regex-based symbol outline and search (TS/JS, Go, Python, Rust, Java/Kotlin, C/C++, Ruby) with kind filters; skips build/SCM directories.
 
 ## [0.80.8] - 2026-07-24

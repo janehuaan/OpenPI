@@ -114,6 +114,13 @@ import {
 
 const PARALLEL_TASKS_TOOL_NAME = "parallel_tasks";
 
+import {
+	type BackgroundJobState,
+	createSubmitJobToolDefinition,
+	createWaitJobToolDefinition,
+	startBackgroundJob,
+	waitForJob as waitForJobImpl,
+} from "./background-jobs.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createDockerBashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
@@ -463,6 +470,49 @@ export class AgentSession {
 	 * Run several sub-agent tasks in parallel (bounded by `maxParallel`).
 	 * Each sub-agent is independent; one failure does not cancel the others.
 	 */
+	/**
+	 * Start a sub-agent job in the background; resolves with the job id
+	 * immediately (does not block the current turn). Collect with waitForJob.
+	 */
+	async submitJob(
+		task: string,
+		options: { description: string; maxSteps?: number; tools?: string[]; writePaths?: string[] } = {
+			description: "",
+		},
+	): Promise<string> {
+		return await startBackgroundJob(
+			this._cwd,
+			{
+				parent: this.agent,
+				tools: Array.from(this._toolRegistry.values()).filter(
+					(tool) =>
+						tool.name !== SUB_AGENT_TOOL_NAME &&
+						tool.name !== PARALLEL_TASKS_TOOL_NAME &&
+						tool.name !== "submit_job" &&
+						tool.name !== "wait_job",
+				),
+				security: this._builtinSecurity,
+				confirm: async (reason) => {
+					const ui = this._extensionUIContext;
+					if (ui?.confirm === undefined) return false;
+					return await ui.confirm("Security confirmation (sub-agent)", reason);
+				},
+			},
+			{
+				description: options.description,
+				task,
+				maxSteps: options.maxSteps,
+				tools: options.tools,
+				writePaths: options.writePaths,
+			},
+		);
+	}
+
+	/** Wait (up to timeoutMs) for a background job to finish and return its state. */
+	async waitForJob(jobId: string, timeoutMs = 120_000): Promise<BackgroundJobState> {
+		return await waitForJobImpl(this._cwd, jobId, timeoutMs);
+	}
+
 	async runSubAgentTasks(tasks: ParallelSubAgentTask[], maxParallel = 4): Promise<ParallelSubAgentTaskResult[]> {
 		const tools = Array.from(this._toolRegistry.values()).filter(
 			(tool) => tool.name !== SUB_AGENT_TOOL_NAME && tool.name !== PARALLEL_TASKS_TOOL_NAME,
@@ -2855,6 +2905,22 @@ export class AgentSession {
 			},
 		};
 		this._baseToolDefinitions.set(PARALLEL_TASKS_TOOL_NAME, parallelTasksTool);
+
+		// Background jobs: submit_job starts a sub-agent without blocking the
+		// turn; wait_job collects the result later.
+		const submitJobTool = createSubmitJobToolDefinition(async (_ctx, options) => {
+			return await this.submitJob(options.task, {
+				description: options.description,
+				maxSteps: options.maxSteps,
+				writePaths: options.writePaths,
+			});
+		});
+		this._baseToolDefinitions.set("submit_job", submitJobTool);
+
+		const waitJobTool = createWaitJobToolDefinition(async (jobId, timeoutMs) => {
+			return await this.waitForJob(jobId, timeoutMs);
+		});
+		this._baseToolDefinitions.set("wait_job", waitJobTool);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {
