@@ -8,6 +8,7 @@
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
 import type { ModelsJsonProvider } from "./model-config.ts";
+import { ensureModelsDevLoaded, lookupModelsDevMeta } from "./models-dev.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 32_768;
@@ -65,12 +66,13 @@ function parseOpenAiModelsResponse(providerId: string, api: Api, baseUrl: string
 			: Array.isArray(value)
 				? (value as Array<{ id?: unknown }>)
 				: [];
-	return data
+	const models = data
 		.filter((entry): entry is { id: string } => typeof entry?.id === "string")
 		.map((entry) => {
 			// Inherit accurate metadata from the built-in catalog when the id
 			// matches a known model; fall back to server-provided hints, then
-			// conservative defaults.
+			// conservative defaults (models.dev lookup happens lazily in
+			// refreshModels, which awaits the shared index before parsing).
 			const known = getBuiltinModelById(entry.id);
 			const contextHint = contextWindowFromEntry(entry as Record<string, unknown>);
 			return {
@@ -86,6 +88,50 @@ function parseOpenAiModelsResponse(providerId: string, api: Api, baseUrl: string
 				maxTokens: known?.maxTokens ?? DEFAULT_MAX_TOKENS,
 			};
 		});
+	return applyModelsDevMeta(models);
+}
+
+/**
+ * Overlay models.dev metadata on discovery results for ids that neither the
+ * built-in catalog nor the server annotated. Synchronous: the models.dev
+ * index is loaded (once, cached 24h) by refreshModels before parsing.
+ */
+function applyModelsDevMeta(models: Model<Api>[]): Model<Api>[] {
+	let changed = false;
+	const merged = models.map((model) => {
+		const meta = lookupModelsDevMeta(model.id);
+		if (!meta) return model;
+		// models.dev fills only discovery defaults — never overrides built-in
+		// catalog values or server-provided hints.
+		const hasKnownCost = model.cost.input !== 0 || model.cost.output !== 0;
+		if (
+			model.contextWindow !== DEFAULT_CONTEXT_WINDOW &&
+			model.maxTokens !== DEFAULT_MAX_TOKENS &&
+			(hasKnownCost || meta.costInput === undefined) &&
+			(model.reasoning || meta.reasoning !== true)
+		) {
+			return model;
+		}
+		changed = true;
+		return {
+			...model,
+			reasoning: model.reasoning || (meta.reasoning ?? false),
+			cost: hasKnownCost
+				? model.cost
+				: {
+						input: meta.costInput ?? model.cost.input,
+						output: meta.costOutput ?? model.cost.output,
+						cacheRead: meta.costCacheRead ?? model.cost.cacheRead,
+						cacheWrite: meta.costCacheWrite ?? model.cost.cacheWrite,
+					},
+			contextWindow:
+				model.contextWindow !== DEFAULT_CONTEXT_WINDOW
+					? model.contextWindow
+					: (meta.context ?? model.contextWindow),
+			maxTokens: model.maxTokens !== DEFAULT_MAX_TOKENS ? model.maxTokens : (meta.output ?? model.maxTokens),
+		};
+	});
+	return changed ? merged : models;
 }
 
 /**
@@ -150,7 +196,10 @@ export function withModelsJsonEndpoint(provider: Provider, config: ModelsJsonPro
 						await context.store.write({ models: dynamicModels, checkedAt });
 						throw new Error(`Model discovery failed for ${provider.id}: ${response.status}`);
 					}
-					const refreshed = parseOpenAiModelsResponse(
+					// Load the models.dev index once (cached 24h) so unknown ids
+					// can inherit accurate metadata; any failure keeps defaults.
+					await ensureModelsDevLoaded();
+					const refreshed = await parseOpenAiModelsResponse(
 						provider.id,
 						(config.api as Api) ?? "openai-responses",
 						config.baseUrl,
@@ -158,6 +207,7 @@ export function withModelsJsonEndpoint(provider: Provider, config: ModelsJsonPro
 					);
 					if (context.signal?.aborted) return;
 					dynamicModels = refreshed;
+					await context.store.write({ models: refreshed, checkedAt });
 					await context.store.write({ models: refreshed, checkedAt });
 				} finally {
 					inflightRefresh = undefined;
