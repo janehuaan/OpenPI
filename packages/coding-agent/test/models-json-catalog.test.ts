@@ -243,7 +243,13 @@ describe("withModelsJsonEndpoint", () => {
 	it("applies manually verified aliases for private model ids", async () => {
 		globalThis.fetch = vi.fn(async () => {
 			return new Response(
-				JSON.stringify({ object: "list", data: [{ id: "agnes-2.5-pro-alpha", object: "model" }] }),
+				JSON.stringify({
+					object: "list",
+					data: [
+						{ id: "agnes-2.5-pro-alpha", object: "model" },
+						{ id: "agnes-2.5-pro", object: "model" },
+					],
+				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
 			);
 		}) as unknown as typeof fetch;
@@ -251,12 +257,13 @@ describe("withModelsJsonEndpoint", () => {
 		const provider = withModelsJsonEndpoint(makeProvider(), makeConfig());
 		await provider.refreshModels?.(makeRefreshContext());
 
-		const model = provider.getModels()[0];
-		expect(model.contextWindow).toBe(1_000_000);
-		expect(model.maxTokens).toBe(128_000);
-		expect(model.reasoning).toBe(true);
-		expect(model.cost?.input).toBeCloseTo(0.45, 6);
-		expect(model.cost?.output).toBeCloseTo(0.9, 6);
-		expect(model.cost?.cacheRead).toBeCloseTo(0.0038, 6);
+		for (const model of provider.getModels()) {
+			expect(model.contextWindow).toBe(1_000_000);
+			expect(model.maxTokens).toBe(128_000);
+			expect(model.reasoning).toBe(true);
+			expect(model.cost?.input).toBeCloseTo(0.45, 6);
+			expect(model.cost?.output).toBeCloseTo(0.9, 6);
+			expect(model.cost?.cacheRead).toBeCloseTo(0.0038, 6);
+		}
 	});
 });

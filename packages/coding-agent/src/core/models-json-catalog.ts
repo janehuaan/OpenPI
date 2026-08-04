@@ -30,6 +30,16 @@ const MANUAL_META_ALIASES: Record<string, ModelsDevMeta> = {
 		costOutput: 0.9,
 		costCacheRead: 0.0038,
 	},
+	// SapiensAI Agnes 2.5 Pro (GA) — same generation/spec as the alpha
+	// (user-confirmed 2026-08-04); no independent public entry exists.
+	"agnes-2.5-pro": {
+		context: 1_000_000,
+		output: 128_000,
+		reasoning: true,
+		costInput: 0.45,
+		costOutput: 0.9,
+		costCacheRead: 0.0038,
+	},
 };
 
 /**
