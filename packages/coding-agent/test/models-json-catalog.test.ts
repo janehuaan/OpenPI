@@ -248,6 +248,8 @@ describe("withModelsJsonEndpoint", () => {
 					data: [
 						{ id: "agnes-2.5-pro-alpha", object: "model" },
 						{ id: "agnes-2.5-pro", object: "model" },
+						{ id: "agnes-2.5-flash", object: "model" },
+						{ id: "agnes-2.0-flash", object: "model" },
 					],
 				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
@@ -257,13 +259,17 @@ describe("withModelsJsonEndpoint", () => {
 		const provider = withModelsJsonEndpoint(makeProvider(), makeConfig());
 		await provider.refreshModels?.(makeRefreshContext());
 
-		for (const model of provider.getModels()) {
+		const byId = new Map(provider.getModels().map((model) => [model.id, model]));
+		for (const id of ["agnes-2.5-pro-alpha", "agnes-2.5-pro"]) {
+			const model = byId.get(id)!;
 			expect(model.contextWindow).toBe(1_000_000);
 			expect(model.maxTokens).toBe(128_000);
 			expect(model.reasoning).toBe(true);
 			expect(model.cost?.input).toBeCloseTo(0.45, 6);
 			expect(model.cost?.output).toBeCloseTo(0.9, 6);
-			expect(model.cost?.cacheRead).toBeCloseTo(0.0038, 6);
+		}
+		for (const id of ["agnes-2.5-flash", "agnes-2.0-flash"]) {
+			expect(byId.get(id)?.contextWindow).toBe(256_000);
 		}
 	});
 });

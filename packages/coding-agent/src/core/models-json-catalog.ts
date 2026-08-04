@@ -40,6 +40,12 @@ const MANUAL_META_ALIASES: Record<string, ModelsDevMeta> = {
 		costOutput: 0.9,
 		costCacheRead: 0.0038,
 	},
+	// Agnes flash series — context window inferred by probing the live
+	// gateway (user-confirmed 2026-08-04): 2.5-flash accepts 195k tokens,
+	// fails at 260k; 2.0-flash accepts 130k. Both set to 256k (matches the
+	// same-generation SenseNova flash at 262144). Not official values.
+	"agnes-2.5-flash": { context: 256_000 },
+	"agnes-2.0-flash": { context: 256_000 },
 };
 
 /**
