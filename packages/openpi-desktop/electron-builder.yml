@@ -21,6 +21,8 @@ extraResources:
     to: ggml-silero-v6.2.0.bin
   - from: native/whisper-NOTICES.txt
     to: whisper-NOTICES.txt
+  - from: build/embedding
+    to: embedding
 # Runtime node_modules is copied in afterPack (builder ignores **/node_modules by default)
 afterPack: scripts/after-pack.cjs
 extraMetadata:

@@ -14,7 +14,14 @@ import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { searchVectorStore, upsertVectorStore, type VectorStoreDoc } from "../vector-store.ts";
+import {
+	type EmbedBatchFn,
+	localEmbedBatch,
+	searchVectorStore,
+	upsertVectorStore,
+	type VectorStoreDoc,
+} from "../vector-store.ts";
+import { embeddingCachePath, embedTexts, loadEmbeddingConfig } from "./embedding.ts";
 
 interface SessionDoc {
 	file: string;
@@ -271,8 +278,18 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 					text: doc.text,
 					timestamp: doc.timestamp || undefined,
 				}));
-				upsertVectorStore(ctx.cwd, vectorDocs);
-				const vectorHits = searchVectorStore(ctx.cwd, params.query, 30);
+				// Embedder: real embeddings (remote API or local llama-server)
+				// when configured, otherwise the zero-dependency hash embedder.
+				const embeddingConfig = loadEmbeddingConfig();
+				let embed: EmbedBatchFn = localEmbedBatch;
+				if (embeddingConfig) {
+					embed = async (texts) => {
+						const vectors = await embedTexts(texts, embeddingConfig, embeddingCachePath(ctx.cwd));
+						return vectors ?? [];
+					};
+				}
+				await upsertVectorStore(ctx.cwd, vectorDocs, embed);
+				const vectorHits = await searchVectorStore(ctx.cwd, params.query, 30, embed);
 				if (vectorHits.length > 0) {
 					const maxBm25 = Math.max(...scored.map((entry) => entry.score), 1e-9);
 					const bm25ByText = new Map<string, number>();

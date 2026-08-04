@@ -15,6 +15,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { localEmbedding } from "./tools/embedding.ts";
 
+/** Batch embedder: returns one vector per input text, in order. */
+export type EmbedBatchFn = (texts: string[]) => Float32Array[] | Promise<Float32Array[]>;
+
+/** Local hash embedder as a batch function (zero-dependency fallback). */
+export function localEmbedBatch(texts: string[]): Float32Array[] {
+	return texts.map((text) => localEmbedding(text));
+}
+
 export interface VectorStoreDoc {
 	/** Stable document id: `${source}:${entryId}` — dedupes across refreshes. */
 	id: string;
@@ -87,16 +95,17 @@ function saveStore(file: string, docs: Map<string, StoredVectorDoc>): void {
  * re-embedded; docs no longer in the input are dropped. Returns the number
  * of docs added or updated.
  */
-export function upsertVectorStore(
+export async function upsertVectorStore(
 	cwd: string,
 	docs: VectorStoreDoc[],
-	embed: (text: string) => Float32Array = localEmbedding,
-): { upserted: number; total: number } {
+	embed: EmbedBatchFn = localEmbedBatch,
+): Promise<{ upserted: number; total: number }> {
 	const file = vectorStorePath(cwd);
 	const store = loadStore(file);
 
+	// Batch-embed only the new/changed docs (fingerprint dedupe).
+	const pending: Array<{ doc: VectorStoreDoc; text: string; fingerprint: string }> = [];
 	const inputIds = new Set<string>();
-	let upserted = 0;
 	for (const doc of docs) {
 		const text = doc.text.length > MAX_TEXT_LENGTH ? doc.text.slice(0, MAX_TEXT_LENGTH) : doc.text;
 		if (text.length === 0) continue;
@@ -104,9 +113,15 @@ export function upsertVectorStore(
 		const fingerprint = fingerprintOf(text);
 		const existing = store.get(doc.id);
 		if (existing && existing.fingerprint === fingerprint) continue;
-		const vector = Array.from(embed(text));
-		store.set(doc.id, { ...doc, text, fingerprint, vector });
-		upserted += 1;
+		pending.push({ doc, text, fingerprint });
+	}
+	if (pending.length > 0) {
+		const vectors = await embed(pending.map((entry) => entry.text));
+		if (vectors.length !== pending.length) return { upserted: 0, total: store.size };
+		for (let i = 0; i < pending.length; i++) {
+			const { doc, text, fingerprint } = pending[i];
+			store.set(doc.id, { ...doc, text, fingerprint, vector: Array.from(vectors[i]) });
+		}
 	}
 
 	// Drop documents that no longer exist in the sources.
@@ -122,11 +137,11 @@ export function upsertVectorStore(
 			if (trimmed.size >= MAX_DOCS) break;
 		}
 		saveStore(file, trimmed);
-		return { upserted, total: trimmed.size };
+		return { upserted: pending.length, total: trimmed.size };
 	}
 
 	saveStore(file, store);
-	return { upserted, total: store.size };
+	return { upserted: pending.length, total: store.size };
 }
 
 export interface VectorSearchHit {
@@ -139,15 +154,17 @@ export interface VectorSearchHit {
 }
 
 /** Cosine-similarity search over the whole persisted store. */
-export function searchVectorStore(
+export async function searchVectorStore(
 	cwd: string,
 	query: string,
 	limit: number,
-	embed: (text: string) => Float32Array = localEmbedding,
-): VectorSearchHit[] {
+	embed: EmbedBatchFn = localEmbedBatch,
+): Promise<VectorSearchHit[]> {
 	const store = loadStore(vectorStorePath(cwd));
 	if (store.size === 0) return [];
-	const queryVector = embed(query);
+	const vectors = await embed([query]);
+	if (vectors.length === 0) return [];
+	const queryVector = vectors[0];
 	const results: Array<{ hit: VectorSearchHit; sim: number }> = [];
 	for (const doc of store.values()) {
 		const vector = new Float32Array(doc.vector);

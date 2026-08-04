@@ -47,6 +47,14 @@ describe("embedding", () => {
 		expect(custom?.model).toBe("custom-embed");
 	});
 
+	it("loadEmbeddingConfig supports local mode without an API key", () => {
+		const local = loadEmbeddingConfig({ OPENPI_EMBEDDING_LOCAL: "1" });
+		expect(local).not.toBeNull();
+		expect(local?.apiKey).toBe("local");
+		expect(local?.baseUrl).toContain("127.0.0.1:18080");
+		expect(loadEmbeddingConfig({ OPENPI_EMBEDDING_LOCAL: "0" })).toBeNull();
+	});
+
 	it("embedTexts posts to the embeddings endpoint and returns vectors", async () => {
 		const dir = makeTempDir();
 		const calls: Array<{ url: string; body: unknown }> = [];

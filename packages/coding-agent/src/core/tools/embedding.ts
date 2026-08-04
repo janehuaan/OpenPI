@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ensureLocalEmbeddingServer, LOCAL_EMBEDDING_BASE_URL } from "../local-embedding-server.ts";
 
 export interface EmbeddingConfig {
 	apiKey: string;
@@ -19,6 +20,15 @@ export interface EmbeddingConfig {
 }
 
 export function loadEmbeddingConfig(env: NodeJS.ProcessEnv = process.env): EmbeddingConfig | null {
+	// Local mode (OPENPI_EMBEDDING_LOCAL=1): spawn/attach to a llama.cpp
+	// llama-server on this machine — no API key required.
+	if (env.OPENPI_EMBEDDING_LOCAL !== undefined && env.OPENPI_EMBEDDING_LOCAL !== "0") {
+		return {
+			apiKey: "local",
+			baseUrl: LOCAL_EMBEDDING_BASE_URL,
+			model: env.OPENPI_EMBEDDING_MODEL ?? "local-bge",
+		};
+	}
 	const apiKey = env.OPENPI_EMBEDDING_API_KEY;
 	if (!apiKey) return null;
 	return {
@@ -67,6 +77,11 @@ export async function embedTexts(
 	cachePath?: string,
 ): Promise<Float32Array[] | null> {
 	if (texts.length === 0) return [];
+	// Local mode: make sure the llama-server is up before calling it.
+	if (config.apiKey === "local") {
+		const ensured = ensureLocalEmbeddingServer();
+		if (ensured && !(await ensured)) return null;
+	}
 	const cache = cachePath ? loadCache(cachePath) : new Map<string, number[]>();
 	const unique = Array.from(new Set(texts));
 	const missing: string[] = [];
