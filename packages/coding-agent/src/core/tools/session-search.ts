@@ -14,7 +14,13 @@ import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { embeddingCachePath, embedTexts, loadEmbeddingConfig, rankBySimilarity } from "./embedding.ts";
+import {
+	embeddingCachePath,
+	embedTexts,
+	loadEmbeddingConfig,
+	rankByLocalSimilarity,
+	rankBySimilarity,
+} from "./embedding.ts";
 
 interface SessionDoc {
 	file: string;
@@ -260,15 +266,24 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 			// reorder. Any embedding failure degrades to plain BM25.
 			let ranked = scored.slice(0, 30);
 			const embeddingConfig = loadEmbeddingConfig();
-			const useSemantic = params.rerank === "on" || (params.rerank !== "off" && embeddingConfig !== null);
-			if (useSemantic && embeddingConfig) {
-				const vectors = await embedTexts(
-					[params.query, ...ranked.map((entry) => entry.doc.text)],
-					embeddingConfig,
-					embeddingCachePath(ctx.cwd),
-				);
-				if (vectors && vectors.length === ranked.length + 1 && vectors[0].length > 0) {
-					const order = rankBySimilarity(vectors[0], vectors.slice(1));
+			const useSemantic = params.rerank === "on" || params.rerank !== "off";
+			if (useSemantic) {
+				if (embeddingConfig) {
+					const vectors = await embedTexts(
+						[params.query, ...ranked.map((entry) => entry.doc.text)],
+						embeddingConfig,
+						embeddingCachePath(ctx.cwd),
+					);
+					if (vectors && vectors.length === ranked.length + 1 && vectors[0].length > 0) {
+						const order = rankBySimilarity(vectors[0], vectors.slice(1));
+						ranked = order.map((index) => ranked[index]).filter((entry) => entry !== undefined);
+					}
+				} else {
+					// Zero-dependency local hashing embedding: no API key needed.
+					const order = rankByLocalSimilarity(
+						params.query,
+						ranked.map((entry) => entry.doc.text),
+					);
 					ranked = order.map((index) => ranked[index]).filter((entry) => entry !== undefined);
 				}
 			}

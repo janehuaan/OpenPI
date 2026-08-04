@@ -116,8 +116,11 @@ const PARALLEL_TASKS_TOOL_NAME = "parallel_tasks";
 
 import {
 	type BackgroundJobState,
+	createListJobsToolDefinition,
 	createSubmitJobToolDefinition,
 	createWaitJobToolDefinition,
+	listJobs as listJobsImpl,
+	recoverInterruptedJobs,
 	startBackgroundJob,
 	waitForJob as waitForJobImpl,
 } from "./background-jobs.ts";
@@ -2907,7 +2910,9 @@ export class AgentSession {
 		this._baseToolDefinitions.set(PARALLEL_TASKS_TOOL_NAME, parallelTasksTool);
 
 		// Background jobs: submit_job starts a sub-agent without blocking the
-		// turn; wait_job collects the result later.
+		// turn; wait_job collects the result later; list_jobs shows all jobs.
+		// Jobs left running by a previous process can never finish — fail them.
+		recoverInterruptedJobs(this._cwd);
 		const submitJobTool = createSubmitJobToolDefinition(async (_ctx, options) => {
 			return await this.submitJob(options.task, {
 				description: options.description,
@@ -2921,6 +2926,9 @@ export class AgentSession {
 			return await this.waitForJob(jobId, timeoutMs);
 		});
 		this._baseToolDefinitions.set("wait_job", waitJobTool);
+
+		const listJobsTool = createListJobsToolDefinition(() => listJobsImpl(this._cwd));
+		this._baseToolDefinitions.set("list_jobs", listJobsTool);
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (options.flagValues) {

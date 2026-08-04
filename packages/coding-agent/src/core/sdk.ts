@@ -254,7 +254,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	];
 	// Runtime tools registered by the session itself (not in the ToolName
 	// union): sub-agents and background jobs are always available by default.
-	const runtimeToolNames = ["sub_agent", "parallel_tasks", "submit_job", "wait_job"] as const;
+	const runtimeToolNames = ["sub_agent", "parallel_tasks", "submit_job", "wait_job", "list_jobs"] as const;
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;

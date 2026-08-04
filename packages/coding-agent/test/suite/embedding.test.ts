@@ -7,6 +7,8 @@ import {
 	type EmbeddingConfig,
 	embedTexts,
 	loadEmbeddingConfig,
+	localEmbedding,
+	rankByLocalSimilarity,
 	rankBySimilarity,
 } from "../../src/core/tools/embedding.ts";
 
@@ -114,5 +116,23 @@ describe("embedding", () => {
 	it("cosineSimilarity handles mismatched or empty vectors", () => {
 		expect(cosineSimilarity(new Float32Array(0), new Float32Array(3))).toBe(0);
 		expect(cosineSimilarity(new Float32Array([1]), new Float32Array([1, 2]))).toBe(0);
+	});
+
+	it("localEmbedding produces similar vectors for similar text", () => {
+		const a = localEmbedding("cache retention settings");
+		const b = localEmbedding("cache retention configuration");
+		const c = localEmbedding("the weather in singapore today");
+
+		expect(cosineSimilarity(a, b)).toBeGreaterThan(cosineSimilarity(a, c));
+		expect(cosineSimilarity(a, a)).toBeGreaterThan(0.99);
+	});
+
+	it("rankByLocalSimilarity orders texts by closeness to the query", () => {
+		const order = rankByLocalSimilarity("flaky test fix", [
+			"deploy the new dashboard",
+			"fix the flaky integration test",
+			"buy groceries",
+		]);
+		expect(order[0]).toBe(1);
 	});
 });

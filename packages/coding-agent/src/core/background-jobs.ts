@@ -8,14 +8,13 @@
  * they complete only while the daemon/session process stays alive.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { ExtensionContext, ToolDefinition } from "./extensions/types.ts";
 import { type RunSubAgentTaskOptions, runSubAgentTask } from "./sub-agent.ts";
-
 export interface BackgroundJobState {
 	id: string;
 	createdAt: string;
@@ -42,6 +41,47 @@ export function loadJobState(cwd: string, jobId: string): BackgroundJobState | u
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * Mark any job left in `running` state as failed — the process that owned it
+ * is gone (daemon restart / crash), so it can never complete. Call once at
+ * session startup.
+ */
+export function recoverInterruptedJobs(cwd: string): number {
+	let dir: string[] = [];
+	try {
+		dir = readdirSync(jobsDir(cwd)).filter((name) => name.endsWith(".json"));
+	} catch {
+		return 0;
+	}
+	let recovered = 0;
+	for (const name of dir) {
+		const jobId = name.slice(0, -".json".length);
+		const state = loadJobState(cwd, jobId);
+		if (!state || state.status !== "running") continue;
+		saveJobState(cwd, {
+			...state,
+			status: "failed",
+			error: "interrupted by process restart",
+		});
+		recovered += 1;
+	}
+	return recovered;
+}
+
+/** List every persisted job, newest first. */
+export function listJobs(cwd: string): BackgroundJobState[] {
+	let dir: string[] = [];
+	try {
+		dir = readdirSync(jobsDir(cwd)).filter((name) => name.endsWith(".json"));
+	} catch {
+		return [];
+	}
+	return dir
+		.map((name) => loadJobState(cwd, name.slice(0, -".json".length)))
+		.filter((state): state is BackgroundJobState => state !== undefined)
+		.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function saveJobState(cwd: string, state: BackgroundJobState): void {
@@ -123,6 +163,8 @@ const WaitJobParams = Type.Object({
 	),
 });
 
+const ListJobsParams = Type.Object({});
+
 function textResult(text: string): AgentToolResult<undefined> {
 	return { content: [{ type: "text", text }], details: undefined };
 }
@@ -181,6 +223,26 @@ export function createWaitJobToolDefinition(
 			return textResult(
 				`Job ${state.id} is still running (waited ${params.timeout_s ?? 120}s). Use wait_job again to collect.`,
 			);
+		},
+	};
+}
+
+export function createListJobsToolDefinition(list: () => BackgroundJobState[]): ToolDefinition<typeof ListJobsParams> {
+	return {
+		name: "list_jobs",
+		label: "List Background Jobs",
+		description:
+			"List every background job (submit_job) with its status: id, description, status (running/done/failed), turns and error.",
+		promptSnippet: "list_jobs - list background jobs and their status",
+		parameters: ListJobsParams,
+		execute: async () => {
+			const jobs = list();
+			if (jobs.length === 0) return textResult("(no background jobs)");
+			const lines = jobs.map((job) => {
+				const result = job.status === "done" ? `${job.turns ?? 0} turns` : (job.error ?? job.status);
+				return `${job.id} [${job.status}] ${job.description} — ${result}`;
+			});
+			return textResult(lines.join("\n"));
 		},
 	};
 }

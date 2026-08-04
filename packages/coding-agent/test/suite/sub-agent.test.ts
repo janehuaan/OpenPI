@@ -1,9 +1,16 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
-import { readFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+	createListJobsToolDefinition,
+	jobFilePath,
+	loadJobState,
+	recoverInterruptedJobs,
+} from "../../src/core/background-jobs.ts";
 import { createHarness } from "./harness.ts";
 
 type Harness = Awaited<ReturnType<typeof createHarness>>;
@@ -199,6 +206,40 @@ describe("sub-agent", () => {
 		const toolNames = harness.session.getAllTools().map((tool) => tool.name);
 		expect(toolNames).toContain("submit_job");
 		expect(toolNames).toContain("wait_job");
+		expect(toolNames).toContain("list_jobs");
+	});
+
+	it("recoverInterruptedJobs fails jobs left running by a previous process", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "jobs-recover-"));
+		mkdirSync(join(dir, ".pi", "jobs"), { recursive: true });
+		writeFileSync(
+			jobFilePath(dir, "job-stale"),
+			JSON.stringify({ id: "job-stale", createdAt: "", description: "old", status: "running" }),
+			"utf8",
+		);
+		writeFileSync(
+			jobFilePath(dir, "job-done"),
+			JSON.stringify({ id: "job-done", createdAt: "", description: "done", status: "done", result: "x", turns: 1 }),
+			"utf8",
+		);
+
+		const recovered = recoverInterruptedJobs(dir);
+		expect(recovered).toBe(1);
+		expect(loadJobState(dir, "job-stale")?.status).toBe("failed");
+		expect(loadJobState(dir, "job-stale")?.error).toContain("restart");
+		expect(loadJobState(dir, "job-done")?.status).toBe("done");
+	});
+
+	it("list_jobs tool formats every job's status", async () => {
+		const tool = createListJobsToolDefinition(() => [
+			{ id: "job-a", createdAt: "", description: "first", status: "done" as const, result: "ok", turns: 2 },
+			{ id: "job-b", createdAt: "", description: "second", status: "running" as const },
+		]);
+		const text = (await tool.execute("c", {}, undefined, undefined, undefined as never)).content
+			.map((part) => (part.type === "text" ? part.text : ""))
+			.join("");
+		expect(text).toContain("job-a [done] first — 2 turns");
+		expect(text).toContain("job-b [running] second — running");
 	});
 
 	it("submitJob returns a job id immediately and waitForJob collects the result", async () => {

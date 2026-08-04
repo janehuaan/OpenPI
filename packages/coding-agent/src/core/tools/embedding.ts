@@ -130,3 +130,48 @@ export function rankBySimilarity(queryVector: Float32Array, textVectors: Float32
 export function embeddingCachePath(cwd: string): string {
 	return join(cwd, ".pi", "embeddings-cache.json");
 }
+
+// ---------------------------------------------------------------------------
+// Zero-dependency local embedding (fallback when no embedding API key is set).
+// Character-level hashing into a fixed-dimension vector: crude but free, and
+// gives search tools a semantic-ish rerank without any network access.
+// ---------------------------------------------------------------------------
+
+const LOCAL_EMBEDDING_DIM = 256;
+
+function fnv1a(text: string): number {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < text.length; i++) {
+		hash ^= text.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return hash >>> 0;
+}
+
+/** Local hashing embedding: word tokens (weight 1) + char bigrams (weight 0.5), L2-normalized. */
+export function localEmbedding(text: string): Float32Array {
+	const vector = new Float32Array(LOCAL_EMBEDDING_DIM);
+	const tokens = text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+	for (const token of tokens) {
+		vector[fnv1a(token) % LOCAL_EMBEDDING_DIM] += 1;
+	}
+	for (let i = 0; i < text.length - 1; i++) {
+		vector[fnv1a(text.slice(i, i + 2)) % LOCAL_EMBEDDING_DIM] += 0.5;
+	}
+	let norm = 0;
+	for (const value of vector) norm += value * value;
+	norm = Math.sqrt(norm);
+	if (norm > 0) {
+		for (let i = 0; i < vector.length; i++) vector[i] /= norm;
+	}
+	return vector;
+}
+
+/** Rank texts by local-embedding cosine similarity to the query; returns indices in rank order. */
+export function rankByLocalSimilarity(query: string, texts: string[]): number[] {
+	const queryVector = localEmbedding(query);
+	return rankBySimilarity(
+		queryVector,
+		texts.map((text) => localEmbedding(text)),
+	);
+}

@@ -233,9 +233,13 @@ function outlinePath(target: string): { file: string; symbols: CodeSymbol[] }[] 
 }
 
 const CodeIndexParams = Type.Object({
-	action: Type.Union([Type.Literal("outline"), Type.Literal("search")]),
+	action: Type.Union([Type.Literal("outline"), Type.Literal("search"), Type.Literal("refs"), Type.Literal("callers")]),
 	path: Type.Optional(Type.String({ description: "File or directory to outline (default: current workspace)" })),
-	query: Type.Optional(Type.String({ description: "Symbol name substring to find (for search)" })),
+	query: Type.Optional(
+		Type.String({
+			description: "Symbol name substring to find (for search), or exact identifier (for refs/callers)",
+		}),
+	),
 	kind: Type.Optional(
 		Type.String({ description: "Filter by kind: func/method/class/interface/type/struct/enum/trait/const/var" }),
 	),
@@ -244,6 +248,74 @@ const CodeIndexParams = Type.Object({
 
 function textResult(text: string): AgentToolResult<undefined> {
 	return { content: [{ type: "text", text }], details: undefined };
+}
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Cross-file reference search: every word-boundary occurrence of `query`
+ * across source files, marking definition lines (from the symbol index).
+ */
+function findReferences(root: string, query: string): string[] {
+	const files: string[] = [];
+	scanFiles(root, 0, files, { value: 0 });
+	const regex = new RegExp(`\\b${escapeRegExp(query)}\\b`, "g");
+	const lines: string[] = [];
+	for (const file of files) {
+		let source: string;
+		try {
+			source = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		const symbols = extractSymbols(file, source);
+		const definitionLines = new Set(symbols.filter((symbol) => symbol.name === query).map((symbol) => symbol.line));
+		const fileLines = source.split("\n");
+		regex.lastIndex = 0;
+		for (let match = regex.exec(source); match !== null; match = regex.exec(source)) {
+			const lineNumber = source.slice(0, match.index).split("\n").length;
+			const rawLine = fileLines[lineNumber - 1] ?? "";
+			const marker = definitionLines.has(lineNumber) ? "[def]" : "[ref]";
+			lines.push(`${marker} ${file}:${lineNumber}: ${rawLine.trim().slice(0, 120)}`);
+		}
+	}
+	return lines;
+}
+
+/**
+ * Caller search: for each reference to `query`, find the nearest enclosing
+ * function/method definition as the (coarse) caller.
+ */
+function findCallers(root: string, query: string): Array<{ file: string; caller: CodeSymbol; line: number }> {
+	const files: string[] = [];
+	scanFiles(root, 0, files, { value: 0 });
+	const regex = new RegExp(`\\b${escapeRegExp(query)}\\b`, "g");
+	const result: Array<{ file: string; caller: CodeSymbol; line: number }> = [];
+	for (const file of files) {
+		let source: string;
+		try {
+			source = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		const symbols = extractSymbols(file, source);
+		const funcs = symbols.filter((symbol) => symbol.kind === "func" || symbol.kind === "method");
+		regex.lastIndex = 0;
+		for (let match = regex.exec(source); match !== null; match = regex.exec(source)) {
+			const lineNumber = source.slice(0, match.index).split("\n").length;
+			// Skip the definition itself.
+			if (symbols.some((symbol) => symbol.name === query && symbol.line === lineNumber)) continue;
+			// Nearest enclosing function/method before or at this line — the
+			// queried function itself can never be its own caller.
+			const enclosing = funcs
+				.filter((symbol) => symbol.name !== query && symbol.line <= lineNumber)
+				.sort((a, b) => b.line - a.line)[0];
+			if (enclosing) result.push({ file, caller: enclosing, line: lineNumber });
+		}
+	}
+	return result;
 }
 
 export function createCodeIndexToolDefinition(): ToolDefinition<typeof CodeIndexParams, undefined> {
@@ -286,6 +358,31 @@ export function createCodeIndexToolDefinition(): ToolDefinition<typeof CodeIndex
 			// search
 			const query = (params.query ?? "").trim().toLowerCase();
 			if (!query) return textResult("(search requires a query)");
+			if (params.action === "refs") {
+				const refs = findReferences(root, params.query!.trim());
+				if (refs.length === 0) return textResult(`No references to "${params.query}" found under ${root}.`);
+				const limited = refs.slice(0, params.limit ?? 50);
+				const note = refs.length > limited.length ? `\n…(${refs.length - limited.length} more)` : "";
+				return textResult(limited.join("\n") + note);
+			}
+			if (params.action === "callers") {
+				const callers = findCallers(root, params.query!.trim());
+				if (callers.length === 0) return textResult(`No callers of "${params.query}" found under ${root}.`);
+				const seen = new Set<string>();
+				const lines: string[] = [];
+				for (const { file, caller, line } of callers) {
+					const display = file === root ? file : relative(process.cwd(), file) || file;
+					const key = `${display}:${caller.name}`;
+					if (seen.has(key)) continue;
+					seen.add(key);
+					lines.push(`${caller.kind} ${caller.name} — ${display}:${caller.line} (calls at :${line})`);
+					if (lines.length >= (params.limit ?? 50)) {
+						lines.push("…(limit reached)");
+						break;
+					}
+				}
+				return textResult(lines.join("\n"));
+			}
 			const files: string[] = [];
 			scanFiles(root, 0, files, { value: 0 });
 			const hits: Array<{ file: string; symbol: CodeSymbol }> = [];

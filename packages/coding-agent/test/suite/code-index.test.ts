@@ -22,7 +22,7 @@ afterEach(() => {
 
 async function runCodeIndex(
 	path: string,
-	params: { action: "outline" | "search"; query?: string; kind?: string; limit?: number },
+	params: { action: "outline" | "search" | "refs" | "callers"; query?: string; kind?: string; limit?: number },
 ) {
 	const tool = createCodeIndexToolDefinition();
 	const ctx = { cwd: path } as unknown as ExtensionContext;
@@ -139,5 +139,37 @@ describe("code_index", () => {
 
 		const text = await runCodeIndex(dir, { action: "search", query: "zzz" });
 		expect(text).toContain("No symbol matching");
+	});
+
+	it("finds cross-file references and marks the definition", async () => {
+		const dir = makeTempDir();
+		writeFileSync(join(dir, "a.ts"), "export function shared(): void {}\n");
+		writeFileSync(join(dir, "b.ts"), "import { shared } from './a';\nshared();\n");
+
+		const text = await runCodeIndex(dir, { action: "refs", query: "shared" });
+
+		expect(text).toContain("[def]");
+		expect(text).toContain("[ref]");
+		expect(text).toContain("b.ts");
+		expect(text).toContain("shared");
+	});
+
+	it("finds callers of a function", async () => {
+		const dir = makeTempDir();
+		writeFileSync(
+			join(dir, "main.ts"),
+			[
+				"export function helper(): void {}",
+				"export function alpha(): void { helper(); }",
+				"export function beta(): void { helper(); }",
+			].join("\n"),
+		);
+
+		const text = await runCodeIndex(dir, { action: "callers", query: "helper" });
+
+		expect(text).toContain("func alpha");
+		expect(text).toContain("func beta");
+		// The definition itself is not a caller.
+		expect(text).not.toContain("func helper —");
 	});
 });
