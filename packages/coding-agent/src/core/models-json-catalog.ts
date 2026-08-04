@@ -8,11 +8,29 @@
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
 import type { ModelsJsonProvider } from "./model-config.ts";
-import { ensureModelsDevLoaded, lookupModelsDevMeta } from "./models-dev.ts";
+import { ensureModelsDevLoaded, lookupModelsDevMeta, type ModelsDevMeta } from "./models-dev.ts";
 import { ensureLiteLlmLoaded, lookupLiteLlmMeta } from "./models-litellm.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 32_768;
+
+/**
+ * Manually verified model metadata (from official docs / authoritative
+ * catalogs) for ids that public databases don't cover. Priority: built-in
+ * catalog > server hint > manual aliases > models.dev > LiteLLM > defaults.
+ */
+const MANUAL_META_ALIASES: Record<string, ModelsDevMeta> = {
+	// SapiensAI Agnes 2.5 Pro Alpha — Artificial Analysis (official): 1M context,
+	// $0.45/$0.9 per M tokens, cache hit $0.0038. Verified 2026-08-04.
+	"agnes-2.5-pro-alpha": {
+		context: 1_000_000,
+		output: 128_000,
+		reasoning: true,
+		costInput: 0.45,
+		costOutput: 0.9,
+		costCacheRead: 0.0038,
+	},
+};
 
 /**
  * Built-in catalog indexed by normalized model id, built lazily. Lets models
@@ -100,7 +118,8 @@ function parseOpenAiModelsResponse(providerId: string, api: Api, baseUrl: string
 function applyModelsDevMeta(models: Model<Api>[]): Model<Api>[] {
 	let changed = false;
 	const merged = models.map((model) => {
-		const meta = lookupModelsDevMeta(model.id) ?? lookupLiteLlmMeta(model.id);
+		const manual = MANUAL_META_ALIASES[model.id];
+		const meta = manual ?? lookupModelsDevMeta(model.id) ?? lookupLiteLlmMeta(model.id);
 		if (!meta) return model;
 		// models.dev fills only discovery defaults — never overrides built-in
 		// catalog values or server-provided hints.
