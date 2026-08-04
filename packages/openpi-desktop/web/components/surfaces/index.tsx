@@ -2741,29 +2741,31 @@ export function ChatSurface({
 			</div>
 			<div className="chat-statusbar">
 				<div className="statusbar-left">
-					<span title={workspace ?? "项目目录"}>
-						<Folder size={13} />
-						{workspaceLabel}
-					</span>
 					<span title="当前模型">
-						<Cpu size={13} />
-						{conversation?.state.model?.id ?? "—"}
+						<Cpu size={12} />
+						{shortModelName(conversation?.state.model?.id ?? "—")}
 					</span>
+					{workspaceLabel && (
+						<span title={workspace ?? ""}>
+							<Folder size={12} />
+							{workspaceLabel}
+						</span>
+					)}
 				</div>
 				<div className="statusbar-right">
-					{stats && <span title="本次命中率">本次 {lastHit ?? 0}%</span>}
-					{stats && <span title="平均命中率">均 {avgHit ?? 0}%</span>}
-					{stats && <span title="会话 token">{fmtTokens(stats.tokens.total)} tok</span>}
-					{lastTotal > 0 && <span title="本次 token">+{fmtTokens(lastTotal)}</span>}
-					{stats && <span title="本次费用">{fmtCost(lastCost)}</span>}
-					{stats && stats.cost > 0 && <span title="会话费用">共 {fmtCost(stats.cost)}</span>}
-					{stats && <span title="对话轮数">{stats.userMessages} 轮</span>}
-					{stats && ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
-					{stats && compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
+					{stats && <span>本次命中 {lastHit ?? 0}%</span>}
+					{stats && <span>平均命中 {avgHit ?? 0}%</span>}
+					{stats && <span>会话 tokens {fmtTokens(stats.tokens.total)}</span>}
+					{lastTotal > 0 && <span>本次 tokens {fmtTokens(lastTotal)}</span>}
+					{stats && <span>本次费用 {fmtCost(lastCost)}</span>}
+					{stats && <span>当前会话 {stats.userMessages} 轮</span>}
+					{stats && ctxPercent !== undefined && <span>上下文 {ctxPercent}%</span>}
+					{stats && compactThreshold !== undefined && stats.contextUsage?.contextWindow && (
+						<span>压缩阈值 {Math.round((compactThreshold / stats.contextUsage.contextWindow) * 100)}%</span>
+					)}
+					{stats && stats.cost > 0 && <span>会话费用 {fmtCost(stats.cost)}</span>}
 					{providerBalance && (
-						<span title="账户余额">
-							余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}
-						</span>
+						<span>余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}</span>
 					)}
 				</div>
 			</div>
