@@ -17,6 +17,7 @@
 - `session_search` tool: BM25 retrieval over past session transcripts and memory index entries (project `<cwd>/.pi/memory/MEMORY.md` + user-global `~/.pi/memory/MEMORY.md`), message-level hits with surrounding context and session labels. Optional semantic reranking when `OPENPI_EMBEDDING_API_KEY` is set (`rerank: auto|on|off`), embedding cache at `<cwd>/.pi/embeddings-cache.json`; any embedding failure degrades to plain BM25.
 - `submit_job` / `wait_job` tools: start a sub-agent task in the background (returns a job id without blocking the turn, persisted to `<cwd>/.pi/jobs/<jobId>.json`) and collect the result later with a timeout.
 - Runtime tools (`sub_agent`, `parallel_tasks`, `submit_job`, `wait_job`) are now active by default in the SDK (previously omitted from the default activation list).
+- `/models` discovery now inherits accurate metadata (context window, max tokens, cost, reasoning) from the built-in catalog when the discovered id matches a known model, and reads `context_window`/`max_model_len` hints from the server response; stores whose models all carry the old 128k/zero-cost defaults are refreshed automatically.
 - `code_index` tool: regex-based symbol outline and search (TS/JS, Go, Python, Rust, Java/Kotlin, C/C++, Ruby) with kind filters; skips build/SCM directories.
 
 ## [0.80.8] - 2026-07-24
