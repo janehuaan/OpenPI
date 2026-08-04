@@ -11,7 +11,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ensureLocalEmbeddingServer, LOCAL_EMBEDDING_BASE_URL } from "../local-embedding-server.ts";
+import {
+	ensureLocalEmbeddingServer,
+	LOCAL_EMBEDDING_BASE_URL,
+	localEmbeddingAvailable,
+} from "../local-embedding-server.ts";
 
 export interface EmbeddingConfig {
 	apiKey: string;
@@ -20,9 +24,10 @@ export interface EmbeddingConfig {
 }
 
 export function loadEmbeddingConfig(env: NodeJS.ProcessEnv = process.env): EmbeddingConfig | null {
-	// Local mode (OPENPI_EMBEDDING_LOCAL=1): spawn/attach to a llama.cpp
-	// llama-server on this machine — no API key required.
-	if (env.OPENPI_EMBEDDING_LOCAL !== undefined && env.OPENPI_EMBEDDING_LOCAL !== "0") {
+	// Local mode: the bundled llama.cpp llama-server (bge-small-zh, 512-dim)
+	// is built in — no API key required. OPENPI_EMBEDDING_LOCAL=0 disables.
+	if (env.OPENPI_EMBEDDING_LOCAL === "0") return null;
+	if (localEmbeddingAvailable(env) || env.OPENPI_EMBEDDING_LOCAL !== undefined) {
 		return {
 			apiKey: "local",
 			baseUrl: LOCAL_EMBEDDING_BASE_URL,

@@ -4,9 +4,10 @@ import type { MemoryConfig, MemoryIndexEntry, MemoryType } from "./types.ts";
  * Build the per-turn inject set (proactive cross-session recall):
  * 1. Always pin user/feedback (or config.pinTypes)
  * 2. Prefer recent session-* digests when present
- * 3. Fill the rest in a stable order (type + key) so the injected prefix is
- *    byte-stable across turns — relevance ranking per prompt would break the
- *    provider prompt cache and lose earlier context in long sessions
+ * 3. Fill the rest either from a relevance-ranked candidate list (hybrid
+ *    vector+BM25, computed once per session so the injected prefix stays
+ *    byte-stable across turns and the provider prompt cache keeps hitting),
+ *    or in a stable order (type + key) as a deterministic fallback
  * 4. Cap at maxSnapshotEntries
  */
 export function selectSnapshotEntries(
@@ -15,6 +16,7 @@ export function selectSnapshotEntries(
 	config: MemoryConfig,
 	_bodyResolver?: (entry: MemoryIndexEntry) => string,
 	_memoryDirectory?: string,
+	rankedRest?: MemoryIndexEntry[],
 ): MemoryIndexEntry[] {
 	if (entries.length === 0) return [];
 	const pinSet = new Set<MemoryType>(config.pinTypes);
@@ -37,16 +39,21 @@ export function selectSnapshotEntries(
 	// Newest session digests first (cross-chat “what we were doing”)
 	for (const entry of [...digests].reverse()) push(entry);
 
-	// Continuity questions are answered from the pinned digests above;
-	// everything else uses a stable ordering (type + key) so the injected
-	// prefix is byte-stable across turns — unstable relevance ranking breaks
-	// the provider prompt cache and makes long sessions lose earlier context.
+	// Relevance-ranked candidates (hybrid vector+BM25, fixed per session) when
+	// provided; otherwise a stable type+key order so the injected prefix is
+	// byte-stable across turns (ranking per prompt would break the provider
+	// prompt cache and make long sessions lose earlier context).
 	if (selected.length < max) {
-		const ordered = [...rest].sort((a, b) => {
-			const byType = a.type.localeCompare(b.type);
-			return byType !== 0 ? byType : a.key.localeCompare(b.key);
-		});
-		for (const entry of ordered) push(entry);
+		if (rankedRest && rankedRest.length > 0) {
+			for (const entry of rankedRest) push(entry);
+		}
+		if (selected.length < max) {
+			const ordered = [...rest].sort((a, b) => {
+				const byType = a.type.localeCompare(b.type);
+				return byType !== 0 ? byType : a.key.localeCompare(b.key);
+			});
+			for (const entry of ordered) push(entry);
+		}
 	}
 
 	return selected;

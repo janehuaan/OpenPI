@@ -49,9 +49,18 @@ async function serverReady(timeoutMs: number): Promise<boolean> {
 	return false;
 }
 
-/** Spawn the local llama-server if configured and not already running. */
+/** True when a bundled local embedding server (binary + model) is available. */
+export function localEmbeddingAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
+	return resolveBundlePaths(env) !== undefined;
+}
+
+/**
+ * Spawn the local llama-server when bundled resources exist (built-in) —
+ * `OPENPI_EMBEDDING_LOCAL=0` disables it explicitly.
+ */
 export function ensureLocalEmbeddingServer(env: NodeJS.ProcessEnv = process.env): Promise<boolean> | undefined {
-	if (env.OPENPI_EMBEDDING_LOCAL === undefined || env.OPENPI_EMBEDDING_LOCAL === "0") return undefined;
+	if (env.OPENPI_EMBEDDING_LOCAL === "0") return undefined;
+	if (!localEmbeddingAvailable(env) && env.OPENPI_EMBEDDING_LOCAL === undefined) return undefined;
 	if (serverProcess) return Promise.resolve(true);
 	if (starting) return starting;
 	const paths = resolveBundlePaths(env);

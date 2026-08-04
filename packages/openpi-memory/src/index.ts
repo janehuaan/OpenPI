@@ -52,7 +52,7 @@ import {
 	upsertEntry,
 } from "./store.ts";
 import { EXCLUSION_LIST, type MemoryConfig, type MemoryIndexEntry } from "./types.ts";
-import { reindexVectors } from "./vectors.ts";
+import { entriesFingerprint, hybridSearch, reindexVectors } from "./vectors.ts";
 
 const MemoryParams = Type.Object({
 	action: Type.String({
@@ -68,6 +68,11 @@ const MemoryParams = Type.Object({
 
 export default function (pi: ExtensionAPI) {
 	let frozen: MemoryIndexEntry[] = [];
+
+	// Per-session inject-set cache: keeps the proactive memory prefix
+	// byte-stable across turns (prompt-cache friendly) while still letting
+	// the first turn pick the most relevant memories via hybrid retrieval.
+	const injectSetCache = new Map<string, { fingerprint: string; rankedRest: MemoryIndexEntry[] }>();
 	let config = loadMemoryConfig(process.cwd());
 	let lastAgentEndExtractAt = 0;
 	let lastDigestRefreshAt = 0;
@@ -474,6 +479,35 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 		const gdir = globalMemoryDir();
 		const resolveBody = (entry: MemoryIndexEntry) =>
 			readTopic(ctx.cwd, entry.type, entry.key) ?? readTopicAt(gdir, entry.type, entry.key) ?? "";
+
+		// Relevance-ranked inject set, fixed per session: hybrid vector+BM25 is
+		// computed once (first turn), then reused so the injected prefix stays
+		// byte-stable across turns — keeping provider prompt-cache hits and
+		// long-session context intact. Cache invalidates when the frozen set
+		// changes (new memories saved).
+		const sessionId = ctx.sessionManager?.getSessionId?.() ?? ctx.cwd;
+		const fingerprint = entriesFingerprint(frozen);
+		const cached = injectSetCache.get(sessionId);
+		let rankedRest: MemoryIndexEntry[] | undefined;
+		if (!cached || cached.fingerprint !== fingerprint) {
+			const pinSet = new Set(config.pinTypes);
+			const others = frozen.filter(
+				(entry) => !pinSet.has(entry.type) && !(entry.type === "project" && entry.key.startsWith("session-")),
+			);
+			const max = Math.max(config.pinTypes.length + 2, config.maxSnapshotEntries);
+			const hits = config.vectorSearch
+				? hybridSearch(others, event.prompt ?? "", memoryDir(ctx.cwd), {
+						bodyResolver: resolveBody,
+						limit: max,
+						alpha: config.vectorAlpha,
+					})
+				: [];
+			rankedRest = hits.map((hit) => hit.entry);
+			injectSetCache.set(sessionId, { fingerprint, rankedRest });
+		} else {
+			rankedRest = cached.rankedRest;
+		}
+
 		const selected = selectSnapshotEntries(
 			frozen,
 			event.prompt,
@@ -481,6 +515,7 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			resolveBody,
 			// Prefer project vectors; BM25 still ranks global entries via value/body text
 			memoryDir(ctx.cwd),
+			rankedRest,
 		);
 		// Include digest bodies so “上次聊到哪” gets real facts, not a one-line teaser
 		const content = formatSelectiveSnapshot(selected, frozen.length, event.prompt, resolveBody);

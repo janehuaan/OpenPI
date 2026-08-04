@@ -6,6 +6,7 @@
 
 - `desktop-ops meta` reports `semanticSearch` feature state and whether an embedding key is configured (env or `secrets.env`).
 - Semantic embedding rerank for memory search: when `OPENPI_EMBEDDING_API_KEY` is set (base URL/model configurable), query results are blended with embedding similarity (`semanticSearch`, default true). Degrades silently to hash-vector + BM25 without a key or on API failure.
+- Proactive memory injection now picks the first-turn inject set via hybrid vector+BM25 relevance (`selectSnapshotEntries` gained a `rankedRest` input); the set is cached per session (invalidated when the frozen index changes) so the injected prefix stays byte-stable across turns — provider prompt-cache hits and long-session context are preserved while memories become relevance-ranked instead of alphabetically ordered.
 
 ## [0.80.8] - 2026-07-24
 
