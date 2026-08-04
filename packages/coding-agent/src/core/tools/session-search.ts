@@ -14,13 +14,7 @@ import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import {
-	embeddingCachePath,
-	embedTexts,
-	loadEmbeddingConfig,
-	rankByLocalSimilarity,
-	rankBySimilarity,
-} from "./embedding.ts";
+import { searchVectorStore, upsertVectorStore, type VectorStoreDoc } from "../vector-store.ts";
 
 interface SessionDoc {
 	file: string;
@@ -207,6 +201,7 @@ function loadMemoryDocs(cwd: string): SessionDoc[] {
 			const entries = parseMemoryIndex(readFileSync(file, "utf8"));
 			for (const entry of entries) {
 				docs.push({
+					id: `memory:${entry.type}:${entry.key}`,
 					file: `memory:${entry.type}`,
 					timestamp: "",
 					role: "memory",
@@ -262,29 +257,36 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 				return textResult(`No past conversation matched "${params.query}".`);
 			}
 
-			// Semantic rerank (optional): BM25 candidates → embedding cosine
-			// reorder. Any embedding failure degrades to plain BM25.
-			let ranked = scored.slice(0, 30);
-			const embeddingConfig = loadEmbeddingConfig();
+			// Vector-library path (default): persist + incrementally update the
+			// local vector store over all memory/session docs, search the whole
+			// store by cosine, and blend with normalized BM25 for word-exact
+			// recall. `rerank: off` keeps the pure BM25 path.
+			let ranked: Array<{ doc: SessionDoc; score: number }> = scored.slice(0, 30);
 			const useSemantic = params.rerank === "on" || params.rerank !== "off";
 			if (useSemantic) {
-				if (embeddingConfig) {
-					const vectors = await embedTexts(
-						[params.query, ...ranked.map((entry) => entry.doc.text)],
-						embeddingConfig,
-						embeddingCachePath(ctx.cwd),
-					);
-					if (vectors && vectors.length === ranked.length + 1 && vectors[0].length > 0) {
-						const order = rankBySimilarity(vectors[0], vectors.slice(1));
-						ranked = order.map((index) => ranked[index]).filter((entry) => entry !== undefined);
-					}
-				} else {
-					// Zero-dependency local hashing embedding: no API key needed.
-					const order = rankByLocalSimilarity(
-						params.query,
-						ranked.map((entry) => entry.doc.text),
-					);
-					ranked = order.map((index) => ranked[index]).filter((entry) => entry !== undefined);
+				const vectorDocs: VectorStoreDoc[] = allDocs.map((doc) => ({
+					id: doc.id ?? `${doc.file}:${doc.timestamp}:${doc.role}`,
+					source: doc.file,
+					role: doc.role,
+					text: doc.text,
+					timestamp: doc.timestamp || undefined,
+				}));
+				upsertVectorStore(ctx.cwd, vectorDocs);
+				const vectorHits = searchVectorStore(ctx.cwd, params.query, 30);
+				if (vectorHits.length > 0) {
+					const maxBm25 = Math.max(...scored.map((entry) => entry.score), 1e-9);
+					const bm25ByText = new Map<string, number>();
+					for (const entry of scored) bm25ByText.set(entry.doc.text, entry.score / maxBm25);
+					ranked = vectorHits.map((hit) => ({
+						doc: {
+							id: hit.id,
+							file: hit.source,
+							timestamp: hit.timestamp ?? "",
+							role: hit.role,
+							text: hit.text,
+						},
+						score: 0.7 * hit.score + 0.3 * (bm25ByText.get(hit.text) ?? 0),
+					}));
 				}
 			}
 
