@@ -114,6 +114,14 @@ import {
 
 const PARALLEL_TASKS_TOOL_NAME = "parallel_tasks";
 
+function stringifyContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content.map((part) => (typeof part === "string" ? part : JSON.stringify(part))).join("\n");
+	}
+	return JSON.stringify(content);
+}
+
 import {
 	type BackgroundJobState,
 	createListJobsToolDefinition,
@@ -329,6 +337,8 @@ export class AgentSession {
 	private _followUpMessages: string[] = [];
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	/** Last injected content per customType, to avoid per-turn duplicate cache writes. */
+	private _lastInjectedCustomContent = new Map<string, string>();
 
 	// Compaction state
 	private _compactionAbortController: AbortController | undefined = undefined;
@@ -1483,6 +1493,13 @@ export class AgentSession {
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			for (const msg of this._pendingNextTurnMessages) {
+				// Dedupe: if the same customType + content is already in the
+				// history (injected on a previous turn), skip re-injecting —
+				// the model still sees it via the cached prefix, and we avoid
+				// a per-turn cache write that would drag the hit rate down.
+				const seen = this._lastInjectedCustomContent.get(msg.customType);
+				if (seen !== undefined && seen === stringifyContent(msg.content)) continue;
+				this._lastInjectedCustomContent.set(msg.customType, stringifyContent(msg.content));
 				messages.push(msg);
 			}
 			this._pendingNextTurnMessages = [];

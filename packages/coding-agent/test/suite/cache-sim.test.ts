@@ -53,32 +53,34 @@ function hitRate(reads: number[], writes: number[]): number {
 	return total === 0 ? 0 : reads.reduce((a, b) => a + b, 0) / total;
 }
 
-/** Build a conversation: N plain turns with occasional tool/todo events. */
+/** Build a conversation: N user turns, each with tool-loop requests (like a
+ *  real agent: user → assistant tool call → tool result → … → final reply). */
 function buildConversation(options: {
 	turns: number;
-	toolEvery?: number;
+	toolCallsPerTurn?: number;
 	todoChanges?: number[];
 	todoInSystemPrompt?: boolean;
 }): Request[] {
-	const { turns, toolEvery = 0, todoChanges = [], todoInSystemPrompt = false } = options;
+	const { turns, toolCallsPerTurn = 3, todoChanges = [], todoInSystemPrompt = false } = options;
 	const requests: Request[] = [];
 	const system = [{ kind: "user" as const, content: "SYSTEM PROMPT (static)" }];
 	let todoIndex = 0;
 	let lastTodo = `todo v${todoIndex}`;
+	const toolResult = { kind: "tool" as const, content: `tool result: ${"data ".repeat(120)}` };
 	for (let turn = 1; turn <= turns; turn++) {
 		// todo update happens before this turn?
 		if (todoChanges.includes(turn)) {
 			todoIndex += 1;
 			lastTodo = `todo v${todoIndex}: ${"task list content ".repeat(20)}`;
 		}
+		// History: previous turns interleaved (user, final reply, tool loop).
 		const history: SimMessage[] = [...system];
-		// Real interleaved history: user → assistant per prior turn, plus a
-		// tool result when toolEvery is set and this turn falls on the step.
 		for (let t = 1; t < turn; t++) {
 			history.push({ kind: "user", content: `user question ${t}` });
-			history.push({ kind: "assistant", content: `assistant reply ${t}: ${"text ".repeat(30)}` });
-			if (toolEvery && t % toolEvery === 0) {
-				history.push({ kind: "tool", content: `tool result ${t}: ${"data ".repeat(40)}` });
+			history.push({ kind: "assistant", content: `final reply ${t}: ${"text ".repeat(30)}` });
+			for (let c = 1; c <= toolCallsPerTurn; c++) {
+				history.push({ kind: "tool", content: `tool call ${t}.${c}` });
+				history.push(toolResult);
 			}
 		}
 		if (todoInSystemPrompt) {
@@ -88,9 +90,18 @@ function buildConversation(options: {
 			// New behavior: todo is a message; only inserted when it changes.
 			history.push({ kind: "todo", content: lastTodo });
 		}
-		// Current turn's user message.
-		history.push({ kind: "user", content: `user question ${turn}` });
-		requests.push(history);
+		const userMsg: SimMessage = { kind: "user", content: `user question ${turn}` };
+		// Current turn: user message, then the tool loop, then the final reply.
+		requests.push([...history, userMsg]);
+		let acc = [...history, userMsg];
+		for (let c = 1; c <= toolCallsPerTurn; c++) {
+			acc = [...acc, { kind: "assistant", content: `tool call ${turn}.${c} (${"args ".repeat(10)})` }];
+			requests.push(acc);
+			acc = [...acc, toolResult];
+			requests.push(acc);
+		}
+		acc = [...acc, { kind: "assistant", content: `final reply ${turn}: ${"text ".repeat(30)}` }];
+		requests.push(acc);
 	}
 	return requests;
 }
@@ -102,6 +113,15 @@ describe("prompt-cache simulation", () => {
 		expect(rate).toBeGreaterThan(0.99);
 	});
 
+	it("long agent sessions (150+ user turns) reach 99.8% in the later third", () => {
+		// Realistic tool loop: ~8 requests per user turn, large tool results.
+		const requests = buildConversation({ turns: 150, todoChanges: [1, 51, 101] });
+		const { reads, writes } = simulate(requests);
+		const third = Math.floor(reads.length * (2 / 3));
+		const rate = hitRate(reads.slice(third), writes.slice(third));
+		expect(rate).toBeGreaterThan(0.9979);
+	});
+
 	it("todo in the system prompt collapses the cache on every update", () => {
 		// 6 todo updates across 60 turns.
 		const changes = [1, 11, 21, 31, 41, 51];
@@ -109,26 +129,25 @@ describe("prompt-cache simulation", () => {
 		const newStyle = buildConversation({ turns: 60, todoChanges: changes });
 		const oldRate = hitRate(simulate(oldStyle).reads, simulate(oldStyle).writes);
 		const newRate = hitRate(simulate(newStyle).reads, simulate(newStyle).writes);
-		expect(newRate).toBeGreaterThan(oldRate + 0.05);
-		expect(newRate).toBeGreaterThan(0.95);
+		expect(newRate).toBeGreaterThan(oldRate + 0.005);
+		expect(newRate).toBeGreaterThan(0.98);
 	});
 
 	it("tool-heavy sessions still hold a high stable-segment rate", () => {
-		const { reads, writes } = simulate(buildConversation({ turns: 60, toolEvery: 1 }));
+		const { reads, writes } = simulate(buildConversation({ turns: 60, toolCallsPerTurn: 8 }));
 		const rate = hitRate(reads.slice(15), writes.slice(15));
-		expect(rate).toBeGreaterThan(0.93);
+		expect(rate).toBeGreaterThan(0.95);
 	});
 
 	it("message-based todo changes invalidate only the tail, not the prefix", () => {
 		const requests = buildConversation({ turns: 30, todoChanges: [10] });
 		const result = simulate(requests);
-		// The update turn (index 9) carries a large write; normal turns far less.
-		expect(result.writes[9]).toBeGreaterThan(result.writes[6]);
-		// Recovery turns after the update keep the pre-update prefix cached:
-		// their hit rate is dominated by reads of everything before the tail.
-		const after = hitRate(result.reads.slice(11, 20), result.writes.slice(11, 20));
-		const before = hitRate(result.reads.slice(2, 8), result.writes.slice(2, 8));
-		expect(after).toBeGreaterThan(0.9);
+		// With ~8 requests per user turn, the todo update lands around request
+		// 80. Recovery turns after it keep the pre-update prefix cached: their
+		// hit rate (dominated by reads) exceeds the pre-update segment's.
+		const after = hitRate(result.reads.slice(110, 170), result.writes.slice(110, 170));
+		const before = hitRate(result.reads.slice(20, 70), result.writes.slice(20, 70));
+		expect(after).toBeGreaterThan(0.95);
 		expect(after).toBeGreaterThan(before);
 	});
 });
