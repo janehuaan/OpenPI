@@ -599,13 +599,6 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			// Task list changed → refresh system prompt so the model sees new status
-			// on the next turn (todo_list is read-only and needs no refresh).
-			if (toolCall.name === "todo_write" || toolCall.name === "complete_step") {
-				const validToolNames = Array.from(this._toolRegistry.keys());
-				this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-				this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
-			}
 			// Builtin security gate runs before extension handlers: zero-config baseline.
 			const security = this._builtinSecurity;
 			if (security) {
@@ -793,6 +786,13 @@ export class AgentSession {
 
 		if (event.type === "agent_end") {
 			this._maybeLogCacheSummary();
+		}
+
+		// Session-level cache summary at conversation end: how many requests
+		// the whole session made and the aggregate hit rate, so users can
+		// verify long-session cache behavior directly.
+		if (event.type === "agent_end" && !this._willRetryAfterAgentEnd(event)) {
+			this._maybeLogSessionCacheSummary();
 		}
 
 		// Handle session persistence
@@ -991,6 +991,22 @@ export class AgentSession {
 			const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
 			console.error(
 				`[cache] ${pct}% hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens across ${summary.requests} requests`,
+			);
+		} catch {
+			// Best-effort telemetry.
+		}
+	}
+
+	/** Aggregate cache summary for the whole conversation (printed at agent end). */
+	private _maybeLogSessionCacheSummary(): void {
+		try {
+			const entries = this.sessionManager.getEntries();
+			const summary = computeCacheSummary(entries);
+			if (summary.requests < 1) return;
+			const total = summary.inputTokens + summary.cacheReadTokens + summary.cacheWriteTokens;
+			const pct = summary.hitRate !== undefined ? Math.round(summary.hitRate * 100) : 0;
+			console.error(
+				`[cache-session] ${pct}% avg hit · ${summary.cacheReadTokens.toLocaleString()}/${total.toLocaleString()} tokens · ${summary.requests} requests this conversation`,
 			);
 		} catch {
 			// Best-effort telemetry.
@@ -1264,15 +1280,7 @@ export class AgentSession {
 
 		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
 		const loaderAppendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
-		// Inject the persistent task list so the model always sees current progress.
-		const todoState = loadTodoState(this._cwd);
-		const todoBlock = todoState?.todos.some((item) => item.status !== "completed")
-			? `## Current task list\n\n${formatTodos(todoState)}`
-			: undefined;
-		const appendParts = [
-			...(loaderAppendSystemPrompt.length > 0 ? [loaderAppendSystemPrompt.join("\n\n")] : []),
-			...(todoBlock ? [todoBlock] : []),
-		];
+		const appendParts = loaderAppendSystemPrompt.length > 0 ? [loaderAppendSystemPrompt.join("\n\n")] : [];
 		const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
@@ -1294,10 +1302,32 @@ export class AgentSession {
 	// Prompting
 	// =========================================================================
 
+	private _lastInjectedTodoText: string | undefined;
+
+	/**
+	 * Inject the task list as a message instead of inside the system prompt.
+	 * The todo message is appended only when its content actually changes, and
+	 * it is placed before the final (current) user message — so a todo update
+	 * invalidates only the tail of the history, while the rest of the prefix
+	 * (and the provider prompt cache) stays intact across turns.
+	 */
+	private _maybeInjectTodo(messages: AgentMessage[]): AgentMessage[] {
+		const todoState = loadTodoState(this._cwd);
+		const todoText = todoState?.todos.some((item) => item.status !== "completed")
+			? `## Current task list\n\n${formatTodos(todoState)}`
+			: undefined;
+		if (!todoText || messages.length === 0) return messages;
+		if (todoText === this._lastInjectedTodoText) return messages;
+		this._lastInjectedTodoText = todoText;
+		const todoMessage: AgentMessage = { role: "user", content: todoText, timestamp: Date.now() };
+		return [...messages.slice(0, -1), todoMessage, ...messages.slice(-1)];
+	}
+
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			await this.agent.prompt(messages);
+			const withTodo = this._maybeInjectTodo(Array.isArray(messages) ? messages : [messages]);
+			await this.agent.prompt(withTodo);
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
 			}
