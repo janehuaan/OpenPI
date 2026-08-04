@@ -2751,15 +2751,15 @@ export function ChatSurface({
 					</span>
 				</div>
 				<div className="statusbar-right">
-					{lastHit !== undefined && <span title="本次命中率">本次 {lastHit}%</span>}
-					{avgHit !== undefined && <span title="平均命中率">均 {avgHit}%</span>}
+					{stats && <span title="本次命中率">本次 {lastHit ?? 0}%</span>}
+					{stats && <span title="平均命中率">均 {avgHit ?? 0}%</span>}
 					{stats && <span title="会话 token">{fmtTokens(stats.tokens.total)} tok</span>}
 					{lastTotal > 0 && <span title="本次 token">+{fmtTokens(lastTotal)}</span>}
-					{lastCost > 0 && <span title="本次费用">{fmtCost(lastCost)}</span>}
+					{stats && <span title="本次费用">{fmtCost(lastCost)}</span>}
 					{stats && stats.cost > 0 && <span title="会话费用">共 {fmtCost(stats.cost)}</span>}
 					{stats && <span title="对话轮数">{stats.userMessages} 轮</span>}
-					{ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
-					{compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
+					{stats && ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
+					{stats && compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
 					{providerBalance && (
 						<span title="账户余额">
 							余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}

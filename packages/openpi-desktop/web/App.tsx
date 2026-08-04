@@ -281,10 +281,20 @@ export function App() {
 			setProviderBalance(undefined);
 			return;
 		}
-		void desktopApi
-			.getConversationStats(selectedInstanceId)
-			.then(setConversationStats)
-			.catch(() => {});
+		let disposed = false;
+		const poll = () =>
+			desktopApi
+				.getConversationStats(selectedInstanceId)
+				.then((stats) => {
+					if (!disposed) setConversationStats(stats);
+				})
+				.catch(() => {});
+		poll();
+		const timer = window.setInterval(poll, 3000);
+		return () => {
+			disposed = true;
+			window.clearInterval(timer);
+		};
 	}, [selectedInstanceId]);
 
 	useEffect(() => {
