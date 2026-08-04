@@ -19,6 +19,7 @@
 - Runtime tools (`sub_agent`, `parallel_tasks`, `submit_job`, `wait_job`) are now active by default in the SDK (previously omitted from the default activation list).
 - `/models` discovery now inherits accurate metadata (context window, max tokens, cost, reasoning) from the built-in catalog when the discovered id matches a known model, and reads `context_window`/`max_model_len` hints from the server response; stores whose models all carry the old 128k/zero-cost defaults are refreshed automatically.
 - `/models` discovery additionally consults the public models.dev database for ids neither in the built-in catalog nor annotated by the server: fetched once, cached 24h at `<agentDir>/models-dev-cache.json` (e.g. `gpt-5.4` → 400k instead of the 128k default); any network failure degrades to the conservative defaults.
+- `/models` discovery also consults the LiteLLM pricing catalog (largest public model-metadata source, ~3000 entries, `<agentDir>/litellm-cache.json`, 24h cache) for ids models.dev misses — e.g. `gpt-5.4-mini` → 272k; cost fields converted per-1M-tokens. Priority: built-in catalog > server hint > models.dev > LiteLLM > defaults.
 - `code_index` tool: regex-based symbol outline and search (TS/JS, Go, Python, Rust, Java/Kotlin, C/C++, Ruby) with kind filters; skips build/SCM directories.
 
 ## [0.80.8] - 2026-07-24

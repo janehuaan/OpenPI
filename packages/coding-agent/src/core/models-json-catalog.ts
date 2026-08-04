@@ -9,6 +9,7 @@ import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import * as builtinProviderCatalog from "@earendil-works/pi-ai/providers/all";
 import type { ModelsJsonProvider } from "./model-config.ts";
 import { ensureModelsDevLoaded, lookupModelsDevMeta } from "./models-dev.ts";
+import { ensureLiteLlmLoaded, lookupLiteLlmMeta } from "./models-litellm.ts";
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 const DEFAULT_MAX_TOKENS = 32_768;
@@ -99,7 +100,7 @@ function parseOpenAiModelsResponse(providerId: string, api: Api, baseUrl: string
 function applyModelsDevMeta(models: Model<Api>[]): Model<Api>[] {
 	let changed = false;
 	const merged = models.map((model) => {
-		const meta = lookupModelsDevMeta(model.id);
+		const meta = lookupModelsDevMeta(model.id) ?? lookupLiteLlmMeta(model.id);
 		if (!meta) return model;
 		// models.dev fills only discovery defaults — never overrides built-in
 		// catalog values or server-provided hints.
@@ -196,9 +197,9 @@ export function withModelsJsonEndpoint(provider: Provider, config: ModelsJsonPro
 						await context.store.write({ models: dynamicModels, checkedAt });
 						throw new Error(`Model discovery failed for ${provider.id}: ${response.status}`);
 					}
-					// Load the models.dev index once (cached 24h) so unknown ids
-					// can inherit accurate metadata; any failure keeps defaults.
-					await ensureModelsDevLoaded();
+					// Load external metadata indexes once (cached 24h) so unknown
+					// ids can inherit accurate metadata; failures keep defaults.
+					await Promise.all([ensureModelsDevLoaded(), ensureLiteLlmLoaded()]);
 					const refreshed = await parseOpenAiModelsResponse(
 						provider.id,
 						(config.api as Api) ?? "openai-responses",
