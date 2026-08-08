@@ -71,11 +71,13 @@ describe("orchestrator conversation lifecycle", () => {
 		rmSync(directory, { recursive: true, force: true });
 	});
 
-	it("discovers, resumes, renames, restores, and deletes a historical session", async () => {
+	it("discovers, resumes, renames, and deletes a historical session on demand", async () => {
 		const supervisor = new OrchestratorSupervisor();
 		supervisors.push(supervisor);
 		await supervisor.recoverAfterRestart();
+		expect(supervisor.isSessionIndexReady()).toBe(false);
 		await supervisor.waitForSessionRefresh();
+		expect(supervisor.isSessionIndexReady()).toBe(true);
 
 		const [discovered] = supervisor.listInstances();
 		expect(discovered).toMatchObject({
@@ -101,9 +103,12 @@ describe("orchestrator conversation lifecycle", () => {
 		supervisors.push(recoveredSupervisor);
 		await recoveredSupervisor.recoverAfterRestart();
 		expect(recoveredSupervisor.getInstance(discovered.id)).toMatchObject({
-			status: "online",
+			status: "stopped",
 			label: "Renamed conversation",
+			autoResume: false,
 		});
+		const recoveredResponse = await recoveredSupervisor.handleRpc(discovered.id, { type: "get_state" });
+		expect(recoveredResponse).toMatchObject({ command: "get_state", success: true });
 
 		expect(await recoveredSupervisor.deleteInstance(discovered.id)).toBe(true);
 		expect(existsSync(sessionFile)).toBe(false);

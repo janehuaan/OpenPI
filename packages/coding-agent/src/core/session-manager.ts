@@ -198,6 +198,21 @@ export interface SessionInfo {
 	allMessagesText: string;
 }
 
+/**
+ * Lightweight session metadata for callers that only need to render a session
+ * list. Reading it is bounded to the beginning and end of a JSONL file.
+ */
+export interface SessionMetadata {
+	path: string;
+	id: string;
+	cwd: string;
+	name?: string;
+	parentSessionPath?: string;
+	created: Date;
+	modified: Date;
+	firstMessage: string;
+}
+
 export type ReadonlySessionManager = Pick<
 	SessionManager,
 	| "getCwd"
@@ -513,6 +528,7 @@ export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultA
 }
 
 const SESSION_READ_BUFFER_SIZE = 1024 * 1024;
+const SESSION_METADATA_READ_BYTES = 64 * 1024;
 
 function parseSessionEntryLine(line: string): FileEntry | null {
 	if (!line.trim()) return null;
@@ -646,6 +662,76 @@ function getMessageActivityTime(entry: SessionMessageEntry): number | undefined 
 
 	const t = new Date(entry.timestamp).getTime();
 	return Number.isNaN(t) ? undefined : t;
+}
+
+function readSessionChunk(fd: number, position: number, length: number): string {
+	const buffer = Buffer.alloc(length);
+	const bytesRead = readSync(fd, buffer, 0, length, position);
+	return buffer.toString("utf8", 0, bytesRead);
+}
+
+async function buildSessionMetadata(filePath: string): Promise<SessionMetadata | null> {
+	try {
+		const stats = await stat(filePath);
+		const fd = openSync(filePath, "r");
+		let head = "";
+		let tail = "";
+		try {
+			head = readSessionChunk(fd, 0, Math.min(stats.size, SESSION_METADATA_READ_BYTES));
+			if (stats.size > SESSION_METADATA_READ_BYTES) {
+				tail = readSessionChunk(
+					fd,
+					Math.max(0, stats.size - SESSION_METADATA_READ_BYTES),
+					SESSION_METADATA_READ_BYTES,
+				);
+			}
+		} finally {
+			closeSync(fd);
+		}
+
+		let header: SessionHeader | undefined;
+		let firstMessage = "";
+		let name: string | undefined;
+		for (const line of head.split("\n")) {
+			const entry = parseSessionEntryLine(line);
+			if (!entry) continue;
+			if (!header) {
+				if (entry.type !== "session") return null;
+				header = entry;
+				continue;
+			}
+			if (entry.type === "session_info") {
+				name = entry.name?.trim() || undefined;
+				continue;
+			}
+			if (entry.type !== "message" || firstMessage) continue;
+			const message = entry.message;
+			if (!isMessageWithContent(message) || message.role !== "user") continue;
+			firstMessage = extractTextContent(message);
+		}
+
+		if (!header) return null;
+
+		for (const line of tail.split("\n")) {
+			const entry = parseSessionEntryLine(line);
+			if (entry?.type === "session_info") {
+				name = entry.name?.trim() || undefined;
+			}
+		}
+
+		return {
+			path: filePath,
+			id: header.id,
+			cwd: typeof header.cwd === "string" ? header.cwd : "",
+			name,
+			parentSessionPath: header.parentSession,
+			created: new Date(header.timestamp),
+			modified: stats.mtime,
+			firstMessage: firstMessage || "(no messages)",
+		};
+	} catch {
+		return null;
+	}
 }
 
 async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
@@ -803,6 +889,18 @@ async function listSessionsFromDir(
 	}
 
 	return sessions;
+}
+
+async function listSessionMetadataFromDir(dir: string): Promise<SessionMetadata[]> {
+	if (!existsSync(dir)) return [];
+
+	try {
+		const files = (await readdir(dir)).filter((file) => file.endsWith(".jsonl")).map((file) => join(dir, file));
+		const metadata = await Promise.all(files.map((file) => buildSessionMetadata(file)));
+		return metadata.filter((entry): entry is SessionMetadata => entry !== null);
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -1657,6 +1755,36 @@ export class SessionManager {
 				}
 			}
 
+			sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+			return sessions;
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * List every session using bounded metadata reads. This is for background
+	 * indexes such as the orchestrator; callers that need full-text search must
+	 * continue to use listAll().
+	 */
+	static async listAllMetadata(sessionDir?: string): Promise<SessionMetadata[]> {
+		const customSessionDir = sessionDir ? normalizePath(sessionDir) : undefined;
+		if (customSessionDir) {
+			const sessions = await listSessionMetadataFromDir(customSessionDir);
+			sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+			return sessions;
+		}
+
+		const sessionsDir = getSessionsDir();
+		try {
+			if (!existsSync(sessionsDir)) return [];
+			const entries = await readdir(sessionsDir, { withFileTypes: true });
+			const directories = entries
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => join(sessionsDir, entry.name));
+			const sessions = (
+				await Promise.all(directories.map((directory) => listSessionMetadataFromDir(directory)))
+			).flat();
 			sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime());
 			return sessions;
 		} catch {

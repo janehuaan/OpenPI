@@ -213,7 +213,11 @@ export async function handleIpcRequest(request: OrchestratorRequest): Promise<Or
 		case "health": {
 			const _request: HealthRequest = request;
 			void _request;
-			return { type: "health_result", ok: true, health: taskScheduler.health() } satisfies HealthResponse;
+			return {
+				type: "health_result",
+				ok: true,
+				health: { ...taskScheduler.health(), sessionsIndexed: supervisor.isSessionIndexReady() },
+			} satisfies HealthResponse;
 		}
 		case "shutdown": {
 			const _request: ShutdownRequest = request;

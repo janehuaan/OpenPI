@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "openpiVersion": "0.80.8",
+  "upstream": {
+    "repository": "earendil-works/pi",
+    "ref": "main",
+    "commit": "d3055be399632026ca6c09f441044cb3344239e9",
+    "lastSyncedAt": "2026-08-08"
+  }
+}

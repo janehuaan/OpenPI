@@ -12,6 +12,15 @@ packages/*/src-tauri/target/
 
 # Environment
 .env
+.env.*
+!.env.example
+
+# Private credentials and signing material
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+*.keystore
 
 # Editor files
 .vscode/

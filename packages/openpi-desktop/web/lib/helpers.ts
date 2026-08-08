@@ -10,7 +10,10 @@ import type {
 } from "../types";
 import {
 	type BlockingConversationUiRequest,
+	type DocumentAttachment,
 	type ImageAttachment,
+	MAX_DOCUMENT_FILE_BYTES,
+	MAX_DOCUMENT_TEXT_BYTES,
 	MAX_IMAGE_ATTACHMENTS,
 	MAX_IMAGE_BASE64_BYTES,
 	MAX_IMAGE_DIMENSION,
@@ -245,6 +248,19 @@ export function contentText(content: unknown): string {
 		.trim();
 }
 
+export function messageBlockCounts(content: unknown): { tools: number; thinking: number } {
+	if (!Array.isArray(content)) return { tools: 0, thinking: 0 };
+	let tools = 0;
+	let thinking = 0;
+	for (const block of content) {
+		if (!isRecord(block)) continue;
+		const type = typeof block.type === "string" ? block.type : "";
+		if (type === "toolCall" || type === "tool_use") tools += 1;
+		if (type === "thinking") thinking += 1;
+	}
+	return { tools, thinking };
+}
+
 export function contentImages(content: unknown): ImageContent[] {
 	if (!Array.isArray(content)) return [];
 	return content.flatMap((block) => {
@@ -262,7 +278,11 @@ export function contentImages(content: unknown): ImageContent[] {
 }
 
 export function conversationContentMatches(left: unknown, right: unknown): boolean {
-	if (contentText(left) !== contentText(right)) return false;
+	const visibleText = (content: unknown) =>
+		contentText(content)
+			.replace(/\n*<openpi-vision-context[\s\S]*?<\/openpi-vision-context>/g, "")
+			.trim();
+	if (visibleText(left) !== visibleText(right)) return false;
 	const leftImages = contentImages(left);
 	const rightImages = contentImages(right);
 	return (
@@ -360,6 +380,99 @@ export async function prepareImageAttachment(file: File): Promise<ImageAttachmen
 	}
 
 	throw new Error(`${file.name} could not be reduced below the image size limit`);
+}
+
+const TEXT_DOCUMENT_EXTENSIONS = new Set([
+	"c",
+	"cc",
+	"cpp",
+	"cs",
+	"css",
+	"csv",
+	"go",
+	"graphql",
+	"h",
+	"html",
+	"java",
+	"js",
+	"jsx",
+	"json",
+	"md",
+	"mjs",
+	"py",
+	"rb",
+	"rs",
+	"sh",
+	"sql",
+	"svg",
+	"toml",
+	"ts",
+	"tsx",
+	"txt",
+	"xml",
+	"yaml",
+	"yml",
+]);
+const BINARY_DOCUMENT_EXTENSIONS = new Set(["pdf", "docx"]);
+
+export function isTextDocumentFile(file: File): boolean {
+	if (file.type.startsWith("text/")) return true;
+	if (
+		[
+			"application/json",
+			"application/javascript",
+			"application/sql",
+			"application/xml",
+			"application/x-yaml",
+			"application/yaml",
+		].includes(file.type)
+	) {
+		return true;
+	}
+	const extension = file.name.split(".").at(-1)?.toLowerCase();
+	return extension !== undefined && TEXT_DOCUMENT_EXTENSIONS.has(extension);
+}
+
+export function isDocumentFile(file: File): boolean {
+	if (isTextDocumentFile(file)) return true;
+	if (
+		["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(file.type)
+	) {
+		return true;
+	}
+	const extension = file.name.split(".").at(-1)?.toLowerCase();
+	return extension !== undefined && BINARY_DOCUMENT_EXTENSIONS.has(extension);
+}
+
+export async function prepareDocumentAttachment(
+	file: File,
+	extractDocumentText: (input: { name: string; mimeType: string; data: string }) => Promise<{ text: string }>,
+): Promise<DocumentAttachment> {
+	if (isTextDocumentFile(file)) {
+		if (file.size > MAX_DOCUMENT_TEXT_BYTES) {
+			throw new Error(`${file.name} 超过 1 MB 文本附件限制`);
+		}
+		const text = await file.text();
+		if (text.includes("\0")) {
+			throw new Error(`${file.name} 是二进制文件，无法作为文本上下文发送`);
+		}
+		return { id: crypto.randomUUID(), name: file.name, text };
+	}
+	if (!isDocumentFile(file)) {
+		throw new Error(`${file.name} 不是支持的文档格式`);
+	}
+	if (file.size > MAX_DOCUMENT_FILE_BYTES) {
+		throw new Error(`${file.name} 超过 10 MB 文档上传限制`);
+	}
+	const result = await extractDocumentText({
+		name: file.name,
+		mimeType: file.type,
+		data: await readBlobAsBase64(file),
+	});
+	if (!result.text.trim()) {
+		throw new Error(`${file.name} 未提取到可发送的文本内容`);
+	}
+	return { id: crypto.randomUUID(), name: file.name, text: result.text };
 }
 
 export function toolCalls(message: ConversationMessage): Array<{ name: string; detail?: string }> {

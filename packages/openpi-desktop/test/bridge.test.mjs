@@ -4,7 +4,12 @@ vi.mock("electron", () => ({ dialog: { showOpenDialog: vi.fn(), showMessageBox: 
 vi.mock("../electron/agnes-media.mjs", () => ({ createAgnesMediaClient: vi.fn() }));
 vi.mock("../electron/orch.mjs", () => ({
 	ensureDaemon: vi.fn(async () => {}),
-	getHealthSafe: vi.fn(async () => ({ version: "0.80.8", uptimeMs: 100, socketPath: "/tmp/sock" })),
+	getHealthSafe: vi.fn(async () => ({
+		version: "0.80.8",
+		uptimeMs: 100,
+		socketPath: "/tmp/sock",
+		sessionsIndexed: true,
+	})),
 	listInstancesLive: vi.fn(async () => []),
 	probeDaemon: vi.fn(async () => ({ alive: true, list: { instances: [] } })),
 	readTasksAndRuns: vi.fn(() => ({ tasks: [], runs: [], instances: [] })),
@@ -97,6 +102,7 @@ describe("bridge IPC", () => {
 
 		const snapshot = await ipcMain.call("openpi:get_snapshot", {});
 		expect(snapshot.daemonRunning).toBe(true);
+		expect(snapshot.health.sessionsIndexed).toBe(true);
 		expect(snapshot.instances.map((i) => i.id)).toEqual(["a"]); // default hides stopped; ghost dropped
 		expect(snapshot.instanceStats.total).toBe(2);
 
@@ -115,6 +121,7 @@ describe("bridge IPC", () => {
 		const snapshot = await ipcMain.call("openpi:get_snapshot", {});
 		expect(snapshot.daemonRunning).toBe(false);
 		expect(snapshot.instances.map((i) => i.id)).toEqual(["f1"]);
+		expect(orch.ensureDaemon).toHaveBeenCalledTimes(1);
 	});
 
 	it("get_snapshot aggregates task health when health is absent", async () => {

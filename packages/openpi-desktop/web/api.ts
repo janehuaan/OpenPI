@@ -15,6 +15,8 @@ import type {
 	CreateConversationInput,
 	CreateTaskInput,
 	DesktopSnapshot,
+	DocumentTextExtractionInput,
+	DocumentTextExtractionResult,
 	ImageContent,
 	MediaSaveInput,
 	ModelProviderConfig,
@@ -22,6 +24,10 @@ import type {
 	TaskRun,
 	ThinkingLevel,
 	TodoState,
+	VisionFallbackConfig,
+	VisionFallbackModel,
+	WorkspaceFileContent,
+	WorkspaceSummary,
 } from "./types";
 
 type OpenPiBridge = {
@@ -70,6 +76,10 @@ export const desktopApi = {
 	createConversation: (input: CreateConversationInput) =>
 		call<AgentInstance>("create_conversation", { label: input.label, cwd: input.cwd, mode: input.mode }),
 	selectWorkspace: (defaultPath?: string) => call<string | undefined>("select_workspace", { defaultPath }),
+	getWorkspaceSummary: (cwd: string) => call<WorkspaceSummary>("get_workspace_summary", { cwd }),
+	readWorkspaceFile: (cwd: string, path: string) => call<WorkspaceFileContent>("read_workspace_file", { cwd, path }),
+	extractDocumentText: (input: DocumentTextExtractionInput) =>
+		call<DocumentTextExtractionResult>("extract_document_text", input),
 	sendMessage: (instanceId: string, message: string, images: ImageContent[], sessionName?: string) =>
 		call<boolean>("send_message", { instanceId, message, images, sessionName }),
 	abortConversation: (instanceId: string) => call<boolean>("abort_conversation", { instanceId }),
@@ -142,6 +152,25 @@ export const desktopApi = {
 	doctor: () => call<{ ok: boolean; output: string }>("doctor"),
 	defaultWorkspace: () => call<string>("default_workspace"),
 	getModelProviders: () => call<Record<string, ModelProviderConfig>>("get_model_providers"),
+	getProviderAuthStatus: (instanceId: string) =>
+		call<Array<{ provider: string; type?: string; source?: string; configured: boolean }>>(
+			"get_provider_auth_status",
+			{ instanceId },
+		),
+	providerLogin: (instanceId: string, provider: string, authType: "oauth" | "api_key") =>
+		call<{ provider: string; type: string }>("provider_login", { instanceId, provider, authType }),
+	providerLogout: (instanceId: string, provider: string) => call<boolean>("provider_logout", { instanceId, provider }),
+	openExternal: (url: string) => call<boolean>("open_external", { url }),
+	getUserProfile: () => call<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>("get_user_profile"),
+	saveUserProfile: (profile: { nickname?: string; avatarEmoji?: string }) =>
+		call<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>("save_user_profile", profile),
+	getVisionFallback: () => call<VisionFallbackConfig>("get_vision_fallback"),
+	getVisionFallbackModels: () => call<VisionFallbackModel[]>("get_vision_fallback_models"),
+	configureVisionFallback: async (input: { apiKey?: string; enabled: boolean; model?: string }) => {
+		const result = await call<VisionFallbackConfig>("configure_vision_fallback", input);
+		window.dispatchEvent(new Event("openpi:model-providers-changed"));
+		return result;
+	},
 	saveModelProvider: async (providerId: string, config: ModelProviderConfig) => {
 		const result = await call<boolean>("save_model_provider", { providerId, config });
 		window.dispatchEvent(new Event("openpi:model-providers-changed"));

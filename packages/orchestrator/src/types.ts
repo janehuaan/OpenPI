@@ -150,6 +150,8 @@ export interface OrchestratorHealth {
 	version: string;
 	uptimeMs: number;
 	socketPath: string;
+	/** True after persisted Pi session metadata has been indexed for this daemon start. */
+	sessionsIndexed?: boolean;
 	tasksActive: number;
 	tasksPaused: number;
 	runsRunning: number;

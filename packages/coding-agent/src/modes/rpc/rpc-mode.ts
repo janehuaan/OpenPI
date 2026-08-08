@@ -12,6 +12,7 @@
  */
 
 import * as crypto from "node:crypto";
+import type { AuthEvent, AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../config.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import type {
@@ -570,6 +571,92 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				await session.modelRuntime.reloadConfig();
 				const models = await session.modelRuntime.getAvailable();
 				return success(id, "get_available_models", { models });
+			}
+
+			// =================================================================
+			// Provider auth (desktop login panel)
+			// =================================================================
+
+			case "get_provider_auth_status": {
+				return success(id, "get_provider_auth_status", {
+					statuses: session.modelRuntime.getAuthStatuses(),
+				});
+			}
+
+			case "provider_login": {
+				const interaction: AuthInteraction = {
+					signal: undefined,
+					prompt: async (prompt: AuthPrompt) => {
+						if (prompt.type === "text" || prompt.type === "secret") {
+							// RPC mode has no synchronous prompt path; resolve empty so
+							// api_key login falls back to stored credentials or errors.
+							return "";
+						}
+						return "";
+					},
+					notify: (event: AuthEvent) => {
+						if (event.type === "auth_url") {
+							output({
+								type: "extension_ui_request",
+								id: crypto.randomUUID(),
+								method: "auth",
+								provider: command.provider,
+								url: event.url,
+								instructions: event.instructions,
+								status: "pending",
+							} as RpcExtensionUIRequest);
+						} else if (event.type === "device_code") {
+							output({
+								type: "extension_ui_request",
+								id: crypto.randomUUID(),
+								method: "auth",
+								provider: command.provider,
+								url: event.verificationUri,
+								userCode: event.userCode,
+								instructions: "在浏览器中打开链接并输入验证码",
+								status: "pending",
+							} as RpcExtensionUIRequest);
+						} else if (event.type === "progress") {
+							output({
+								type: "extension_ui_request",
+								id: crypto.randomUUID(),
+								method: "notify",
+								message: `[${command.provider}] ${event.message}`,
+								notifyType: "info",
+							} as RpcExtensionUIRequest);
+						} else if (event.type === "info") {
+							output({
+								type: "extension_ui_request",
+								id: crypto.randomUUID(),
+								method: "notify",
+								message: `[${command.provider}] ${event.message}`,
+								notifyType: "info",
+							} as RpcExtensionUIRequest);
+						}
+					},
+				};
+				try {
+					const credential = await session.modelRuntime.login(command.provider, command.authType, interaction);
+					return success(id, "provider_login", {
+						provider: command.provider,
+						type: credential.type,
+					});
+				} catch (caught) {
+					output({
+						type: "extension_ui_request",
+						id: crypto.randomUUID(),
+						method: "auth",
+						provider: command.provider,
+						status: "failed",
+						message: caught instanceof Error ? caught.message : String(caught),
+					} as RpcExtensionUIRequest);
+					return error(id, "provider_login", caught instanceof Error ? caught.message : String(caught));
+				}
+			}
+
+			case "provider_logout": {
+				await session.modelRuntime.logout(command.provider);
+				return success(id, "provider_logout");
 			}
 
 			// =================================================================

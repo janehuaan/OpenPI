@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktopApi } from "./api";
 import {
 	type AppMode,
-	AppRail,
 	CapabilitiesSurface,
 	ChatSurface,
 	ContextPanel,
@@ -12,8 +11,11 @@ import {
 	CreateTaskDialog,
 	DaemonSurface,
 	DeleteConversationDialog,
+	EditProfileDialog,
 	IntelligenceSurface,
 	MemorySurface,
+	ProviderAuthDialog,
+	ReferenceWorkspacePreview,
 	RenameConversationDialog,
 	SecuritySurface,
 	TasksSurface,
@@ -21,6 +23,7 @@ import {
 import { TodoPanel } from "./components/todo-panel";
 import {
 	type CapabilityTab,
+	type DocumentAttachment,
 	type ExtensionNotice,
 	emptySnapshot,
 	type OptimisticUserMessage,
@@ -30,6 +33,7 @@ import {
 } from "./lib/app-types";
 import {
 	blockingConversationUiRequest,
+	contentText,
 	conversationContentMatches,
 	instanceTitle,
 	isConversationMessage,
@@ -51,10 +55,29 @@ import type {
 	ConversationUiResponse,
 	CreateTaskInput,
 	ImageContent,
+	RunningTool,
 	TaskRun,
 	ThinkingLevel,
 	TodoState,
+	VisionFallbackConfig,
+	WorkspaceSummary,
 } from "./types";
+
+function escapeAttachmentName(name: string): string {
+	return name.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function messageWithDocuments(message: string, documents: DocumentAttachment[]): string {
+	if (documents.length === 0) return message;
+	const prompt = message.trim() || "请分析已附加的文件。";
+	const content = documents
+		.map((document) => {
+			const source = document.path ? ` path="${escapeAttachmentName(document.path)}"` : "";
+			return `<file name="${escapeAttachmentName(document.name)}"${source}>\n${document.text}\n</file>`;
+		})
+		.join("\n\n");
+	return `${prompt}\n\n<openpi-attachments>\n${content}\n</openpi-attachments>`;
+}
 
 export function App() {
 	const [setup, setSetup] = useState<{
@@ -96,6 +119,8 @@ export function App() {
 	const [taskQuery, setTaskQuery] = useState("");
 	const [chatQuery, setChatQuery] = useState("");
 	const [loading, setLoading] = useState(true);
+	const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+	const [startupReady, setStartupReady] = useState(false);
 	const [busy, setBusy] = useState<string>();
 	const [error, setError] = useState<string>();
 	// Track which instances are actively processing (agent_start → agent_settled)
@@ -106,8 +131,12 @@ export function App() {
 	const [deletingConversation, setDeletingConversation] = useState<AgentInstance>();
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [contextOpen, setContextOpen] = useState(false);
+	const [chatTab, setChatTab] = useState<"chat" | "activity">("chat");
 	const [log, setLog] = useState<string>();
 	const [workspaceMemory, setWorkspaceMemory] = useState<string[]>([]);
+	const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceSummary>();
+	const [runningTools, setRunningTools] = useState<RunningTool[]>([]);
+	const [visionFallback, setVisionFallback] = useState<VisionFallbackConfig>();
 	const [workspaceIntelligenceRuns, setWorkspaceIntelligenceRuns] = useState<string[]>([]);
 	const [securityAudit, setSecurityAudit] = useState<string[]>([]);
 	const [securityMode, setSecurityMode] = useState<string>();
@@ -138,6 +167,15 @@ export function App() {
 	}>({});
 	const [includeStopped, setIncludeStopped] = useState(false);
 	const [showAllConversations, setShowAllConversations] = useState(false);
+	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
+	const [editingProfile, setEditingProfile] = useState(false);
+	const [authDialog, setAuthDialog] = useState<{
+		provider: string;
+		url?: string;
+		userCode?: string;
+		status: "pending" | "completed" | "failed";
+		message?: string;
+	}>();
 	// Stable first-seen order: once an instance gets an index it never changes
 	const [conversationOrder, setConversationOrder] = useState<Record<string, number>>({});
 	const [appMode, setAppMode] = useState<AppMode>(() => {
@@ -153,11 +191,16 @@ export function App() {
 		return window.localStorage.getItem("openpi-code-workspace") || undefined;
 	});
 	const selectedInstanceIdRef = useRef(selectedInstanceId);
+	const conversationCacheRef = useRef<Record<string, ConversationSnapshot>>({});
 	const routeInitializedRef = useRef(false);
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
 	selectedInstanceIdRef.current = selectedInstanceId;
 	const activeConversationUiRequest = pendingConversationUiRequests[0];
 	const isStreaming = Boolean(conversation?.state.isStreaming || optimisticMessage);
+
+	useEffect(() => {
+		if (conversation) conversationCacheRef.current[conversation.instance.id] = conversation;
+	}, [conversation]);
 
 	const refresh = useCallback(
 		async (showLoading = false) => {
@@ -182,11 +225,42 @@ export function App() {
 			} catch (caught) {
 				setError(caught instanceof Error ? caught.message : String(caught));
 			} finally {
-				if (showLoading) setLoading(false);
+				if (showLoading) {
+					setLoading(false);
+					setInitialLoadComplete(true);
+				}
 			}
 		},
 		[includeStopped],
 	);
+
+	useEffect(() => {
+		if (!desktopApi.isNative) return;
+		let disposed = false;
+		void desktopApi
+			.getUserProfile()
+			.then((profile) => {
+				if (!disposed) setUserProfile(profile ?? {});
+			})
+			.catch(() => {});
+		return () => {
+			disposed = true;
+		};
+	}, []);
+
+	async function saveUserProfile(profile: { nickname?: string; avatarEmoji?: string }): Promise<void> {
+		setBusy("save-profile");
+		setError(undefined);
+		try {
+			const next = await desktopApi.saveUserProfile(profile);
+			setUserProfile(next ?? {});
+			setEditingProfile(false);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setBusy(undefined);
+		}
+	}
 
 	useEffect(() => {
 		window.localStorage.setItem("openpi-app-mode", appMode);
@@ -259,6 +333,7 @@ export function App() {
 					busy: false,
 					error: caught instanceof Error ? caught.message : String(caught),
 				});
+				setInitialLoadComplete(true);
 			});
 		return () => {
 			disposed = true;
@@ -268,11 +343,53 @@ export function App() {
 	useEffect(() => {
 		if (!setup.checked || !setup.enabled) return;
 		void refresh(true);
-		// Faster while streaming; otherwise 15s full snapshot (was 5s).
-		const intervalMs = isStreaming ? 5_000 : 15_000;
+		// Reconcile quickly while the daemon is starting, then back off.
+		const intervalMs =
+			snapshot.daemonRunning && snapshot.health?.sessionsIndexed ? (isStreaming ? 5_000 : 15_000) : 750;
 		const timer = window.setInterval(() => void refresh(), intervalMs);
 		return () => window.clearInterval(timer);
-	}, [refresh, setup.checked, setup.enabled, isStreaming]);
+	}, [refresh, setup.checked, setup.enabled, isStreaming, snapshot.daemonRunning, snapshot.health?.sessionsIndexed]);
+
+	useEffect(() => {
+		if (startupReady) return;
+		if (!setup.checked) return;
+		if (!setup.enabled) {
+			setStartupReady(true);
+			return;
+		}
+		if (!initialLoadComplete || !snapshot.daemonRunning || !snapshot.health?.sessionsIndexed) return;
+
+		let disposed = false;
+		const loadInitialData = async (): Promise<void> => {
+			try {
+				const [profile, fallback, mode] = await Promise.all([
+					desktopApi.getUserProfile(),
+					desktopApi.getVisionFallback(),
+					desktopApi.getSecurityMode(),
+				]);
+				if (disposed) return;
+				setUserProfile(profile ?? {});
+				setVisionFallback(fallback);
+				setSecurityMode(mode);
+			} catch (caught) {
+				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
+			} finally {
+				if (!disposed) setStartupReady(true);
+			}
+		};
+
+		void loadInitialData();
+		return () => {
+			disposed = true;
+		};
+	}, [
+		initialLoadComplete,
+		setup.checked,
+		setup.enabled,
+		snapshot.daemonRunning,
+		snapshot.health?.sessionsIndexed,
+		startupReady,
+	]);
 
 	// Conversation stats + provider balance for the status bar.
 	useEffect(() => {
@@ -355,6 +472,24 @@ export function App() {
 			if (disposed || payload.instanceId !== selectedInstanceIdRef.current || !isRecord(payload.event)) return;
 			const eventType = typeof payload.event.type === "string" ? payload.event.type : undefined;
 			if (eventType === "extension_ui_request") {
+				if (payload.event.method === "auth" && typeof payload.event.provider === "string") {
+					setAuthDialog({
+						provider: payload.event.provider,
+						url: typeof payload.event.url === "string" ? payload.event.url : undefined,
+						userCode: typeof payload.event.userCode === "string" ? payload.event.userCode : undefined,
+						status:
+							payload.event.status === "completed" || payload.event.status === "failed"
+								? payload.event.status
+								: "pending",
+						message:
+							typeof payload.event.message === "string"
+								? payload.event.message
+								: typeof payload.event.instructions === "string"
+									? payload.event.instructions
+									: undefined,
+					});
+					return;
+				}
 				if (payload.event.method === "notify" && typeof payload.event.message === "string") {
 					const type: ExtensionNotice["type"] =
 						payload.event.notifyType === "warning" || payload.event.notifyType === "error"
@@ -404,6 +539,7 @@ export function App() {
 				return;
 			}
 			if (eventType === "agent_start") {
+				setRunningTools([]);
 				setStreamingInstances((prev) => new Set(prev).add(payload.instanceId));
 				setConversation((current) =>
 					current?.instance.id === payload.instanceId
@@ -413,6 +549,7 @@ export function App() {
 				return;
 			}
 			if (eventType === "agent_settled") {
+				setRunningTools([]);
 				setStreamingInstances((prev) => {
 					const next = new Set(prev);
 					next.delete(payload.instanceId);
@@ -434,6 +571,27 @@ export function App() {
 				void desktopApi.getConversationStats(payload.instanceId).then((stats) => {
 					if (!disposed && selectedInstanceIdRef.current === payload.instanceId) setConversationStats(stats);
 				});
+				return;
+			}
+			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
+				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
+				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
+				if (!toolCallId || !toolName) return;
+				setRunningTools((current) => {
+					const next = {
+						toolCallId,
+						toolName,
+						args: (payload.event as { args?: unknown }).args,
+					};
+					const existing = current.findIndex((tool) => tool.toolCallId === toolCallId);
+					if (existing === -1) return [...current, next];
+					return current.map((tool, index) => (index === existing ? next : tool));
+				});
+				return;
+			}
+			if (eventType === "tool_execution_end") {
+				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
+				if (toolCallId) setRunningTools((current) => current.filter((tool) => tool.toolCallId !== toolCallId));
 				return;
 			}
 			if (
@@ -508,10 +666,13 @@ export function App() {
 		let disposed = false;
 		let timer: number | undefined;
 		const instanceId = selectedInstanceId;
+		const cached = conversationCacheRef.current[instanceId];
+		setConversation(cached);
 		const poll = async () => {
 			let delay = 4_000;
 			try {
 				const next = await desktopApi.getConversation(instanceId);
+				conversationCacheRef.current[instanceId] = next;
 				const pending = optimisticMessage?.instanceId === instanceId ? optimisticMessage : undefined;
 				const messageAccepted = pending
 					? next.messages
@@ -561,6 +722,10 @@ export function App() {
 		};
 	}, [selectedInstanceId, optimisticMessage, streamConnectedInstanceId]);
 
+	useEffect(() => {
+		setRunningTools([]);
+	}, [selectedInstanceId]);
+
 	const loadConversationModels = useCallback(async (instanceId: string): Promise<void> => {
 		setLoadingConversationModels(true);
 		try {
@@ -590,10 +755,21 @@ export function App() {
 		const handleModelProvidersChanged = () => {
 			const instanceId = selectedInstanceIdRef.current;
 			if (instanceId) void loadConversationModels(instanceId);
+			void desktopApi
+				.getVisionFallback()
+				.then(setVisionFallback)
+				.catch(() => undefined);
 		};
 		window.addEventListener("openpi:model-providers-changed", handleModelProvidersChanged);
 		return () => window.removeEventListener("openpi:model-providers-changed", handleModelProvidersChanged);
 	}, [loadConversationModels]);
+
+	useEffect(() => {
+		void desktopApi
+			.getVisionFallback()
+			.then(setVisionFallback)
+			.catch(() => undefined);
+	}, []);
 
 	const loadCapabilities = useCallback(async (instanceId: string, reload = false): Promise<void> => {
 		setLoadingCapabilities(true);
@@ -612,7 +788,10 @@ export function App() {
 
 	useEffect(() => {
 		setCapabilities(undefined);
-		if (!selectedInstanceId || view !== "capabilities") return;
+		if (!selectedInstanceId || view !== "capabilities") {
+			setLoadingCapabilities(false);
+			return;
+		}
 		void loadCapabilities(selectedInstanceId);
 	}, [selectedInstanceId, view, loadCapabilities]);
 
@@ -644,12 +823,7 @@ export function App() {
 					.includes(normalized)
 			);
 		});
-		// Split by cwd: conversations with a specific project path go to "projects"
-		const defaultCwd = setup.workspace;
-		const isProject = (i: AgentInstance) => {
-			const cwd = i.cwd?.trim();
-			return Boolean(cwd) && cwd !== defaultCwd;
-		};
+		const isProject = (instance: AgentInstance) => instance.mode === "code";
 		const projectFiltered = filtered.filter(isProject);
 		const chatFiltered = filtered.filter((i) => !isProject(i));
 		const sortByOrder = (a: AgentInstance, b: AgentInstance) =>
@@ -673,15 +847,7 @@ export function App() {
 			totalCount: totalAll,
 			truncated: totalAll > SIDEBAR_LIMIT && !searching,
 		};
-	}, [
-		snapshot.instances,
-		conversationTitles,
-		chatQuery,
-		showAllConversations,
-		selectedInstanceId,
-		conversationOrder,
-		setup.workspace,
-	]);
+	}, [snapshot.instances, conversationTitles, chatQuery, showAllConversations, selectedInstanceId, conversationOrder]);
 	const conversations = conversationList.conversations;
 
 	const selectedTask = snapshot.tasks.find((task) => task.id === selectedTaskId);
@@ -699,6 +865,28 @@ export function App() {
 		activeConversation?.instance.cwd ??
 		snapshot.instances.find((instance) => instance.id === selectedInstanceId)?.cwd;
 	const operationView = view === "memory" || view === "security" || view === "intelligence" || view === "daemon";
+
+	useEffect(() => {
+		if (!selectedWorkspace) {
+			setWorkspaceSummary(undefined);
+			return;
+		}
+		let disposed = false;
+		void desktopApi
+			.getWorkspaceSummary(selectedWorkspace)
+			.then((summary) => {
+				if (!disposed) setWorkspaceSummary(summary);
+			})
+			.catch((caught: unknown) => {
+				if (!disposed) {
+					setWorkspaceSummary(undefined);
+					setError(caught instanceof Error ? caught.message : String(caught));
+				}
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [selectedWorkspace]);
 
 	// Load agent slash commands for chat hub (not only intelligence page)
 	useEffect(() => {
@@ -722,7 +910,7 @@ export function App() {
 
 	useEffect(() => {
 		if (!selectedWorkspace) {
-			if (view === "memory") setWorkspaceMemory([]);
+			if (view === "memory" || view === "chat") setWorkspaceMemory([]);
 			if (view === "security") setSecurityAudit([]);
 			if (view === "intelligence") {
 				setWorkspaceIntelligenceRuns([]);
@@ -734,9 +922,11 @@ export function App() {
 		let disposed = false;
 		const loadWorkspaceSurface = async (): Promise<void> => {
 			try {
-				if (view === "memory") {
-					const entries = await desktopApi.listMemoryIndex(selectedWorkspace, memoryScope);
-					const meta = await desktopApi.memoryMeta(selectedWorkspace);
+				if (view === "memory" || view === "chat") {
+					const [entries, meta] = await Promise.all([
+						desktopApi.listMemoryIndex(selectedWorkspace, memoryScope),
+						desktopApi.memoryMeta(selectedWorkspace),
+					]);
 					if (!disposed) {
 						setWorkspaceMemory(entries);
 						setMemoryMeta({
@@ -770,11 +960,13 @@ export function App() {
 				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
 			}
 		};
-		void loadWorkspaceSurface();
+		const timer = view === "chat" ? window.setTimeout(() => void loadWorkspaceSurface(), 1_000) : undefined;
+		if (timer === undefined) void loadWorkspaceSurface();
 		return () => {
 			disposed = true;
+			if (timer !== undefined) window.clearTimeout(timer);
 		};
-	}, [view, selectedWorkspace, selectedInstanceId, memoryScope]);
+	}, [view, selectedWorkspace, memoryScope]);
 
 	useEffect(() => {
 		if (view !== "security") return;
@@ -857,17 +1049,22 @@ export function App() {
 		}
 	}
 
-	async function sendMessage(message: string, images: ImageContent[]): Promise<void> {
+	async function sendMessage(
+		message: string,
+		images: ImageContent[],
+		documents: DocumentAttachment[] = [],
+	): Promise<void> {
 		setTurnMeta(undefined);
 		setBusy("send-message");
 		setError(undefined);
+		const prompt = messageWithDocuments(message, documents);
 		const selectedConversation = conversation?.instance.id === selectedInstanceId ? conversation : undefined;
 		const pending: OptimisticUserMessage = {
 			instanceId: selectedInstanceId,
 			baselineMessageCount: selectedConversation?.messages.length ?? 0,
 			message: {
 				role: "user",
-				content: images.length > 0 ? [{ type: "text", text: message }, ...images] : message,
+				content: images.length > 0 ? [{ type: "text", text: prompt }, ...images] : prompt,
 				timestamp: Date.now(),
 			},
 		};
@@ -911,22 +1108,49 @@ export function App() {
 			}
 			const sessionName =
 				pending.baselineMessageCount === 0
-					? (message.replace(/\s+/g, " ").trim() || "Image conversation").slice(0, 48)
+					? (message.replace(/\s+/g, " ").trim() || documents[0]?.name || "Image conversation").slice(0, 48)
 					: undefined;
 			if (sessionName) {
 				setConversationTitles((current) => ({ ...current, [instanceId]: sessionName }));
 			}
 			if (desktopApi.isNative) await desktopApi.watchConversation(instanceId);
-			await desktopApi.sendMessage(instanceId, message, images, sessionName);
+			await desktopApi.sendMessage(instanceId, prompt, images, sessionName);
 		} catch (caught) {
 			setOptimisticMessage((current) =>
 				current === pending || current?.message === pending.message ? undefined : current,
 			);
-			setError(caught instanceof Error ? caught.message : String(caught));
+			const messageText = caught instanceof Error ? caught.message : String(caught);
+			if (/已停止|aborted|abort/i.test(messageText)) return;
+			setError(messageText);
 			throw caught;
 		} finally {
 			setBusy(undefined);
 		}
+	}
+
+	function selectConversation(instanceId: string): void {
+		const cached = conversationCacheRef.current[instanceId];
+		setOptimisticMessage(undefined);
+		setTurnMeta(undefined);
+		selectedInstanceIdRef.current = instanceId;
+		setConversation(cached);
+		setSelectedInstanceId(instanceId);
+	}
+
+	function abortConversation(): void {
+		const instanceId = selectedInstanceIdRef.current;
+		if (!instanceId) return;
+		setOptimisticMessage(undefined);
+		setBusy((current) => (current === "send-message" ? undefined : current));
+		setConversation((current) => {
+			if (!current || current.instance.id !== instanceId) return current;
+			const next = { ...current, state: { ...current.state, isStreaming: false } };
+			conversationCacheRef.current[instanceId] = next;
+			return next;
+		});
+		void desktopApi.abortConversation(instanceId).catch((caught: unknown) => {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		});
 	}
 
 	async function changeConversationMode(mode: AgentMode): Promise<void> {
@@ -956,26 +1180,19 @@ export function App() {
 		setView("chat");
 		const targetAgentMode = nextMode === "code" ? "code" : "work";
 		setPreferredMode(targetAgentMode);
-		const defaultCwd = setup.workspace;
-		const isProjectInstance = (i: AgentInstance) => {
-			const cwd = i.cwd?.trim();
-			return Boolean(cwd) && cwd !== defaultCwd;
-		};
-		// If current selection already matches the target view, keep it
-		const currentIsProject = selectedAgentInstance ? isProjectInstance(selectedAgentInstance) : false;
-		if ((nextMode === "code") === currentIsProject) return;
+		if (selectedAgentInstance?.mode === targetAgentMode) return;
 		// Find the most recent conversation matching the target view
 		const candidates = snapshot.instances.filter((i) => {
 			if (i.status === "error") return false;
-			return nextMode === "code" ? isProjectInstance(i) : !isProjectInstance(i);
+			return i.mode === targetAgentMode;
 		});
 		const match = candidates
 			.sort((a, b) => (conversationOrder[a.id] ?? Infinity) - (conversationOrder[b.id] ?? Infinity))
 			.at(-1);
 		if (match) {
 			selectedInstanceIdRef.current = match.id;
+			setConversation(conversationCacheRef.current[match.id]);
 			setSelectedInstanceId(match.id);
-			setConversation(undefined);
 			setView("chat");
 		} else {
 			selectedInstanceIdRef.current = undefined;
@@ -1000,6 +1217,28 @@ export function App() {
 			);
 			setRenamingConversation(undefined);
 		}
+	}
+
+	function exportSelectedConversation(): void {
+		if (!conversation) {
+			setError("没有可导出的对话。");
+			return;
+		}
+		const title = instanceTitle(conversation.instance, conversation.state.sessionName);
+		const body = conversation.messages
+			.filter((message) => message.role === "user" || message.role === "assistant" || message.role === "toolResult")
+			.map((message) => {
+				const role = message.role === "user" ? "You" : message.role === "assistant" ? "OpenPI" : message.toolName;
+				return `## ${role ?? "Tool"}\n\n${contentText(message.content)}`;
+			})
+			.join("\n\n");
+		const blob = new Blob([`# ${title}\n\n${body}\n`], { type: "text/markdown;charset=utf-8" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = "openpi-conversation.md";
+		link.click();
+		URL.revokeObjectURL(url);
 	}
 
 	async function deleteSelectedConversation(): Promise<void> {
@@ -1092,8 +1331,11 @@ export function App() {
 		setError(undefined);
 		try {
 			const cwd = selectedWorkspace || (await desktopApi.defaultWorkspace());
-			setWorkspaceMemory(await desktopApi.listMemoryIndex(cwd, memoryScope));
-			const meta = await desktopApi.memoryMeta(cwd);
+			const [entries, meta] = await Promise.all([
+				desktopApi.listMemoryIndex(cwd, memoryScope),
+				desktopApi.memoryMeta(cwd),
+			]);
+			setWorkspaceMemory(entries);
 			setMemoryMeta({
 				...meta.meta,
 				projectCount: meta.projectCount,
@@ -1304,12 +1546,16 @@ export function App() {
 		});
 	}, []);
 
-	if (!setup.checked) {
+	if (!startupReady) {
 		return (
 			<div className="setup-shell">
-				<div className="setup-card">
+				<div className="setup-card startup-card startup-card-active">
 					<h1>OpenPI</h1>
-					<p className="muted">正在启动桌面助手…</p>
+					<p className="muted">正在加载工作区…</p>
+					<div className="startup-progress" role="status" aria-live="polite">
+						<RefreshCw size={20} className="spin" />
+						<span>初始化服务与会话</span>
+					</div>
 				</div>
 			</div>
 		);
@@ -1375,20 +1621,106 @@ export function App() {
 		);
 	}
 
+	if (view === "chat") {
+		return (
+			<ReferenceWorkspacePreview
+				projectInstances={conversationList.projects}
+				chatInstances={conversations}
+				selectedInstanceId={selectedInstanceId}
+				conversation={conversation}
+				conversationTitles={conversationTitles}
+				workspaceSummary={workspaceSummary}
+				runningTools={runningTools}
+				optimisticMessage={
+					optimisticMessage &&
+					(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
+						? optimisticMessage.message
+						: undefined
+				}
+				memoryEntries={workspaceMemory}
+				memoryCount={memoryMeta.projectCount ?? workspaceMemory.length}
+				stats={conversationStats}
+				providerBalance={providerBalance}
+				modelOptions={conversationModels}
+				visionFallback={visionFallback}
+				loadingModels={loadingConversationModels}
+				configuring={busy === "set-model" || busy === "set-thinking"}
+				sending={busy === "send-message"}
+				appMode={appMode}
+				onSelectConversation={(instanceId) => {
+					setAppMode("chat");
+					setPreferredMode("work");
+					selectConversation(instanceId);
+				}}
+				onOpenProject={(instanceId) => {
+					const project = snapshot.instances.find((instance) => instance.id === instanceId);
+					setAppMode("code");
+					setPreferredMode("code");
+					if (project?.cwd) setCodeWorkspace(project.cwd);
+					selectConversation(instanceId);
+				}}
+				onNewProjectSession={(workspace) => void createConversation("code", workspace)}
+				onNewConversation={() =>
+					void createConversation(preferredMode, preferredMode === "code" ? codeWorkspace : undefined)
+				}
+				onOpenSettings={() => setView("capabilities")}
+				onSend={sendMessage}
+				onAbort={abortConversation}
+				onRenameConversation={() => {
+					if (selectedAgentInstance) setRenamingConversation(selectedAgentInstance);
+				}}
+				onExportConversation={exportSelectedConversation}
+				onDeleteConversation={() => {
+					if (selectedAgentInstance) setDeletingConversation(selectedAgentInstance);
+				}}
+				onRemember={(text) => rememberFromChat(text)}
+				onCreateTaskFromChat={openTaskFromChat}
+				onModelChange={(model) =>
+					void updateConversationConfiguration("set-model", (instanceId) =>
+						desktopApi.setConversationModel(instanceId, model.provider, model.id),
+					)
+				}
+				onThinkingLevelChange={(level) =>
+					void updateConversationConfiguration("set-thinking", (instanceId) =>
+						desktopApi.setConversationThinkingLevel(instanceId, level),
+					)
+				}
+				onAppModeChange={handleModeChange}
+				slashCommands={conversationCommands}
+				onNavigate={(next) => setView(next)}
+			/>
+		);
+	}
+
+	if (view === "capabilities") {
+		return (
+			<CapabilitiesSurface
+				conversation={conversation}
+				capabilities={capabilities}
+				loading={loadingCapabilities}
+				busy={busy}
+				onClose={() => setView("chat")}
+				onReload={() => selectedInstanceId && void loadCapabilities(selectedInstanceId, true)}
+				onUseSkill={(name) => openCapabilityPrompt(`/skill:${name} `)}
+				onConfigureMcp={() => openCapabilityPrompt("/mcp setup")}
+				onInstallPackage={(marketPackage) =>
+					void mutateCapabilities(`install-market-${marketPackage.id}`, (instanceId) =>
+						desktopApi.installConversationPackage(instanceId, marketPackage.source),
+					)
+				}
+				onRemoveMcp={(source, local) =>
+					void mutateCapabilities("remove-mcp", (instanceId) =>
+						desktopApi.removeConversationPackage(instanceId, source, local),
+					)
+				}
+			/>
+		);
+	}
+
 	return (
 		<div
-			className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${view === "capabilities" ? "capabilities-view" : ""} ${operationView ? "operations-view" : ""} ${sidebarOpen ? "sidebar-open" : ""} ${contextOpen ? "context-open" : ""}`}
+			className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${(view as View) === "capabilities" ? "capabilities-view" : ""} ${operationView ? "operations-view" : ""} ${sidebarOpen ? "sidebar-open" : ""} ${contextOpen ? "context-open" : ""}`}
 		>
-			<AppRail
-				activeView={view}
-				tasks={snapshot.tasks}
-				runs={snapshot.runs}
-				daemonRunning={snapshot.daemonRunning}
-				onNavigate={(next) => {
-					setView(next);
-					setSidebarOpen(false);
-				}}
-			/>
 			<ConversationSidebar
 				conversations={conversations}
 				projects={conversationList.projects}
@@ -1428,14 +1760,19 @@ export function App() {
 				showAll={showAllConversations}
 				onShowAllChange={setShowAllConversations}
 				activeView={view}
-				appMode={appMode}
-				onAppModeChange={handleModeChange}
-				onSelectProject={() => void changeCodeWorkspace()}
-				currentProject={codeWorkspace}
+				tasks={snapshot.tasks}
+				runs={snapshot.runs}
+				daemonRunning={snapshot.daemonRunning}
+				onNavigate={(next) => {
+					setView(next);
+					setSidebarOpen(false);
+				}}
+				userProfile={userProfile}
+				onEditProfile={() => setEditingProfile(true)}
 			/>
 
 			<div className="main-column">
-				{view !== "chat" && (
+				{(view as View) !== "chat" && (
 					<div className="secondary-bar">
 						<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
 							<ArrowLeft size={14} />
@@ -1476,7 +1813,7 @@ export function App() {
 						<RefreshCw size={22} className="spin" />
 						<span>加载中…</span>
 					</div>
-				) : view === "chat" ? (
+				) : (view as View) === "chat" ? (
 					<>
 						<TodoPanel state={todoState} />
 						<ChatSurface
@@ -1515,11 +1852,31 @@ export function App() {
 							}
 							onOpenSidebar={() => setSidebarOpen(true)}
 							onToggleContext={() => setContextOpen((current) => !current)}
+							activeTab={chatTab}
+							onTabChange={setChatTab}
 							slashCommands={conversationCommands}
 							turnMeta={turnMeta && turnMeta.instanceId === selectedInstanceId ? turnMeta.message : undefined}
 							onRemember={(text) => rememberFromChat(text)}
 							onCreateTaskFromChat={openTaskFromChat}
 							onNavigate={(next) => setView(next)}
+							onNewConversation={() => {
+								if (appMode === "code" && !codeWorkspace) {
+									void changeCodeWorkspace();
+								} else {
+									void createConversation(
+										appMode === "code" ? "code" : "work",
+										appMode === "code" ? codeWorkspace : undefined,
+									);
+								}
+							}}
+							onRenameConversation={() => {
+								if (selectedAgentInstance) setRenamingConversation(selectedAgentInstance);
+							}}
+							onExportConversation={() => {
+								setError("导出功能稍后开放；如需 HTML 备份请用 CLI 的 export-html 子命令");
+							}}
+							appMode={appMode}
+							onAppModeChange={handleModeChange}
 						/>
 					</>
 				) : view === "tasks" ? (
@@ -1551,27 +1908,6 @@ export function App() {
 						onDelete={(taskId) => perform("delete", () => desktopApi.deleteTask(taskId))}
 						onCancel={(runId) => perform("cancel", () => desktopApi.cancelRun(runId))}
 						onLoadLog={loadLog}
-					/>
-				) : view === "capabilities" ? (
-					<CapabilitiesSurface
-						conversation={conversation}
-						capabilities={capabilities}
-						loading={loadingCapabilities}
-						busy={busy}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onReload={() => selectedInstanceId && void loadCapabilities(selectedInstanceId, true)}
-						onUseSkill={(name) => openCapabilityPrompt(`/skill:${name} `)}
-						onConfigureMcp={() => openCapabilityPrompt("/mcp setup")}
-						onInstallPackage={(marketPackage) =>
-							void mutateCapabilities(`install-market-${marketPackage.id}`, (instanceId) =>
-								desktopApi.installConversationPackage(instanceId, marketPackage.source),
-							)
-						}
-						onRemoveMcp={(source, local) =>
-							void mutateCapabilities("remove-mcp", (instanceId) =>
-								desktopApi.removeConversationPackage(instanceId, source, local),
-							)
-						}
 					/>
 				) : view === "memory" ? (
 					<MemorySurface
@@ -1631,10 +1967,12 @@ export function App() {
 				)}
 			</div>
 
-			{view === "chat" && (
+			{(view as View) === "chat" && (
 				<ContextPanel
 					conversation={conversation}
-					snapshot={snapshot}
+					stats={conversationStats}
+					capabilities={capabilities}
+					memoryEntries={workspaceMemory}
 					onClose={() => setContextOpen(false)}
 					onShowTasks={() => setView("tasks")}
 				/>
@@ -1672,6 +2010,29 @@ export function App() {
 					busy={busy === "rename-conversation"}
 					onClose={() => setRenamingConversation(undefined)}
 					onRename={renameSelectedConversation}
+				/>
+			)}
+
+			{editingProfile && (
+				<EditProfileDialog
+					profile={userProfile}
+					busy={busy === "save-profile"}
+					onClose={() => setEditingProfile(false)}
+					onSave={saveUserProfile}
+				/>
+			)}
+
+			{authDialog && (
+				<ProviderAuthDialog
+					auth={authDialog}
+					busy={false}
+					onClose={() => setAuthDialog(undefined)}
+					onOpenUrl={(url) => {
+						void desktopApi.openExternal(url).catch((caught: unknown) => {
+							setError(caught instanceof Error ? caught.message : String(caught));
+						});
+					}}
+					onDone={() => setAuthDialog(undefined)}
 				/>
 			)}
 

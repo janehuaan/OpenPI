@@ -38,6 +38,7 @@ export interface DaemonHealth {
 	version?: string;
 	uptimeMs?: number;
 	socketPath?: string;
+	sessionsIndexed?: boolean;
 	tasksActive?: number;
 	tasksPaused?: number;
 	runsRunning?: number;
@@ -77,6 +78,33 @@ export interface AgentInstance {
 	sessionId?: string;
 	sessionFile?: string;
 	radiusPiId?: string;
+}
+
+export interface WorkspaceSummary {
+	fileCount: number;
+	files: string[];
+	truncated: boolean;
+}
+
+export interface WorkspaceFileContent {
+	path: string;
+	text: string;
+}
+
+export interface DocumentTextExtractionInput {
+	name: string;
+	mimeType: string;
+	data: string;
+}
+
+export interface DocumentTextExtractionResult {
+	text: string;
+}
+
+export interface RunningTool {
+	toolCallId: string;
+	toolName: string;
+	args?: unknown;
 }
 
 export interface ConversationMessage {
@@ -310,6 +338,21 @@ export interface ModelProviderConfig {
 	headers?: Record<string, string>;
 	authHeader?: boolean;
 	models?: ModelDefinition[];
+}
+
+export interface VisionFallbackConfig {
+	enabled: boolean;
+	configured: boolean;
+	provider: string;
+	model: string;
+}
+
+export interface VisionFallbackModel {
+	id: string;
+	name: string;
+	inputPrice: number;
+	outputPrice: number;
+	priceLabel: string;
 }
 
 export type AgnesImageSize = "1K" | "2K" | "3K" | "4K";

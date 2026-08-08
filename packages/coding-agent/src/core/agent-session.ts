@@ -3573,7 +3573,10 @@ export class AgentSession {
 			}
 
 			if (!hasPostCompactionUsage) {
-				return { tokens: null, contextWindow, percent: null };
+				// Fallback: estimate from current message list even without post-compaction proof
+				const estimate = estimateContextTokens(this.messages);
+				const percent = contextWindow > 0 ? (estimate.tokens / contextWindow) * 100 : 0;
+				return { tokens: estimate.tokens, contextWindow, percent };
 			}
 		}
 

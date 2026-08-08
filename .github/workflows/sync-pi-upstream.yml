@@ -1,0 +1,99 @@
+name: Sync Pi Upstream
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Pi tag or branch to synchronize. Leave empty for the newest v* tag.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-pi-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OpenPI
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "openpi-sync[bot]"
+          git config user.email "openpi-sync[bot]@users.noreply.github.com"
+          git remote add pi-upstream https://github.com/earendil-works/pi.git 2>/dev/null || \
+            git remote set-url pi-upstream https://github.com/earendil-works/pi.git
+
+      - name: Resolve Pi revision
+        id: upstream
+        env:
+          REQUESTED_REF: ${{ inputs.upstream_ref }}
+        run: |
+          set -euo pipefail
+
+          ref="$REQUESTED_REF"
+          if [ -z "$ref" ]; then
+            ref="$(git ls-remote --refs --tags pi-upstream 'v*' | awk -F/ '{print $3}' | sort -V | tail -n 1)"
+          fi
+
+          if [ -z "$ref" ]; then
+            echo "Unable to resolve a Pi release tag." >&2
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --refs pi-upstream "refs/tags/$ref" >/dev/null 2>&1; then
+            git fetch --force pi-upstream "refs/tags/$ref:refs/tags/$ref"
+            commit="$(git rev-list -n 1 "refs/tags/$ref")"
+          else
+            git fetch --force pi-upstream "refs/heads/$ref:refs/remotes/pi-upstream/$ref"
+            commit="$(git rev-parse "refs/remotes/pi-upstream/$ref")"
+          fi
+
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Merge Pi revision
+        id: merge
+        env:
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+        run: |
+          set -euo pipefail
+
+          if git merge-base --is-ancestor "$UPSTREAM_COMMIT" HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git merge --no-edit --no-ff "$UPSTREAM_COMMIT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Record upstream baseline
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          node scripts/update-openpi-upstream-version.mjs \
+            --repository earendil-works/pi \
+            --ref "${{ steps.upstream.outputs.ref }}" \
+            --commit "${{ steps.upstream.outputs.commit }}"
+
+      - name: Create synchronization pull request
+        if: steps.merge.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/sync-pi-${{ steps.upstream.outputs.commit }}
+          delete-branch: true
+          commit-message: "chore: sync Pi ${{ steps.upstream.outputs.ref }}"
+          title: "chore: sync Pi ${{ steps.upstream.outputs.ref }}"
+          body: |
+            Synchronizes OpenPI with [earendil-works/pi](https://github.com/earendil-works/pi) at `${{ steps.upstream.outputs.commit }}`.
+
+            This PR is created automatically and must pass CI and OpenPI smoke tests before review.

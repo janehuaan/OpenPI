@@ -114,7 +114,7 @@ function useSmoothText(text: string): { displayedText: string; rootRef: RefObjec
 			return;
 		}
 
-		const scrollContainer = rootRef.current?.closest<HTMLElement>(".message-scroll");
+		const scrollContainer = rootRef.current?.closest<HTMLElement>(".message-scroll, .reference-feed");
 		shouldFollowRef.current = Boolean(
 			scrollContainer &&
 				scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight <=
@@ -149,7 +149,7 @@ function useSmoothText(text: string): { displayedText: string; rootRef: RefObjec
 	useLayoutEffect(() => {
 		if (!shouldFollowRef.current) return;
 		shouldFollowRef.current = false;
-		const scrollContainer = rootRef.current?.closest<HTMLElement>(".message-scroll");
+		const scrollContainer = rootRef.current?.closest<HTMLElement>(".message-scroll, .reference-feed");
 		if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
 	}, [displayedText]);
 

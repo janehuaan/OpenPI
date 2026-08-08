@@ -34,6 +34,11 @@ export type RpcCommand =
 	| { id?: string; type: "cycle_model" }
 	| { id?: string; type: "get_available_models" }
 
+	// Provider auth (desktop login panel)
+	| { id?: string; type: "get_provider_auth_status" }
+	| { id?: string; type: "provider_login"; provider: string; authType: "oauth" | "api_key" }
+	| { id?: string; type: "provider_logout"; provider: string }
+
 	// Thinking
 	| { id?: string; type: "set_thinking_level"; level: ThinkingLevel }
 	| { id?: string; type: "cycle_thinking_level" }
@@ -205,6 +210,21 @@ export type RpcResponse =
 			success: true;
 			data: { models: Model<any>[] };
 	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_provider_auth_status";
+			success: true;
+			data: { statuses: Array<{ provider: string; type?: string; source?: string; configured: boolean }> };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "provider_login";
+			success: true;
+			data: { provider: string; type: string };
+	  }
+	| { id?: string; type: "response"; command: "provider_logout"; success: true }
 
 	// Thinking
 	| { id?: string; type: "response"; command: "set_thinking_level"; success: true }
@@ -336,7 +356,18 @@ export type RpcExtensionUIRequest =
 			widgetPlacement?: "aboveEditor" | "belowEditor";
 	  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
-	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string };
+	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "auth";
+			provider: string;
+			url?: string;
+			userCode?: string;
+			instructions?: string;
+			status: "pending" | "completed" | "failed";
+			message?: string;
+	  };
 
 // ============================================================================
 // Extension UI Commands (stdin)

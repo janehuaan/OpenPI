@@ -5,6 +5,8 @@ import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findMostRecentSession, loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
 
+const SESSION_METADATA_FILL_BYTES = 256 * 1024;
+
 describe("loadEntriesFromFile", () => {
 	let tempDir: string;
 
@@ -233,6 +235,45 @@ describe("SessionManager custom flat session directory", () => {
 
 		const continuedA = SessionManager.continueRecent(projectA, tempDir);
 		expect(continuedA.getSessionFile()).toBe(sessionA);
+	});
+
+	it("lists metadata without scanning the full session file", async () => {
+		const sessionFile = join(tempDir, "large-session.jsonl");
+		writeFileSync(
+			sessionFile,
+			`${JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "large-session",
+				timestamp: "2026-08-08T00:00:00.000Z",
+				cwd: projectA,
+			})}\n${JSON.stringify({
+				type: "message",
+				id: "first-message",
+				parentId: null,
+				timestamp: "2026-08-08T00:00:01.000Z",
+				message: { role: "user", content: "First prompt", timestamp: 1 },
+			})}\n`,
+		);
+		appendFileSync(sessionFile, `${"x".repeat(SESSION_METADATA_FILL_BYTES)}\n`);
+		appendFileSync(
+			sessionFile,
+			`${JSON.stringify({
+				type: "session_info",
+				id: "session-name",
+				parentId: "first-message",
+				timestamp: "2026-08-08T00:00:02.000Z",
+				name: "Latest session name",
+			})}\n`,
+		);
+
+		const [metadata] = await SessionManager.listAllMetadata(tempDir);
+		expect(metadata).toMatchObject({
+			id: "large-session",
+			cwd: projectA,
+			firstMessage: "First prompt",
+			name: "Latest session name",
+		});
 	});
 });
 

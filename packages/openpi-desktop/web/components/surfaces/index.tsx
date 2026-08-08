@@ -1,5 +1,7 @@
 import {
 	ArrowDown,
+	ArrowLeft,
+	AtSign,
 	Bell,
 	Blocks,
 	BookOpen,
@@ -14,24 +16,34 @@ import {
 	CircleStop,
 	Clapperboard,
 	Clock3,
+	Copy,
 	Cpu,
 	Database,
 	Download,
 	ExternalLink,
 	FileJson,
+	FileText,
 	Folder,
+	FolderPlus,
+	GitBranch,
 	Github,
 	History,
 	Image as ImageIcon,
 	ListTodo,
+	LogIn,
+	LogOut,
 	Menu,
 	MessageSquare,
 	Mic,
+	MoreHorizontal,
 	Package,
+	PanelLeftClose,
+	PanelLeftOpen,
 	PanelRight,
 	Paperclip,
 	Pause,
 	Pencil,
+	Pin,
 	Play,
 	Plus,
 	RefreshCw,
@@ -39,10 +51,13 @@ import {
 	Search,
 	Send,
 	Server,
+	Share2,
 	ShieldCheck,
+	Slash,
 	Sparkles,
 	Square,
 	Store,
+	Terminal,
 	TerminalSquare,
 	Trash2,
 	UserRound,
@@ -50,17 +65,30 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { type ClipboardEvent, type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ClipboardEvent,
+	type DragEvent,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { desktopApi } from "../../api";
 import {
 	type BlockingConversationUiRequest,
 	type CapabilityTab,
+	type DocumentAttachment,
 	type ImageAttachment,
+	MAX_DOCUMENT_ATTACHMENTS,
 	MAX_IMAGE_ATTACHMENTS,
+	MAX_TOTAL_DOCUMENT_TEXT_BYTES,
 	MAX_TOTAL_IMAGE_BASE64_BYTES,
 	type ModelProviderConfig,
 	SUPPORTED_IMAGE_TYPES,
 	type TaskFilter,
+	type View,
 } from "../../lib/app-types";
 import {
 	assistantToolsHaveResults,
@@ -72,7 +100,10 @@ import {
 	formatTime,
 	instanceTitle,
 	isConversationMessage,
+	isDocumentFile,
 	isRecord,
+	messageBlockCounts,
+	prepareDocumentAttachment,
 	prepareImageAttachment,
 	scheduleLabel,
 	shortWorkspacePath,
@@ -120,10 +151,14 @@ import type {
 	GeneratedMediaItem,
 	ImageContent,
 	MediaComposerMode,
+	RunningTool,
 	RunStatus,
 	TaskDefinition,
 	TaskRun,
 	ThinkingLevel,
+	VisionFallbackConfig,
+	VisionFallbackModel,
+	WorkspaceSummary,
 } from "../../types";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
@@ -141,6 +176,17 @@ const MORE_ITEMS: Array<{ id: MoreView; label: string; hint: string; icon: typeo
 	{ id: "intelligence", label: "智能规划", hint: "多步计划记录", icon: BrainCircuit },
 	{ id: "daemon", label: "运行时", hint: "本地服务状态", icon: Server },
 ];
+
+function visibleMessageText(text: string): string {
+	return text
+		.replace(/\n*<openpi-attachments>[\s\S]*?<\/openpi-attachments>/g, "")
+		.replace(/\n*<openpi-vision-context[\s\S]*?<\/openpi-vision-context>/g, "")
+		.trim();
+}
+
+function hasVisionContext(content: unknown): boolean {
+	return contentText(content).includes("<openpi-vision-context");
+}
 
 export type AppMode = "chat" | "code";
 
@@ -250,6 +296,1180 @@ export function AppRail({
 	);
 }
 
+/** Brand mark shown at the top of the merged sidebar (nav lives in the left rail). */
+export function SidebarHeader({
+	activeView: _activeView,
+	tasks: _tasks,
+	runs: _runs,
+	daemonRunning: _daemonRunning,
+	onNavigate,
+}: {
+	activeView: MoreView | "chat";
+	tasks: TaskDefinition[];
+	runs: TaskRun[];
+	daemonRunning: boolean;
+	onNavigate(view: MoreView | "chat"): void;
+}) {
+	return (
+		<div className="sidebar-header">
+			<button type="button" className="sidebar-brand" title="OpenPI" onClick={() => onNavigate("chat")}>
+				<span className="sidebar-brand-mark">π</span>
+				<span className="sidebar-brand-text">
+					<strong>OpenPI</strong>
+					<span>Personal agent</span>
+				</span>
+			</button>
+		</div>
+	);
+}
+
+export function ReferenceWorkspacePreview({
+	projectInstances,
+	chatInstances,
+	selectedInstanceId,
+	conversation,
+	conversationTitles,
+	workspaceSummary,
+	runningTools,
+	optimisticMessage,
+	memoryEntries,
+	memoryCount,
+	stats,
+	providerBalance,
+	modelOptions,
+	visionFallback,
+	loadingModels,
+	configuring,
+	sending,
+	appMode,
+	slashCommands,
+	onSelectConversation,
+	onOpenProject,
+	onNewProjectSession,
+	onNewConversation,
+	onOpenSettings,
+	onSend,
+	onAbort,
+	onRenameConversation,
+	onExportConversation,
+	onDeleteConversation,
+	onRemember,
+	onCreateTaskFromChat,
+	onModelChange,
+	onThinkingLevelChange,
+	onAppModeChange,
+	onNavigate,
+}: {
+	projectInstances: AgentInstance[];
+	chatInstances: AgentInstance[];
+	selectedInstanceId?: string;
+	conversation?: ConversationSnapshot;
+	conversationTitles: Record<string, string>;
+	workspaceSummary?: WorkspaceSummary;
+	runningTools: RunningTool[];
+	optimisticMessage?: ConversationMessage;
+	memoryEntries: string[];
+	memoryCount: number;
+	stats?: ConversationStats;
+	providerBalance?: { currency: string; totalBalance: number } | null;
+	modelOptions: ConversationModelOption[];
+	visionFallback?: VisionFallbackConfig;
+	loadingModels: boolean;
+	configuring: boolean;
+	sending: boolean;
+	appMode: AppMode;
+	slashCommands: string[];
+	onSelectConversation(instanceId: string): void;
+	onOpenProject(instanceId: string): void;
+	onNewProjectSession(workspace: string): void;
+	onNewConversation(): void;
+	onOpenSettings(): void;
+	onSend(message: string, images: ImageContent[], documents: DocumentAttachment[]): Promise<void>;
+	onAbort(): void;
+	onRenameConversation(): void;
+	onExportConversation(): void;
+	onDeleteConversation(): void;
+	onRemember(text: string): Promise<void> | void;
+	onCreateTaskFromChat(prompt: string): void;
+	onModelChange(model: ConversationModelOption): void;
+	onThinkingLevelChange(level: ThinkingLevel): void;
+	onAppModeChange(mode: AppMode): void;
+	onNavigate(view: ChatNavView): void;
+}) {
+	const [draft, setDraft] = useState("");
+	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+	const [documents, setDocuments] = useState<DocumentAttachment[]>([]);
+	const [attachmentNotice, setAttachmentNotice] = useState<string>();
+	const [contextPickerOpen, setContextPickerOpen] = useState(false);
+	const [modelMenuOpen, setModelMenuOpen] = useState(false);
+	const [slashOpen, setSlashOpen] = useState(false);
+	const [slashIndex, setSlashIndex] = useState(0);
+	const [showAllSpaces, setShowAllSpaces] = useState(false);
+	const [showAllSessions, setShowAllSessions] = useState(false);
+	const [projectsOverflow, setProjectsOverflow] = useState(false);
+	const [chatsOverflow, setChatsOverflow] = useState(false);
+	const [showAllFiles, setShowAllFiles] = useState(false);
+	const [memoryQuery, setMemoryQuery] = useState("");
+	const [leftCollapsed, setLeftCollapsed] = useState(false);
+	const attachmentInput = useRef<HTMLInputElement>(null);
+	const draftInput = useRef<HTMLTextAreaElement>(null);
+	const feedScroll = useRef<HTMLElement>(null);
+	const projectList = useRef<HTMLDivElement>(null);
+	const chatList = useRef<HTMLDivElement>(null);
+	const autoFollow = useRef(true);
+	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+	const instances = [...projectInstances, ...chatInstances];
+	const selectedInstance = instances.find((instance) => instance.id === selectedInstanceId);
+	const workspace = conversation?.instance.cwd ?? selectedInstance?.cwd;
+	const spaces = useMemo(() => {
+		const groups = new Map<string, AgentInstance[]>();
+		for (const instance of projectInstances) {
+			if (!instance.cwd) continue;
+			const group = groups.get(instance.cwd) ?? [];
+			group.push(instance);
+			groups.set(instance.cwd, group);
+		}
+		return [...groups.entries()];
+	}, [projectInstances]);
+	const title = conversation
+		? instanceTitle(conversation.instance, conversationTitles[conversation.instance.id])
+		: selectedInstance
+			? instanceTitle(selectedInstance, conversationTitles[selectedInstance.id])
+			: "New conversation";
+	const storedMessages = conversation?.messages ?? [];
+	const messages = optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
+	const isWorking = Boolean(conversation?.state.isStreaming || sending || optimisticMessage);
+	const currentModel = modelOptions.find(
+		(model) => model.provider === conversation?.state.model?.provider && model.id === conversation.state.model.id,
+	);
+	const usesVisionFallback =
+		attachments.length > 0 &&
+		currentModel?.supportsImages === false &&
+		visionFallback?.enabled === true &&
+		visionFallback.configured;
+	const thinkingLevels = currentModel?.thinkingLevels ?? thinkingLevelsForModel({ reasoning: true });
+	const modelGroups = useMemo(() => {
+		const groups = new Map<string, ConversationModelOption[]>();
+		for (const model of modelOptions) groups.set(model.provider, [...(groups.get(model.provider) ?? []), model]);
+		return [...groups];
+	}, [modelOptions]);
+	const relatedFiles = workspaceSummary?.files ?? [];
+	const visibleMemory = memoryEntries.filter((entry) =>
+		entry.toLowerCase().includes(memoryQuery.trim().toLowerCase()),
+	);
+	const contextUsage = stats?.contextUsage;
+	const contextTokens = contextUsage?.tokens ?? 0;
+	const contextWindow = contextUsage?.contextWindow ?? conversation?.state.model?.contextWindow ?? 0;
+	const contextPercent =
+		contextUsage?.percent !== undefined
+			? Math.min(contextUsage.percent > 1 ? contextUsage.percent / 100 : contextUsage.percent, 1)
+			: contextWindow > 0
+				? Math.min(contextTokens / contextWindow, 1)
+				: undefined;
+	const cacheRead = stats?.tokens.cacheRead ?? 0;
+	const cacheWrite = stats?.tokens.cacheWrite ?? 0;
+	const cacheEligibleTokens = (stats?.tokens.input ?? 0) + cacheRead;
+	const cacheHitPercent = cacheEligibleTokens > 0 ? Math.round((cacheRead / cacheEligibleTokens) * 100) : undefined;
+	const messageSignature = messages
+		.map((message, index) => `${message.timestamp ?? index}:${message.role}:${contentText(message.content).length}`)
+		.join("|");
+	const agentSlash = useMemo(
+		() =>
+			slashCommands.map((line) => {
+				const parsed = parseCommand(line);
+				return {
+					id: `agent:${parsed.name}`,
+					label: parsed.name.startsWith("/") ? parsed.name : `/${parsed.name}`,
+					hint: parsed.description,
+					insert: parsed.name.startsWith("/") ? `${parsed.name} ` : `/${parsed.name} `,
+				};
+			}),
+		[slashCommands],
+	);
+	const slashQuery = draft.startsWith("/") ? draft.slice(1).trim().toLowerCase() : "";
+	const localSlashItems = useMemo(
+		() =>
+			LOCAL_SLASH.map((item) => ({
+				id: item.id,
+				label: item.label,
+				hint: item.hint,
+				insert: `${item.label.split(" ")[0]} `,
+			})),
+		[],
+	);
+	const slashItems = useMemo(() => {
+		const combined = [...localSlashItems, ...agentSlash];
+		if (!slashQuery) return combined.slice(0, 12);
+		return combined
+			.filter(
+				(item) =>
+					item.label.toLowerCase().includes(slashQuery) ||
+					item.hint.toLowerCase().includes(slashQuery) ||
+					item.id.toLowerCase().includes(slashQuery),
+			)
+			.slice(0, 12);
+	}, [agentSlash, localSlashItems, slashQuery]);
+
+	useEffect(() => {
+		autoFollow.current = true;
+		setShowScrollToBottom(false);
+		setModelMenuOpen(false);
+		setSlashOpen(false);
+	}, [conversation?.instance.id]);
+
+	useEffect(() => {
+		const open = draft.startsWith("/") && !draft.includes("\n");
+		setSlashOpen(open);
+		if (open) setSlashIndex(0);
+	}, [draft]);
+
+	useEffect(() => {
+		const measureOverflow = (): void => {
+			if (!showAllSpaces && projectList.current) {
+				setProjectsOverflow(projectList.current.scrollHeight > projectList.current.clientHeight + 1);
+			}
+			if (!showAllSessions && chatList.current) {
+				setChatsOverflow(chatList.current.scrollHeight > chatList.current.clientHeight + 1);
+			}
+		};
+		measureOverflow();
+		const observer = new ResizeObserver(measureOverflow);
+		if (projectList.current) observer.observe(projectList.current);
+		if (chatList.current) observer.observe(chatList.current);
+		return () => observer.disconnect();
+	}, [chatInstances, showAllSessions, showAllSpaces, spaces]);
+
+	useEffect(() => {
+		if (!autoFollow.current) return;
+		const frame = window.requestAnimationFrame(() => {
+			const feed = feedScroll.current;
+			if (feed) feed.scrollTop = feed.scrollHeight;
+		});
+		return () => window.cancelAnimationFrame(frame);
+	}, [messageSignature]);
+
+	function handleFeedScroll(): void {
+		const feed = feedScroll.current;
+		if (!feed) return;
+		const isAwayFromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight > 96;
+		autoFollow.current = !isAwayFromBottom;
+		setShowScrollToBottom(isAwayFromBottom);
+	}
+
+	function scrollToBottom(): void {
+		autoFollow.current = true;
+		setShowScrollToBottom(false);
+		feedScroll.current?.scrollTo({ top: feedScroll.current.scrollHeight, behavior: "smooth" });
+	}
+
+	async function addFiles(files: File[]): Promise<void> {
+		if (files.length === 0) return;
+		setAttachmentNotice(undefined);
+		const imageFiles = files.filter((file) => SUPPORTED_IMAGE_TYPES.has(file.type));
+		const documentFiles = files.filter((file) => !SUPPORTED_IMAGE_TYPES.has(file.type) && isDocumentFile(file));
+		if (imageFiles.length + documentFiles.length !== files.length) {
+			setAttachmentNotice("仅支持 PNG、JPEG、GIF、WebP、PDF、DOCX 和文本类文档");
+		}
+		const availableImages = MAX_IMAGE_ATTACHMENTS - attachments.length;
+		const availableDocuments = MAX_DOCUMENT_ATTACHMENTS - documents.length;
+		try {
+			const preparedImages: ImageAttachment[] = [];
+			let totalImageBytes = attachments.reduce((total, image) => total + image.data.length, 0);
+			for (const file of imageFiles.slice(0, Math.max(0, availableImages))) {
+				const image = await prepareImageAttachment(file);
+				if (totalImageBytes + image.data.length > MAX_TOTAL_IMAGE_BASE64_BYTES) {
+					throw new Error("图片总大小不能超过 12 MB");
+				}
+				totalImageBytes += image.data.length;
+				preparedImages.push(image);
+			}
+			const preparedDocuments: DocumentAttachment[] = [];
+			let totalDocumentBytes = documents.reduce((total, document) => total + document.text.length, 0);
+			for (const file of documentFiles.slice(0, Math.max(0, availableDocuments))) {
+				const document = await prepareDocumentAttachment(file, desktopApi.extractDocumentText);
+				if (totalDocumentBytes + document.text.length > MAX_TOTAL_DOCUMENT_TEXT_BYTES) {
+					throw new Error("文档总大小不能超过 4 MB");
+				}
+				totalDocumentBytes += document.text.length;
+				preparedDocuments.push(document);
+			}
+			if (imageFiles.length > availableImages) {
+				setAttachmentNotice(`每条消息最多附加 ${MAX_IMAGE_ATTACHMENTS} 张图片`);
+			} else if (documentFiles.length > availableDocuments) {
+				setAttachmentNotice(`每条消息最多附加 ${MAX_DOCUMENT_ATTACHMENTS} 个文档`);
+			}
+			if (preparedImages.length > 0) setAttachments((current) => [...current, ...preparedImages]);
+			if (preparedDocuments.length > 0) setDocuments((current) => [...current, ...preparedDocuments]);
+		} catch (caught) {
+			setAttachmentNotice(caught instanceof Error ? caught.message : String(caught));
+		}
+	}
+
+	function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+		const files = Array.from(event.clipboardData.files);
+		if (files.length === 0) return;
+		event.preventDefault();
+		void addFiles(files);
+	}
+
+	async function addWorkspaceFile(path: string): Promise<void> {
+		if (!workspace) {
+			setAttachmentNotice("请先选择一个工作区");
+			return;
+		}
+		if (documents.some((document) => document.path === path)) {
+			setContextPickerOpen(false);
+			return;
+		}
+		if (documents.length >= MAX_DOCUMENT_ATTACHMENTS) {
+			setAttachmentNotice(`每条消息最多附加 ${MAX_DOCUMENT_ATTACHMENTS} 个文档`);
+			return;
+		}
+		try {
+			const file = await desktopApi.readWorkspaceFile(workspace, path);
+			const totalDocumentBytes = documents.reduce((total, document) => total + document.text.length, 0);
+			if (totalDocumentBytes + file.text.length > MAX_TOTAL_DOCUMENT_TEXT_BYTES) {
+				throw new Error("文档总大小不能超过 4 MB");
+			}
+			setDocuments((current) => [
+				...current,
+				{
+					id: crypto.randomUUID(),
+					name: file.path.split(/[\\/]/).at(-1) ?? file.path,
+					path: file.path,
+					text: file.text,
+				},
+			]);
+			setAttachmentNotice(undefined);
+			setContextPickerOpen(false);
+		} catch (caught) {
+			setAttachmentNotice(caught instanceof Error ? caught.message : String(caught));
+		}
+	}
+
+	async function selectProject(): Promise<void> {
+		const selectedWorkspace = await desktopApi.selectWorkspace(workspace);
+		if (selectedWorkspace) onNewProjectSession(selectedWorkspace);
+	}
+
+	async function handleLocalSlash(raw: string): Promise<boolean> {
+		const message = raw.trim();
+		for (const item of LOCAL_SLASH) {
+			const match = message.match(item.match);
+			if (!match) continue;
+			if (item.id === "remember") {
+				const body = (match[2] ?? "").trim();
+				if (!body) {
+					setAttachmentNotice("用法：/记住 要记住的内容");
+					return true;
+				}
+				await onRemember(body);
+				setAttachmentNotice("已写入记忆");
+				return true;
+			}
+			if (item.id === "task") {
+				onCreateTaskFromChat((match[2] ?? "").trim() || "定期检查并汇报工作区进展");
+				return true;
+			}
+			if (item.kind === "nav") {
+				const navMap: Record<string, ChatNavView> = {
+					memory: "memory",
+					tasks: "tasks",
+					capabilities: "capabilities",
+					security: "security",
+					intelligence: "intelligence",
+					daemon: "daemon",
+				};
+				const target = navMap[item.id];
+				if (target) onNavigate(target);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function applySlashItem(item: { id: string; label: string; insert: string }): void {
+		const local = LOCAL_SLASH.find((entry) => entry.id === item.id);
+		if (local?.kind === "nav") {
+			void handleLocalSlash(item.label);
+			setDraft("");
+			setSlashOpen(false);
+			return;
+		}
+		if (local?.id === "task") {
+			onCreateTaskFromChat("");
+			setDraft("");
+			setSlashOpen(false);
+			return;
+		}
+		if (local?.id === "remember") {
+			setDraft("/记住 ");
+		} else {
+			setDraft(item.insert);
+		}
+		setSlashOpen(false);
+		draftInput.current?.focus();
+	}
+
+	const submit = async (): Promise<void> => {
+		const message = draft.trim();
+		if ((!message && attachments.length === 0 && documents.length === 0) || isWorking) return;
+		if (message.startsWith("/") && attachments.length === 0 && (await handleLocalSlash(message))) {
+			setDraft("");
+			setSlashOpen(false);
+			return;
+		}
+		await onSend(message, attachments, documents);
+		setDraft("");
+		setAttachments([]);
+		setDocuments([]);
+		setAttachmentNotice(undefined);
+	};
+
+	return (
+		<div className={`reference-workspace ${leftCollapsed ? "left-collapsed" : ""}`}>
+			<aside className="reference-leftbar">
+				<header className="reference-brand">
+					<img className="reference-brand-mark" src="./openpi-mark.svg" alt="" />
+					<strong>OpenPI</strong>
+					<button
+						type="button"
+						className="reference-sidebar-toggle"
+						title={leftCollapsed ? "展开侧栏" : "收起侧栏"}
+						aria-label={leftCollapsed ? "展开侧栏" : "收起侧栏"}
+						onClick={() => setLeftCollapsed((value) => !value)}
+					>
+						{leftCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+					</button>
+				</header>
+				<label className="reference-search">
+					<Search size={14} />
+					<input placeholder="Search" />
+					<kbd>⌘K</kbd>
+				</label>
+				<div className="reference-sidebar-content">
+					<div className="reference-label">
+						<span>Projects</span>
+						<div className="reference-section-actions">
+							<button type="button" title="选择项目" aria-label="选择项目" onClick={() => void selectProject()}>
+								<FolderPlus size={14} />
+							</button>
+						</div>
+					</div>
+					<div className={`reference-spaces ${showAllSpaces ? "expanded" : ""}`} ref={projectList}>
+						{spaces.map(([cwd, spaceInstances], index) => (
+							<div className="reference-project-group" key={cwd}>
+								<div className={`reference-space ${cwd === workspace ? "selected" : ""}`}>
+									<button
+										type="button"
+										className="reference-project-select"
+										onClick={() =>
+											onOpenProject(
+												spaceInstances.find((instance) => instance.id === selectedInstanceId)?.id ??
+													spaceInstances[0].id,
+											)
+										}
+									>
+										<span className={`reference-folder ${["blue", "cyan", "amber", "yellow"][index % 4]}`}>
+											<Folder size={16} />
+										</span>
+										<span>
+											<strong>{cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd}</strong>
+											<small>{shortWorkspacePath(cwd)}</small>
+										</span>
+									</button>
+									<div className="reference-project-actions">
+										<button
+											type="button"
+											className="reference-project-new-session"
+											title="在此项目中新建 Cwork 会话"
+											aria-label="在此项目中新建 Cwork 会话"
+											onClick={() => onNewProjectSession(cwd)}
+										>
+											<Plus size={13} />
+										</button>
+										<Popover>
+											<PopoverTrigger asChild>
+												<button
+													type="button"
+													className="reference-project-more"
+													title="项目操作"
+													aria-label="项目操作"
+												>
+													<MoreHorizontal size={14} />
+												</button>
+											</PopoverTrigger>
+											<PopoverContent className="reference-project-menu" align="end">
+												<span className="reference-menu-label">项目</span>
+												<button
+													type="button"
+													onClick={() =>
+														onOpenProject(
+															spaceInstances.find((instance) => instance.id === selectedInstanceId)
+																?.id ?? spaceInstances[0].id,
+														)
+													}
+												>
+													<Folder size={14} /> 打开项目
+												</button>
+												<button type="button" onClick={() => onNewProjectSession(cwd)}>
+													<Plus size={14} /> 新建 Cwork 会话
+												</button>
+												<div className="reference-menu-divider" />
+												<button type="button" onClick={() => void selectProject()}>
+													<FolderPlus size={14} /> 选择其他项目
+												</button>
+											</PopoverContent>
+										</Popover>
+									</div>
+								</div>
+								<div className="reference-project-sessions">
+									{spaceInstances.map((instance) => (
+										<button
+											type="button"
+											className={instance.id === selectedInstanceId ? "selected" : ""}
+											key={instance.id}
+											onClick={() => onOpenProject(instance.id)}
+										>
+											<span>{instanceTitle(instance, conversationTitles[instance.id])}</span>
+											{instance.id === selectedInstanceId && <i />}
+										</button>
+									))}
+								</div>
+							</div>
+						))}
+					</div>
+					{projectsOverflow && (
+						<button type="button" className="reference-more" onClick={() => setShowAllSpaces((value) => !value)}>
+							{showAllSpaces ? "收起项目" : "显示全部项目"} <ChevronRight size={14} />
+						</button>
+					)}
+					<div className="reference-label recent">
+						<span>Chats</span>
+						<button type="button" title="新建会话" aria-label="新建会话" onClick={onNewConversation}>
+							<Plus size={14} />
+						</button>
+					</div>
+					<div className={`reference-sessions ${showAllSessions ? "expanded" : ""}`} ref={chatList}>
+						{chatInstances.map((instance) => (
+							<button
+								type="button"
+								className={instance.id === selectedInstanceId ? "selected" : ""}
+								key={instance.id}
+								onClick={() => onSelectConversation(instance.id)}
+							>
+								<span>{instanceTitle(instance, conversationTitles[instance.id])}</span>
+								<small>{instance.status === "online" ? "Active" : statusLabel(instance.status)}</small>
+								{instance.id === selectedInstanceId && <i />}
+							</button>
+						))}
+					</div>
+					{chatsOverflow && (
+						<button
+							type="button"
+							className="reference-more"
+							onClick={() => setShowAllSessions((value) => !value)}
+						>
+							{showAllSessions ? "收起对话" : "显示全部对话"} <ChevronRight size={14} />
+						</button>
+					)}
+				</div>
+				<footer className="reference-account">
+					<span className="reference-avatar">H</span>
+					<strong>Huaan</strong>
+					<em>Pro</em>
+					<button type="button" title="设置" aria-label="设置" onClick={onOpenSettings}>
+						<Wrench size={15} />
+					</button>
+				</footer>
+			</aside>
+
+			<main className="reference-main">
+				<header className="reference-main-header">
+					<div className="reference-title">
+						<span className="reference-title-folder">
+							<Folder size={19} />
+						</span>
+						<div>
+							<h1>
+								{title} <Pencil size={14} />
+							</h1>
+							<p>{workspace ? `${shortWorkspacePath(workspace)} 工作空间` : "选择一个工作区"}</p>
+						</div>
+					</div>
+					<div className="reference-header-actions">
+						<span className="reference-active">
+							<i /> {conversation?.state.isStreaming ? "Working" : "Active"}
+						</span>
+						<Popover>
+							<PopoverTrigger asChild>
+								<button type="button" title="更多会话操作" aria-label="更多会话操作">
+									<MoreHorizontal size={18} />
+								</button>
+							</PopoverTrigger>
+							<PopoverContent className="reference-header-menu" align="end">
+								<span className="reference-menu-label">会话</span>
+								<button type="button" disabled={!conversation} onClick={onRenameConversation}>
+									<Pencil size={14} /> 重命名会话
+								</button>
+								<button type="button" disabled={!conversation} onClick={onExportConversation}>
+									<Download size={14} /> 导出 Markdown
+								</button>
+								<div className="reference-menu-divider" />
+								<button
+									type="button"
+									className="danger"
+									disabled={!conversation}
+									onClick={onDeleteConversation}
+								>
+									<Trash2 size={14} /> 删除会话
+								</button>
+							</PopoverContent>
+						</Popover>
+					</div>
+				</header>
+				<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
+					<div className="reference-chat-view">
+						{messages
+							.filter((message) => message.role === "user" || message.role === "assistant")
+							.map((message, index) => {
+								const text = visibleMessageText(contentText(message.content));
+								const isUser = message.role === "user";
+								return (
+									<div
+										className={`${isUser ? "reference-user-card" : "reference-assistant-card"} ${message === optimisticMessage ? "pending" : ""}`}
+										key={`${message.timestamp ?? "untimed"}-${message.role}-${index}`}
+									>
+										<div>
+											{isUser ? (
+												<p>{text}</p>
+											) : text ? (
+												<div className="reference-assistant-message">
+													<MarkdownText text={text} />
+												</div>
+											) : (
+												<p>正在生成…</p>
+											)}
+											{isUser && hasVisionContext(message.content) && (
+												<span className="reference-vision-badge">
+													<ImageIcon size={12} /> GLM-4.6V 视觉解析
+												</span>
+											)}
+											{contentImages(message.content).length > 0 && (
+												<div className="reference-message-images">
+													{contentImages(message.content).map((image, imageIndex) => (
+														<img
+															src={`data:${image.mimeType};base64,${image.data}`}
+															alt="已附加图片"
+															key={`${image.mimeType}-${imageIndex}`}
+														/>
+													))}
+												</div>
+											)}
+										</div>
+									</div>
+								);
+							})}
+					</div>
+					{isWorking && (
+						<div className="reference-streaming-indicator" aria-label="OpenPI 正在回复">
+							<span />
+							<span />
+							<span />
+						</div>
+					)}
+				</section>
+				{showScrollToBottom && (
+					<button
+						type="button"
+						className="reference-scroll-to-bottom"
+						title="回到最新消息"
+						aria-label="回到最新消息"
+						onClick={scrollToBottom}
+					>
+						<ArrowDown size={16} />
+					</button>
+				)}
+				<footer className="reference-composer">
+					{(attachments.length > 0 || documents.length > 0) && (
+						<div className="reference-attachment-list" aria-label="已附加内容">
+							{attachments.map((attachment) => (
+								<div className="reference-attachment-chip image" key={attachment.id}>
+									<img src={`data:${attachment.mimeType};base64,${attachment.data}`} alt="" />
+									<span>{attachment.name}</span>
+									<button
+										type="button"
+										title={`移除 ${attachment.name}`}
+										aria-label={`移除 ${attachment.name}`}
+										onClick={() =>
+											setAttachments((current) => current.filter((item) => item.id !== attachment.id))
+										}
+									>
+										<X size={12} />
+									</button>
+								</div>
+							))}
+							{documents.map((document) => (
+								<div
+									className="reference-attachment-chip document"
+									key={document.id}
+									title={document.path ?? document.name}
+								>
+									{document.path ? <AtSign size={13} /> : <FileText size={13} />}
+									<span>{document.path ?? document.name}</span>
+									<button
+										type="button"
+										title={`移除 ${document.name}`}
+										aria-label={`移除 ${document.name}`}
+										onClick={() =>
+											setDocuments((current) => current.filter((item) => item.id !== document.id))
+										}
+									>
+										<X size={12} />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
+					{slashOpen && slashItems.length > 0 && (
+						<div className="reference-slash-menu" role="listbox" aria-label="斜杠命令">
+							{slashItems.map((item, index) => (
+								<button
+									type="button"
+									key={item.id}
+									className={index === slashIndex ? "active" : ""}
+									onMouseEnter={() => setSlashIndex(index)}
+									onClick={() => applySlashItem(item)}
+								>
+									<code>{item.label}</code>
+									<span>{item.hint}</span>
+								</button>
+							))}
+						</div>
+					)}
+					<textarea
+						ref={draftInput}
+						placeholder="Ask OpenPI anything..."
+						rows={1}
+						value={draft}
+						onChange={(event) => setDraft(event.target.value)}
+						onPaste={handlePaste}
+						onKeyDown={(event) => {
+							if (slashOpen && slashItems.length > 0) {
+								if (event.key === "ArrowDown") {
+									event.preventDefault();
+									setSlashIndex((current) => (current + 1) % slashItems.length);
+									return;
+								}
+								if (event.key === "ArrowUp") {
+									event.preventDefault();
+									setSlashIndex((current) => (current - 1 + slashItems.length) % slashItems.length);
+									return;
+								}
+								if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+									event.preventDefault();
+									applySlashItem(slashItems[slashIndex] ?? slashItems[0]);
+									return;
+								}
+								if (event.key === "Escape") {
+									event.preventDefault();
+									setSlashOpen(false);
+									return;
+								}
+							}
+							if (event.key === "Enter" && !event.shiftKey) {
+								event.preventDefault();
+								void submit().catch(() => undefined);
+							}
+						}}
+					/>
+					{attachmentNotice && <p className="reference-attachment-notice">{attachmentNotice}</p>}
+					{usesVisionFallback && (
+						<p className="reference-attachment-vision">
+							<ImageIcon size={12} /> 将由 GLM-4.6V-Flash 解析图片
+						</p>
+					)}
+					<div className="reference-composer-toolbar">
+						<div className="reference-composer-primary">
+							<Popover>
+								<PopoverTrigger asChild>
+									<button
+										type="button"
+										className="reference-composer-icon"
+										title="更多操作"
+										aria-label="更多操作"
+									>
+										<Plus size={16} />
+									</button>
+								</PopoverTrigger>
+								<PopoverContent className="composer-plus-menu" side="top" align="start">
+									<button type="button" onClick={() => void onRemember(draft)}>
+										<BookOpen size={14} /> 写入记忆
+									</button>
+									<button type="button" onClick={() => onCreateTaskFromChat(draft)}>
+										<ListTodo size={14} /> 创建任务
+									</button>
+								</PopoverContent>
+							</Popover>
+							<div className="reference-composer-mode-switch" aria-label="应用模式">
+								<button
+									type="button"
+									className={appMode === "chat" ? "active" : ""}
+									onClick={() => onAppModeChange("chat")}
+								>
+									<MessageSquare size={13} /> Chat
+								</button>
+								<button
+									type="button"
+									className={appMode === "code" ? "active" : ""}
+									onClick={() => onAppModeChange("code")}
+								>
+									<TerminalSquare size={13} /> CWork
+								</button>
+							</div>
+							<Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+								<PopoverTrigger asChild>
+									<button
+										type="button"
+										className="reference-model-control"
+										disabled={configuring || loadingModels || modelOptions.length === 0}
+									>
+										{shortModelName(
+											conversation?.state.model?.name ?? conversation?.state.model?.id ?? "Model",
+										)}
+										<span>·</span>
+										{conversation?.state.thinkingLevel ?? "medium"}
+										<ChevronsUpDown size={12} />
+									</button>
+								</PopoverTrigger>
+								<PopoverContent className="model-popover model-popover-wide" side="top" align="start">
+									<div className="model-popover-section">
+										<span className="model-popover-label">思考强度</span>
+										<div className="thinking-row">
+											{thinkingLevels.map((level) => (
+												<button
+													type="button"
+													key={level}
+													className={conversation?.state.thinkingLevel === level ? "active" : ""}
+													disabled={configuring || loadingModels || !currentModel}
+													onClick={() => {
+														setModelMenuOpen(false);
+														onThinkingLevelChange(level);
+													}}
+												>
+													{level}
+												</button>
+											))}
+										</div>
+									</div>
+									<div className="model-popover-section">
+										<span className="model-popover-label">模型</span>
+										<Command label="Select model" loop>
+											<CommandInput placeholder="搜索模型" />
+											<CommandList>
+												<CommandEmpty>没有匹配的模型</CommandEmpty>
+												{modelGroups.map(([provider, models]) => (
+													<CommandGroup heading={provider} key={provider}>
+														{models.map((model) => (
+															<CommandItem
+																value={`${model.provider}/${model.id}`}
+																key={`${model.provider}/${model.id}`}
+																onSelect={() => {
+																	setModelMenuOpen(false);
+																	onModelChange(model);
+																}}
+															>
+																<span className="model-option-main">
+																	<strong>{model.name}</strong>
+																	<small>{model.id}</small>
+																</span>
+																{model.supportsImages && (
+																	<span className="model-option-vision" title="支持图片输入">
+																		<ImageIcon size={13} />
+																	</span>
+																)}
+																{model.provider === currentModel?.provider &&
+																	model.id === currentModel.id && <Check size={14} />}
+															</CommandItem>
+														))}
+													</CommandGroup>
+												))}
+											</CommandList>
+										</Command>
+									</div>
+								</PopoverContent>
+							</Popover>
+						</div>
+						<div className="reference-composer-actions">
+							<input
+								ref={attachmentInput}
+								type="file"
+								accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.docx,.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.css,.js,.jsx,.mjs,.ts,.tsx,.py,.go,.rs,.java,.c,.cc,.cpp,.h,.sql,.sh,.toml,.svg"
+								multiple
+								hidden
+								onChange={(event) => {
+									void addFiles([...(event.target.files ?? [])]);
+									event.target.value = "";
+								}}
+							/>
+							<button
+								type="button"
+								className="reference-composer-icon"
+								title="附加图片或文档"
+								aria-label="附加图片或文档"
+								onClick={() => attachmentInput.current?.click()}
+							>
+								<Paperclip size={15} />
+							</button>
+							<Popover open={contextPickerOpen} onOpenChange={setContextPickerOpen}>
+								<PopoverTrigger asChild>
+									<button
+										type="button"
+										className="reference-composer-icon"
+										title="选择工作区文件"
+										aria-label="选择工作区文件"
+										disabled={!workspace || relatedFiles.length === 0}
+									>
+										<AtSign size={15} />
+									</button>
+								</PopoverTrigger>
+								<PopoverContent className="reference-file-picker" side="top" align="end">
+									<Command label="选择工作区文件" loop>
+										<CommandInput placeholder="搜索项目文件" />
+										<CommandList>
+											<CommandEmpty>没有可用的工作区文件</CommandEmpty>
+											<CommandGroup heading="工作区文件">
+												{relatedFiles.map((path) => (
+													<CommandItem
+														key={path}
+														value={path}
+														onSelect={() => void addWorkspaceFile(path)}
+													>
+														<FileText size={14} />
+														<span>{path}</span>
+													</CommandItem>
+												))}
+											</CommandGroup>
+										</CommandList>
+									</Command>
+								</PopoverContent>
+							</Popover>
+							<button
+								type="button"
+								className="reference-composer-icon"
+								title="命令"
+								aria-label="命令"
+								onClick={() => {
+									setDraft("/");
+									setSlashOpen(true);
+									draftInput.current?.focus();
+								}}
+							>
+								<Slash size={15} />
+							</button>
+							<button
+								type="button"
+								className="reference-composer-icon"
+								title="写入记忆"
+								aria-label="写入记忆"
+								onClick={() => void onRemember(draft)}
+							>
+								<BookOpen size={15} />
+							</button>
+							<button
+								type="button"
+								className={`reference-send ${isWorking ? "working" : ""}`}
+								title={isWorking ? "停止生成" : "发送消息"}
+								aria-label={isWorking ? "停止生成" : "发送消息"}
+								disabled={!isWorking && !draft.trim() && attachments.length === 0 && documents.length === 0}
+								onClick={() => {
+									if (isWorking) onAbort();
+									else void submit();
+								}}
+							>
+								{isWorking ? <Square size={13} fill="currentColor" /> : <ArrowDown size={17} />}
+							</button>
+						</div>
+					</div>
+				</footer>
+			</main>
+
+			<aside className="reference-context">
+				<header>
+					<strong>Context</strong>
+					<span>
+						<Pin size={14} />
+						<button type="button">
+							<X size={15} />
+						</button>
+					</span>
+				</header>
+				<ReferenceContextCard title="Workspace">
+					<div className="reference-context-workspace">
+						<span className="reference-title-folder">
+							<Folder size={22} />
+						</span>
+						<div>
+							<strong>{workspace?.split(/[\\/]/).filter(Boolean).at(-1) ?? "No workspace"}</strong>
+							<small>{workspace ? shortWorkspacePath(workspace) : "Select a conversation"}</small>
+						</div>
+					</div>
+					<div className="reference-context-counts">
+						<div>
+							<strong>
+								{workspaceSummary
+									? `${workspaceSummary.fileCount}${workspaceSummary.truncated ? "+" : ""}`
+									: "--"}
+							</strong>
+							<span>Files</span>
+						</div>
+						<div>
+							<strong>{runningTools.length}</strong>
+							<span>Tools</span>
+						</div>
+						<div>
+							<strong>{memoryCount}</strong>
+							<span>Memories</span>
+						</div>
+					</div>
+				</ReferenceContextCard>
+				<ReferenceContextCard title="Environment">
+					<div className="reference-environment">
+						<span>
+							Agent <strong>{conversation?.instance.mode ?? "--"}</strong>
+						</span>
+						<span>
+							Model <strong>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "--"}</strong>
+						</span>
+						<span>
+							Session <strong>{conversation?.state.sessionId.slice(0, 8) ?? "--"}</strong>
+						</span>
+						<span>
+							Status <strong>{conversation?.state.isStreaming ? "Working" : "Idle"}</strong>
+						</span>
+					</div>
+				</ReferenceContextCard>
+				<ReferenceContextCard title="会话用量">
+					{stats ? (
+						<div className="reference-usage">
+							<div className="reference-context-usage">
+								<div>
+									<span>上下文占用</span>
+									<strong>
+										{contextPercent === undefined ? "--" : `${Math.round(contextPercent * 100)}%`}
+									</strong>
+								</div>
+								<span>
+									{contextWindow > 0
+										? `${fmtTokens(contextTokens)} / ${fmtTokens(contextWindow)}`
+										: "模型未提供窗口"}
+								</span>
+								<div className="reference-context-progress" aria-label="上下文占用">
+									<span style={{ width: `${Math.round((contextPercent ?? 0) * 100)}%` }} />
+								</div>
+							</div>
+							<div className="reference-token-grid">
+								<span>
+									输入 <strong>{fmtTokens(stats.tokens.input)}</strong>
+								</span>
+								<span>
+									输出 <strong>{fmtTokens(stats.tokens.output)}</strong>
+								</span>
+								<span>
+									缓存读 <strong>{fmtTokens(cacheRead)}</strong>
+								</span>
+								<span>
+									缓存写 <strong>{fmtTokens(cacheWrite)}</strong>
+								</span>
+							</div>
+							<div className="reference-usage-total">
+								<span>
+									缓存命中 <strong>{cacheHitPercent === undefined ? "--" : `${cacheHitPercent}%`}</strong>
+								</span>
+								<span>
+									本会话费用 <strong>{fmtCost(stats.cost)}</strong>
+								</span>
+							</div>
+							{providerBalance && (
+								<div className="reference-provider-balance">
+									账户余额{" "}
+									<strong>
+										{providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}
+									</strong>
+								</div>
+							)}
+						</div>
+					) : (
+						<p className="reference-context-empty">正在读取会话统计…</p>
+					)}
+				</ReferenceContextCard>
+				<ReferenceContextCard title="Running Tools">
+					<div className="reference-tool-list">
+						{runningTools.map((tool) => (
+							<span key={tool.toolCallId}>
+								<Terminal size={14} /> {tool.toolName} <em>Running</em>
+							</span>
+						))}
+						{runningTools.length === 0 && (
+							<span>
+								<Terminal size={14} /> No tools running
+							</span>
+						)}
+					</div>
+				</ReferenceContextCard>
+				<ReferenceContextCard title="Related Files">
+					<div className="reference-file-list">
+						{relatedFiles.slice(0, showAllFiles ? relatedFiles.length : 5).map((file, index) => (
+							<span className={index === 0 ? "selected" : ""} key={file}>
+								<FileText size={13} /> {file}
+							</span>
+						))}
+						{relatedFiles.length === 0 && (
+							<span>
+								<FileText size={13} /> No workspace files
+							</span>
+						)}
+					</div>
+					<button
+						type="button"
+						className="reference-context-link"
+						onClick={() => setShowAllFiles((value) => !value)}
+					>
+						{showAllFiles ? "Show Less" : `Show All (${workspaceSummary?.fileCount ?? 0})`}
+					</button>
+				</ReferenceContextCard>
+				<ReferenceContextCard title="Memory">
+					<label className="reference-memory-search">
+						<Search size={12} />
+						<input
+							placeholder="Search memory"
+							value={memoryQuery}
+							onChange={(event) => setMemoryQuery(event.target.value)}
+						/>
+					</label>
+					<div className="reference-memory-list">
+						{visibleMemory.slice(0, 3).map((entry) => (
+							<span key={entry}>{entry}</span>
+						))}
+					</div>
+					<button type="button" className="reference-context-link">
+						Show All ({memoryCount})
+					</button>
+				</ReferenceContextCard>
+			</aside>
+		</div>
+	);
+}
+
+function ReferenceContextCard({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<section className="reference-context-card">
+			<h2>{title}</h2>
+			{children}
+		</section>
+	);
+}
+
 export function ConversationSidebar({
 	conversations,
 	projects,
@@ -265,18 +1485,20 @@ export function ConversationSidebar({
 	onDelete,
 	includeStopped: _includeStopped,
 	onIncludeStoppedChange: _onIncludeStoppedChange,
-	stoppedCount = 0,
-	onPruneStopped,
+	stoppedCount: _stoppedCount = 0,
+	onPruneStopped: _onPruneStopped,
 	pruning: _pruning,
-	totalCount,
-	truncated,
-	showAll,
-	onShowAllChange,
+	totalCount: _totalCount,
+	truncated: _truncated,
+	showAll: _showAll,
+	onShowAllChange: _onShowAllChange,
 	activeView,
-	appMode,
-	onAppModeChange,
-	onSelectProject,
-	currentProject,
+	tasks,
+	runs,
+	daemonRunning,
+	onNavigate,
+	userProfile,
+	onEditProfile,
 }: {
 	conversations: AgentInstance[];
 	projects: AgentInstance[];
@@ -300,36 +1522,35 @@ export function ConversationSidebar({
 	showAll: boolean;
 	onShowAllChange(value: boolean): void;
 	activeView: MoreView | "chat";
-	appMode: AppMode;
-	onAppModeChange(mode: AppMode): void;
-	onSelectProject(): void;
-	currentProject?: string;
+	tasks?: TaskDefinition[];
+	runs?: TaskRun[];
+	daemonRunning?: boolean;
+	onNavigate?(view: MoreView | "chat"): void;
+	userProfile?: { nickname?: string; avatarEmoji?: string };
+	onEditProfile?(): void;
 }) {
-	const projectGroups = useMemo(() => {
-		const groups = new Map<string, AgentInstance[]>();
-		for (const instance of projects) {
-			const project = instance.cwd.trim() || "未指定项目";
-			const group = groups.get(project) ?? [];
-			group.push(instance);
-			groups.set(project, group);
-		}
-		return [...groups.entries()];
+	const spaces = useMemo(() => {
+		const seen = new Set<string>();
+		return projects.filter((instance) => {
+			const cwd = instance.cwd.trim();
+			if (!cwd || seen.has(cwd)) return false;
+			seen.add(cwd);
+			return true;
+		});
 	}, [projects]);
 
-	const hasAny = conversations.length > 0 || projects.length > 0;
-
-	const renderConversationRow = (instance: AgentInstance, isProjectRow = false) => (
+	const renderConversationRow = (instance: AgentInstance) => (
 		<div
 			key={instance.id}
 			className={`conversation-row ${selectedInstanceId === instance.id && activeView === "chat" ? "selected" : ""}`}
 		>
 			<button className="conversation-select" type="button" onClick={() => onSelect(instance.id)}>
-				<span className={`conversation-avatar ${isProjectRow ? "code" : ""}`}>
-					{isProjectRow ? <TerminalSquare size={15} /> : <MessageSquare size={15} />}
+				<span className="conversation-avatar">
+					<MessageSquare size={15} />
 				</span>
 				<span className="conversation-copy">
 					<strong>{instanceTitle(instance, conversationTitles[instance.id])}</strong>
-					{isProjectRow && instance.cwd && <span>{shortWorkspacePath(instance.cwd)}</span>}
+					<span>{instance.mode === "code" ? "Coding workspace" : "Personal workspace"}</span>
 				</span>
 				<span className="conversation-status-indicator">
 					<span className={`instance-dot ${instance.status}`} />
@@ -349,11 +1570,19 @@ export function ConversationSidebar({
 
 	return (
 		<aside className="conversation-sidebar">
+			{onNavigate && tasks && runs && (
+				<SidebarHeader
+					activeView={activeView}
+					tasks={tasks}
+					runs={runs}
+					daemonRunning={daemonRunning ?? false}
+					onNavigate={onNavigate}
+				/>
+			)}
 			<div className="sidebar-title">
 				<div className="brand-lockup">
 					<span className="brand-copy">
-						<strong>OpenPI</strong>
-						<span>Personal agent</span>
+						<strong>Spaces</strong>
 					</span>
 				</div>
 				<button
@@ -366,55 +1595,93 @@ export function ConversationSidebar({
 					{creating ? <RefreshCw size={16} className="spin" /> : <Plus size={17} />}
 				</button>
 			</div>
-			<ModeTabBar
-				mode={appMode}
-				onModeChange={onAppModeChange}
-				onSelectProject={onSelectProject}
-				currentProject={currentProject}
-			/>
 			<div className="search-box">
 				<Search size={15} />
 				<input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="搜索对话" />
 			</div>
-			<div className="sidebar-section-label">
-				<span>对话</span>
-				{(truncated || showAll || stoppedCount > 0) && (
-					<button
-						type="button"
-						className="text-button sidebar-meta-btn"
-						onClick={() => {
-							if (truncated && !showAll) onShowAllChange(true);
-							else if (showAll) onShowAllChange(false);
-							else if (stoppedCount > 0) onPruneStopped();
-						}}
-						title={
-							stoppedCount > 0 && !truncated ? "清理已停止" : showAll ? "只看最近" : `显示全部 ${totalCount}`
-						}
-					>
-						{showAll ? "收起" : truncated ? `全部 ${totalCount}` : stoppedCount > 0 ? `清理 ${stoppedCount}` : ""}
-					</button>
-				)}
-			</div>
-			<div className="conversation-list">
-				{projectGroups.length > 0 &&
-					projectGroups.map(([project, projectConversations]) => (
-						<section className="conversation-project-group" key={project}>
-							<div className="conversation-project-heading">
-								<Folder size={13} />
-								<strong title={project}>{shortWorkspacePath(project)}</strong>
-								<span>{projectConversations.length}</span>
-							</div>
-							{projectConversations.map((inst) => renderConversationRow(inst, true))}
-						</section>
+			<div className="reference-sidebar-scroll">
+				<div className="sidebar-section-label reference-section-heading">
+					<span>Spaces</span>
+				</div>
+				<div className="spaces-list">
+					{spaces.map((space) => (
+						<button
+							type="button"
+							className={`space-row ${selectedInstanceId === space.id ? "selected" : ""}`}
+							key={space.id}
+							onClick={() => onSelect(space.id)}
+						>
+							<span className="space-icon">
+								<Folder size={16} />
+							</span>
+							<span className="space-copy">
+								<strong>{shortWorkspacePath(space.cwd)}</strong>
+								<small>~/{space.cwd.split(/[\\/]/).pop() ?? "workspace"}</small>
+							</span>
+							<span className="space-dot" />
+						</button>
 					))}
-				{conversations.map((inst) => renderConversationRow(inst))}
-				{!hasAny && (
+					{spaces.length === 0 && <span className="sidebar-inline-empty">还没有工作区</span>}
+				</div>
+				<button type="button" className="sidebar-more-row" onClick={() => onNavigate?.("capabilities")}>
+					<span>More</span>
+					<ChevronRight size={14} />
+				</button>
+
+				<div className="sidebar-section-label reference-section-heading recent-heading">
+					<span>Recent Sessions</span>
+					<button
+						className="icon-button quiet"
+						type="button"
+						title="新建会话"
+						aria-label="新建会话"
+						onClick={onNew}
+					>
+						<Plus size={14} />
+					</button>
+				</div>
+				<div className="conversation-list reference-session-list">
+					{conversations.map((instance) => renderConversationRow(instance))}
+					{conversations.length === 0 && (
+						<div className="sidebar-empty">
+							<MessageSquare size={20} />
+							<strong>还没有对话</strong>
+							<span>点 + 开始</span>
+						</div>
+					)}
+				</div>
+
+				{!spaces.length && !conversations.length && (
 					<div className="sidebar-empty">
 						<MessageSquare size={20} />
 						<strong>还没有对话</strong>
 						<span>点 + 开始</span>
 					</div>
 				)}
+			</div>
+			<div className="sidebar-account">
+				<button
+					type="button"
+					className="account-avatar"
+					title="编辑档案"
+					aria-label="编辑档案"
+					onClick={onEditProfile}
+				>
+					{userProfile?.avatarEmoji ?? (userProfile?.nickname ?? "U").slice(0, 1).toUpperCase()}
+				</button>
+				<div className="account-copy">
+					<strong>{userProfile?.nickname ?? "用户"}</strong>
+					<span>本地档案</span>
+				</div>
+				<button
+					type="button"
+					className="icon-button quiet"
+					title="设置"
+					aria-label="设置"
+					onClick={() => onNavigate?.("capabilities")}
+				>
+					<Wrench size={16} />
+				</button>
 			</div>
 		</aside>
 	);
@@ -1424,10 +2691,17 @@ export function ChatSurface({
 	onAbort,
 	onOpenSidebar,
 	onToggleContext,
+	activeTab,
+	onTabChange,
 	onRemember,
 	onCreateTaskFromChat,
 	onNavigate,
+	onNewConversation,
+	onRenameConversation,
+	onExportConversation,
 	turnMeta,
+	appMode,
+	onAppModeChange,
 }: {
 	mode: AgentMode;
 	workspace?: string;
@@ -1451,9 +2725,16 @@ export function ChatSurface({
 	onAbort(): void;
 	onOpenSidebar(): void;
 	onToggleContext(): void;
+	activeTab: "chat" | "activity";
+	onTabChange(tab: "chat" | "activity"): void;
 	onRemember(text: string): Promise<void> | void;
 	onCreateTaskFromChat(prompt: string): void;
 	onNavigate(view: ChatNavView): void;
+	onNewConversation?(): void;
+	onRenameConversation?(): void;
+	onExportConversation?(): void;
+	appMode: AppMode;
+	onAppModeChange(mode: AppMode): void;
 }) {
 	const [draft, setDraft] = useState("");
 	const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -1542,11 +2823,10 @@ export function ChatSurface({
 			? currentModel.thinkingLevels
 			: thinkingLevelsForModel({ reasoning: true });
 	const configurationDisabled = !conversation || isWorking || configuring;
-	const supportsImages = currentModel?.supportsImages ?? false;
-	const supportsComposerImages = composerMode === "image" || supportsImages;
+	const supportsComposerImages = composerMode === "image" || composerMode === "chat";
 	const canSubmit =
 		composerMode === "chat"
-			? (draft.trim().length > 0 || attachments.length > 0) && (attachments.length === 0 || supportsImages)
+			? draft.trim().length > 0 || attachments.length > 0
 			: draft.trim().length > 0 && (composerMode !== "video" || attachments.length === 0);
 	const latestMediaContent = mediaItems
 		.map(
@@ -1971,10 +3251,6 @@ export function ChatSurface({
 			onError("文生视频暂不接受本地图片，请先移除附件");
 			return;
 		}
-		if (composerMode === "chat" && attachments.length > 0 && !supportsImages) {
-			onError("当前模型不支持图片输入");
-			return;
-		}
 		abortSpeechRecognition();
 		if (composerMode === "chat" && message.startsWith("/") && attachments.length === 0) {
 			const handled = await handleLocalSlash(message);
@@ -2120,6 +3396,16 @@ export function ChatSurface({
 		n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
 	const fmtCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
 	const workspaceLabel = workspace ? workspace.split(/[\\/]/).pop() || workspace : "—";
+	const titleText = conversation
+		? instanceTitle(conversation.instance, conversation.state.sessionName)
+		: selectedInstance
+			? instanceTitle(selectedInstance, selectedInstance.label)
+			: "新对话";
+	const subtitleText = conversation
+		? shortWorkspacePath(conversation.instance.cwd)
+		: selectedInstance
+			? shortWorkspacePath(selectedInstance.cwd)
+			: "有什么需要我帮忙的？";
 
 	return (
 		<section className="chat-surface">
@@ -2132,21 +3418,9 @@ export function ChatSurface({
 				>
 					<Menu size={18} />
 				</button>
-				<div className="surface-heading">
-					<strong>
-						{conversation
-							? instanceTitle(conversation.instance, conversation.state.sessionName)
-							: selectedInstance
-								? instanceTitle(selectedInstance, selectedInstance.label)
-								: "新对话"}
-					</strong>
-					<span>
-						{conversation
-							? shortWorkspacePath(conversation.instance.cwd)
-							: selectedInstance
-								? shortWorkspacePath(selectedInstance.cwd)
-								: "有什么需要我帮忙的？"}
-					</span>
+				<div className="surface-heading chat-title">
+					<strong>{titleText}</strong>
+					<span>{subtitleText}</span>
 				</div>
 				<div className="surface-actions">
 					{conversation && (
@@ -2165,128 +3439,215 @@ export function ChatSurface({
 					</button>
 				</div>
 			</header>
-
-			<div className="message-scroll" ref={messageScroll} onScroll={handleMessageScroll}>
-				{threadItems.length > 0 ? (
-					<div className="message-thread">
-						{threadItems.map((item) =>
-							"message" in item ? (
-								<MessageItem
-									key={item.key}
-									message={item.message}
-									hideAssistantTools={
-										item.message.role === "assistant" && assistantToolsHaveResults(messages, item.index)
-									}
-								/>
-							) : (
-								<GeneratedMediaCard
-									key={item.key}
-									item={item.media}
-									onSave={async (mediaItem) => {
-										const source =
-											mediaItem.kind === "image"
-												? {
-														url: mediaItem.image?.url,
-														data: mediaItem.image?.data,
-														mimeType: mediaItem.image?.mimeType,
-														filename: `agnes-image-${mediaItem.id.slice(0, 8)}`,
-													}
-												: {
-														url: mediaItem.video?.url,
-														mimeType: "video/mp4",
-														filename: `agnes-video-${mediaItem.id.slice(0, 8)}`,
-													};
-										try {
-											await desktopApi.saveMedia(source);
-										} catch (caught) {
-											onError(caught instanceof Error ? caught.message : String(caught));
-										}
-									}}
-									onDelete={(itemId) =>
-										setMediaHistory((current) => ({
-											...current,
-											[mediaScope]: (current[mediaScope] ?? []).filter((entry) => entry.id !== itemId),
-										}))
-									}
-								/>
-							),
-						)}
-						{isWorking && (
-							<div className="agent-progress">
-								<span className="agent-avatar">
-									<Bot size={16} />
-								</span>
-								<span className="thinking-dots">
-									<i />
-									<i />
-									<i />
-								</span>
-								<span>正在思考…</span>
-							</div>
-						)}
-						{!isWorking && turnMeta && (
-							<div className="turn-meta" role="status">
-								{turnMeta}
-							</div>
-						)}
+			<div className="chat-toolbar" role="toolbar" aria-label="对话工具">
+				<div className="chat-toolbar-left">
+					{onNewConversation && (
+						<button
+							type="button"
+							className="icon-button quiet"
+							title="新建会话"
+							aria-label="新建会话"
+							onClick={onNewConversation}
+						>
+							<Plus size={15} />
+						</button>
+					)}
+					{onRenameConversation && conversation && (
+						<button
+							type="button"
+							className="icon-button quiet"
+							title="重命名"
+							aria-label="重命名"
+							onClick={onRenameConversation}
+						>
+							<Pencil size={15} />
+						</button>
+					)}
+				</div>
+				<div className="chat-toolbar-center">
+					<div className="chat-view-tabs" role="tablist" aria-label="对话视图">
+						<button
+							type="button"
+							role="tab"
+							aria-selected={activeTab === "chat"}
+							className={activeTab === "chat" ? "active" : ""}
+							onClick={() => onTabChange("chat")}
+						>
+							Chat
+						</button>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={activeTab === "activity"}
+							className={activeTab === "activity" ? "active" : ""}
+							onClick={() => onTabChange("activity")}
+						>
+							Activity
+						</button>
 					</div>
-				) : (
-					<div className="conversation-empty">
-						<div className="empty-mark">π</div>
-						<h1>{mode === "code" ? (workspace ? "CWork 已准备好" : "先选择一个项目") : "今天想做什么？"}</h1>
-						<p className="conversation-empty-sub">
-							{mode === "code"
-								? workspace
-									? "描述目标，CWork 会先检查项目再修改"
-									: "点击左上角“选择项目”按钮开始"
-								: "直接聊，或输入 / 打开命令"}
-						</p>
-						{mode === "code" && !workspace ? null : (
-							<div className="starter-grid">
-								<button
-									type="button"
-									onClick={() =>
-										replaceDraft(
-											mode === "code"
-												? "检查这个项目当前状态，告诉我最需要先处理的代码问题。"
-												: "帮我扫一眼这个项目，指出最该先做的一件事。",
-										)
-									}
-								>
-									{mode === "code" ? "检查项目状态" : "梳理项目重点"}
-									<ChevronRight size={15} />
-								</button>
-								<button
-									type="button"
-									onClick={() =>
-										replaceDraft(
-											mode === "code"
-												? "检查未提交改动，继续完成并验证它们。"
-												: "继续这个工作区里未完成的改动。",
-										)
-									}
-								>
-									{mode === "code" ? "继续项目改动" : "接着上次的活"}
-									<ChevronRight size={15} />
-								</button>
-								<button
-									type="button"
-									onClick={() =>
-										replaceDraft(
-											mode === "code"
-												? "运行这个项目的相关测试和静态检查，定位失败原因并修复。"
-												: "/任务 每周五汇总本周进展并给出下周建议",
-										)
-									}
-								>
-									{mode === "code" ? "修复检查失败" : "安排一个自动化"}
-									<ChevronRight size={15} />
-								</button>
-							</div>
-						)}
-					</div>
-				)}
+				</div>
+				<div className="chat-toolbar-right">
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="复制会话"
+						aria-label="复制会话"
+						onClick={() => {
+							if (typeof navigator !== "undefined" && navigator.clipboard && conversation) {
+								const lines = conversation.messages
+									.map((m) => `${m.role === "user" ? "You" : "Assistant"}: ${contentText(m.content)}`)
+									.join("\n\n");
+								void navigator.clipboard.writeText(lines);
+							}
+						}}
+					>
+						<Copy size={15} />
+					</button>
+					{onExportConversation && conversation && (
+						<button
+							type="button"
+							className="icon-button quiet"
+							title="导出 HTML"
+							aria-label="导出 HTML"
+							onClick={onExportConversation}
+						>
+							<Download size={15} />
+						</button>
+					)}
+					<button type="button" className="icon-button quiet" title="分享" aria-label="分享">
+						<Share2 size={15} />
+					</button>
+					<button type="button" className="icon-button quiet" title="更多" aria-label="更多">
+						<MoreHorizontal size={15} />
+					</button>
+				</div>
 			</div>
+
+			{activeTab === "activity" ? (
+				<ActivityTimeline conversation={conversation} />
+			) : (
+				<div className="message-scroll" ref={messageScroll} onScroll={handleMessageScroll}>
+					{threadItems.length > 0 ? (
+						<div className="message-thread">
+							{threadItems.map((item) =>
+								"message" in item ? (
+									<MessageItem
+										key={item.key}
+										message={item.message}
+										hideAssistantTools={
+											item.message.role === "assistant" && assistantToolsHaveResults(messages, item.index)
+										}
+									/>
+								) : (
+									<GeneratedMediaCard
+										key={item.key}
+										item={item.media}
+										onSave={async (mediaItem) => {
+											const source =
+												mediaItem.kind === "image"
+													? {
+															url: mediaItem.image?.url,
+															data: mediaItem.image?.data,
+															mimeType: mediaItem.image?.mimeType,
+															filename: `agnes-image-${mediaItem.id.slice(0, 8)}`,
+														}
+													: {
+															url: mediaItem.video?.url,
+															mimeType: "video/mp4",
+															filename: `agnes-video-${mediaItem.id.slice(0, 8)}`,
+														};
+											try {
+												await desktopApi.saveMedia(source);
+											} catch (caught) {
+												onError(caught instanceof Error ? caught.message : String(caught));
+											}
+										}}
+										onDelete={(itemId) =>
+											setMediaHistory((current) => ({
+												...current,
+												[mediaScope]: (current[mediaScope] ?? []).filter((entry) => entry.id !== itemId),
+											}))
+										}
+									/>
+								),
+							)}
+							{isWorking && (
+								<div className="agent-progress">
+									<span className="agent-avatar">
+										<Bot size={16} />
+									</span>
+									<span className="thinking-dots">
+										<i />
+										<i />
+										<i />
+									</span>
+									<span>正在思考…</span>
+								</div>
+							)}
+							{!isWorking && turnMeta && (
+								<div className="turn-meta" role="status">
+									{turnMeta}
+								</div>
+							)}
+						</div>
+					) : (
+						<div className="conversation-empty">
+							<div className="empty-mark">π</div>
+							<h1>{mode === "code" ? (workspace ? "CWork 已准备好" : "先选择一个项目") : "今天想做什么？"}</h1>
+							<p className="conversation-empty-sub">
+								{mode === "code"
+									? workspace
+										? "描述目标，CWork 会先检查项目再修改"
+										: "点击左上角“选择项目”按钮开始"
+									: "直接聊，或输入 / 打开命令"}
+							</p>
+							{mode === "code" && !workspace ? null : (
+								<div className="starter-grid">
+									<button
+										type="button"
+										onClick={() =>
+											replaceDraft(
+												mode === "code"
+													? "检查这个项目当前状态，告诉我最需要先处理的代码问题。"
+													: "帮我扫一眼这个项目，指出最该先做的一件事。",
+											)
+										}
+									>
+										{mode === "code" ? "检查项目状态" : "梳理项目重点"}
+										<ChevronRight size={15} />
+									</button>
+									<button
+										type="button"
+										onClick={() =>
+											replaceDraft(
+												mode === "code"
+													? "检查未提交改动，继续完成并验证它们。"
+													: "继续这个工作区里未完成的改动。",
+											)
+										}
+									>
+										{mode === "code" ? "继续项目改动" : "接着上次的活"}
+										<ChevronRight size={15} />
+									</button>
+									<button
+										type="button"
+										onClick={() =>
+											replaceDraft(
+												mode === "code"
+													? "运行这个项目的相关测试和静态检查，定位失败原因并修复。"
+													: "/任务 每周五汇总本周进展并给出下周建议",
+											)
+										}
+									>
+										{mode === "code" ? "修复检查失败" : "安排一个自动化"}
+										<ChevronRight size={15} />
+									</button>
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+			)}
 
 			<div className="composer-wrap">
 				{toast && <div className="chat-toast">{toast}</div>}
@@ -2295,6 +3656,26 @@ export function ChatSurface({
 						<ArrowDown size={17} />
 					</button>
 				)}
+				<div className="composer-mode-row">
+					<div className="segmented mode-switch composer-mode-switch" aria-label="应用模式">
+						<button
+							type="button"
+							className={appMode === "chat" ? "active" : ""}
+							onClick={() => onAppModeChange("chat")}
+						>
+							<MessageSquare size={14} />
+							Chat
+						</button>
+						<button
+							type="button"
+							className={appMode === "code" ? "active" : ""}
+							onClick={() => onAppModeChange("code")}
+						>
+							<TerminalSquare size={14} />
+							CWork
+						</button>
+					</div>
+				</div>
 				<div
 					className={`composer ${isWorking ? "streaming" : ""} ${draggingImages ? "dragging" : ""} ${composerMode !== "chat" ? "media-composer" : ""}`}
 					onDragEnter={handleDragEnter}
@@ -2537,7 +3918,7 @@ export function ChatSurface({
 										type="button"
 										disabled={
 											!supportsComposerImages ||
-											composerMode === "video" ||
+											(composerMode as MediaComposerMode) === "video" ||
 											preparingImages ||
 											attachments.length >= MAX_IMAGE_ATTACHMENTS
 										}
@@ -2647,10 +4028,6 @@ export function ChatSurface({
 																		keywords={[model.name, model.provider, model.id]}
 																		key={`${model.provider}/${model.id}`}
 																		onSelect={() => {
-																			if (!model.supportsImages && attachments.length > 0) {
-																				onError("请先移除图片再切换纯文本模型");
-																				return;
-																			}
 																			setModelMenuOpen(false);
 																			if (!selected) onModelChange(model);
 																		}}
@@ -2741,31 +4118,29 @@ export function ChatSurface({
 			</div>
 			<div className="chat-statusbar">
 				<div className="statusbar-left">
-					<span title="当前模型">
-						<Cpu size={12} />
-						{shortModelName(conversation?.state.model?.id ?? "—")}
+					<span title={workspace ?? "项目目录"}>
+						<Folder size={13} />
+						{workspaceLabel}
 					</span>
-					{workspaceLabel && (
-						<span title={workspace ?? ""}>
-							<Folder size={12} />
-							{workspaceLabel}
-						</span>
-					)}
+					<span title="当前模型">
+						<Cpu size={13} />
+						{conversation?.state.model?.id ?? "—"}
+					</span>
 				</div>
 				<div className="statusbar-right">
-					{stats && <span>本次命中 {lastHit ?? 0}%</span>}
-					{stats && <span>平均命中 {avgHit ?? 0}%</span>}
-					{stats && <span>会话 tokens {fmtTokens(stats.tokens.total)}</span>}
-					{lastTotal > 0 && <span>本次 tokens {fmtTokens(lastTotal)}</span>}
-					{stats && <span>本次费用 {fmtCost(lastCost)}</span>}
-					{stats && <span>当前会话 {stats.userMessages} 轮</span>}
-					{stats && ctxPercent !== undefined && <span>上下文 {ctxPercent}%</span>}
-					{stats && compactThreshold !== undefined && stats.contextUsage?.contextWindow && (
-						<span>压缩阈值 {Math.round((compactThreshold / stats.contextUsage.contextWindow) * 100)}%</span>
-					)}
-					{stats && stats.cost > 0 && <span>会话费用 {fmtCost(stats.cost)}</span>}
+					{lastHit !== undefined && <span title="本次命中率">本次 {lastHit}%</span>}
+					{avgHit !== undefined && <span title="平均命中率">均 {avgHit}%</span>}
+					{stats && <span title="会话 token">{fmtTokens(stats.tokens.total)} tok</span>}
+					{lastTotal > 0 && <span title="本次 token">+{fmtTokens(lastTotal)}</span>}
+					{lastCost > 0 && <span title="本次费用">{fmtCost(lastCost)}</span>}
+					{stats && stats.cost > 0 && <span title="会话费用">共 {fmtCost(stats.cost)}</span>}
+					{stats && <span title="对话轮数">{stats.userMessages} 轮</span>}
+					{ctxPercent !== undefined && <span title="上下文占用">ctx {ctxPercent}%</span>}
+					{compactThreshold !== undefined && <span title="压缩阈值">{fmtTokens(compactThreshold)} 阈</span>}
 					{providerBalance && (
-						<span>余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}</span>
+						<span title="账户余额">
+							余额 {providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}
+						</span>
 					)}
 				</div>
 			</div>
@@ -2779,6 +4154,84 @@ function shortModelName(name: string): string {
 	return `${trimmed.slice(0, 16)}…`;
 }
 
+interface ActivityTimelineItem {
+	key: string;
+	kind: "tool" | "message" | "assistant";
+	title: string;
+	detail: string;
+	timestamp?: number;
+	error?: boolean;
+}
+
+function ActivityTimeline({ conversation }: { conversation?: ConversationSnapshot }) {
+	const items: ActivityTimelineItem[] = (conversation?.messages ?? []).flatMap<ActivityTimelineItem>(
+		(message, messageIndex) => {
+			const calls = toolCalls(message);
+			const text = contentText(message.content).trim();
+			const timestamp = message.timestamp;
+			const key = `${timestamp ?? messageIndex}-${messageIndex}`;
+			if (message.role === "user" && text) {
+				return [{ key, kind: "message" as const, title: "你", detail: text, timestamp }];
+			}
+			if (calls.length > 0) {
+				return calls.map((call, callIndex) => ({
+					key: `${key}-tool-${callIndex}`,
+					kind: "tool" as const,
+					title: call.name,
+					detail: call.detail || "工具调用完成",
+					timestamp,
+					error: message.isError,
+				}));
+			}
+			if (message.role === "assistant" && text) {
+				return [{ key, kind: "assistant" as const, title: "OpenPI", detail: text, timestamp }];
+			}
+			return [];
+		},
+	);
+
+	return (
+		<div className="activity-scroll">
+			<div className="activity-thread">
+				{items.length > 0 ? (
+					items.map((item) => (
+						<article className={`activity-item ${item.kind} ${item.error ? "error" : ""}`} key={item.key}>
+							<time>{formatTime(item.timestamp)}</time>
+							<div className="activity-rail-dot" />
+							<div className="activity-card">
+								<header>
+									<span className="activity-icon">
+										{item.kind === "tool" ? (
+											<Terminal size={15} />
+										) : item.kind === "message" ? (
+											<UserRound size={15} />
+										) : (
+											<Bot size={15} />
+										)}
+									</span>
+									<strong>{item.title}</strong>
+									{item.kind === "tool" && (
+										<span className={`activity-state ${item.error ? "error" : ""}`}>
+											{item.error ? "Failed" : "Completed"}
+										</span>
+									)}
+								</header>
+								<p>{item.detail}</p>
+							</div>
+						</article>
+					))
+				) : (
+					<div className="activity-empty">
+						<History size={28} />
+						<strong>还没有执行记录</strong>
+						<span>开始对话后，文件、终端和工具活动会显示在这里。</span>
+					</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
 export function MessageItem({
 	message,
 	hideAssistantTools = false,
@@ -2790,6 +4243,7 @@ export function MessageItem({
 	const text = contentText(message.content);
 	const images = contentImages(message.content);
 	const calls = hideAssistantTools ? [] : toolCalls(message);
+	const blockCounts = message.role !== "user" ? messageBlockCounts(message.content) : undefined;
 	// toolResult must use the same avatar+stack grid as assistant messages,
 	// otherwise rows sit full-bleed and misalign with in-message tool chips.
 	if (message.role === "toolResult") {
@@ -2805,8 +4259,18 @@ export function MessageItem({
 										<Wrench size={14} />
 										{call.name}
 									</span>
-									<span>
-										{message.isError ? "失败" : "完成"}
+									<span className="tool-trace-status">
+										{message.isError ? (
+											<>
+												<CircleStop size={13} className="trace-icon error" />
+												失败
+											</>
+										) : (
+											<>
+												<Check size={13} className="trace-icon ok" />
+												完成
+											</>
+										)}
 										<ChevronRight size={14} />
 									</span>
 								</summary>
@@ -2825,6 +4289,15 @@ export function MessageItem({
 		return null;
 	}
 
+	// Build a compact trace badge like "2个工具 · 1段思考"
+	let traceBadge: string | undefined;
+	if (!isUser && blockCounts) {
+		const parts: string[] = [];
+		if (blockCounts.tools > 0) parts.push(`${blockCounts.tools}个工具`);
+		if (blockCounts.thinking > 0) parts.push(`${blockCounts.thinking}段思考`);
+		if (parts.length > 0) traceBadge = parts.join(" · ");
+	}
+
 	return (
 		<article className={`message ${isUser ? "user" : "assistant"}`}>
 			{!isUser && (
@@ -2836,6 +4309,7 @@ export function MessageItem({
 				{!isUser && (
 					<div className="message-meta">
 						<strong>OpenPI</strong>
+						{traceBadge && <span className="message-trace-badge">{traceBadge}</span>}
 						<span>{formatTime(message.timestamp)}</span>
 					</div>
 				)}
@@ -2844,13 +4318,26 @@ export function MessageItem({
 					{text && <div className="message-text">{isUser ? text : <MarkdownText text={text} />}</div>}
 					{message.errorMessage && <div className="message-error">{message.errorMessage}</div>}
 					{calls.map((call, index) => (
-						<details className="tool-trace" key={`${call.name}-${index}`}>
+						<details className={`tool-trace ${message.isError ? "error" : ""}`} key={`${call.name}-${index}`}>
 							<summary>
 								<span>
 									<Wrench size={14} />
 									{call.name}
 								</span>
-								<ChevronRight size={14} />
+								<span className="tool-trace-status">
+									{message.isError ? (
+										<>
+											<CircleStop size={13} className="trace-icon error" />
+											失败
+										</>
+									) : (
+										<>
+											<Check size={13} className="trace-icon ok" />
+											完成
+										</>
+									)}
+									<ChevronRight size={14} />
+								</span>
 							</summary>
 							{call.detail && <pre>{call.detail}</pre>}
 						</details>
@@ -2962,101 +4449,434 @@ function GeneratedMediaCard({
 	);
 }
 
+const fmtTokens = (n: number) =>
+	n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
+const fmtCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+
+function ContextProgressBar({ value, max, color = "var(--accent)" }: { value: number; max: number; color?: string }) {
+	const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+	const warn = pct > 80;
+	const danger = pct > 95;
+	const barColor = danger ? "var(--danger)" : warn ? "var(--warn)" : color;
+	return (
+		<div className="ctx-progress-wrap">
+			<div className="ctx-progress-bar">
+				<div className="ctx-progress-fill" style={{ width: `${pct}%`, background: barColor }} />
+			</div>
+			<span className="ctx-progress-label">
+				{fmtTokens(value)} / {fmtTokens(max)} ({Math.round(pct)}%)
+			</span>
+		</div>
+	);
+}
+
+function TokenCompositionBar({
+	tokens: t,
+}: {
+	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+}) {
+	const total = t.input + t.output + t.cacheRead + t.cacheWrite || 1;
+	const segments = [
+		{ key: "prompt", label: "提示词", value: t.input, color: "#d97757" },
+		{ key: "reply", label: "回复", value: t.output, color: "#76c878" },
+		{ key: "cacheR", label: "缓存读", value: t.cacheRead, color: "#4d8df6" },
+		{ key: "cacheW", label: "缓存写", value: t.cacheWrite, color: "#8791a1" },
+	].filter((s) => s.value > 0);
+	return (
+		<div className="token-composition">
+			<div className="token-bar">
+				{segments.map((s) => (
+					<div
+						key={s.key}
+						className="token-bar-segment"
+						style={{ width: `${(s.value / total) * 100}%`, background: s.color }}
+						title={`${s.label}: ${fmtTokens(s.value)}`}
+					/>
+				))}
+			</div>
+			<div className="token-legend">
+				{segments.map((s) => (
+					<span key={s.key} className="token-legend-item">
+						<span className="token-legend-dot" style={{ background: s.color }} />
+						{s.label} {fmtTokens(s.value)}
+					</span>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function MetricCard({ label, value, unit }: { label: string; value: string; unit?: string }) {
+	return (
+		<div className="metric-card">
+			<span className="metric-label">{label}</span>
+			<span className="metric-value">
+				{value}
+				{unit && <span className="metric-unit">{unit}</span>}
+			</span>
+		</div>
+	);
+}
+
+type ContextTab = "overview" | "files" | "changes" | "terminal";
+
+const CONTEXT_TABS: Array<{ id: ContextTab; label: string; icon: typeof ListTodo }> = [
+	{ id: "overview", label: "概览", icon: ListTodo },
+	{ id: "files", label: "文件", icon: FileText },
+	{ id: "changes", label: "改动", icon: GitBranch },
+	{ id: "terminal", label: "终端", icon: Terminal },
+];
+
+function extractFilePaths(args: unknown): string[] {
+	if (!args || typeof args !== "object") return [];
+	const obj = args as Record<string, unknown>;
+	const candidates = [
+		obj.path,
+		obj.file_path,
+		obj.filePath,
+		obj.target,
+		obj.targetPath,
+		obj.target_file,
+		obj.notebook_path,
+	];
+	const out: string[] = [];
+	for (const candidate of candidates) {
+		if (typeof candidate === "string" && candidate.length > 0) {
+			out.push(candidate);
+		}
+	}
+	const command = obj.command;
+	if (typeof command === "string") {
+		const match = command.match(/(?:\s|\b)([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8})/g);
+		if (match) out.push(...match);
+	}
+	return out;
+}
+
+function extractFileChangeRecords(
+	messages: ConversationMessage[] | undefined,
+): Array<{ path: string; ts: number; tool: string }> {
+	if (!messages) return [];
+	const out: Array<{ path: string; ts: number; tool: string }> = [];
+	for (const m of messages) {
+		if (m.role !== "assistant") continue;
+		if (!Array.isArray(m.content)) continue;
+		for (const block of m.content) {
+			if (!block || typeof block !== "object") continue;
+			const b = block as { type?: string; name?: string; arguments?: unknown };
+			if (b.type === "toolCall" && typeof b.name === "string") {
+				const paths = extractFilePaths(b.arguments);
+				for (const p of paths) {
+					out.push({ path: p, ts: m.timestamp ?? 0, tool: b.name });
+				}
+			}
+		}
+	}
+	const seen = new Set<string>();
+	return out
+		.slice()
+		.sort((a, b) => b.ts - a.ts)
+		.filter((entry) => {
+			if (seen.has(entry.path)) return false;
+			seen.add(entry.path);
+			return true;
+		});
+}
+
+function extractChangeSnippets(
+	messages: ConversationMessage[] | undefined,
+): Array<{ tool: string; summary: string; ts: number }> {
+	if (!messages) return [];
+	const out: Array<{ tool: string; summary: string; ts: number }> = [];
+	for (const m of messages) {
+		if (m.role !== "assistant") continue;
+		if (!Array.isArray(m.content)) continue;
+		for (const block of m.content) {
+			if (!block || typeof block !== "object") continue;
+			const b = block as { type?: string; name?: string; arguments?: unknown };
+			if (b.type === "toolCall" && typeof b.name === "string") {
+				const args = (b.arguments ?? {}) as Record<string, unknown>;
+				const path = typeof args.path === "string" ? args.path : "";
+				const command = typeof args.command === "string" ? args.command : "";
+				let summary = "";
+				if (b.name === "edit" || b.name === "write") {
+					summary = path ? `${path}` : command;
+				} else if (b.name === "bash" || b.name === "bash_execution") {
+					summary = command.split("\n")[0] ?? command;
+				} else if (b.name === "read") {
+					summary = path;
+				} else {
+					summary = JSON.stringify(args).slice(0, 80);
+				}
+				if (summary) {
+					out.push({ tool: b.name, summary, ts: m.timestamp ?? 0 });
+				}
+			}
+		}
+	}
+	return out
+		.slice()
+		.sort((a, b) => b.ts - a.ts)
+		.slice(0, 80);
+}
+
 export function ContextPanel({
 	conversation,
-	snapshot,
+	stats,
+	capabilities,
+	memoryEntries = [],
 	onClose,
 	onShowTasks,
 }: {
 	conversation?: ConversationSnapshot;
-	snapshot: DesktopSnapshot;
+	stats?: ConversationStats;
+	capabilities?: ConversationCapabilities;
+	memoryEntries?: string[];
 	onClose(): void;
 	onShowTasks(): void;
 }) {
-	const activeRuns = snapshot.runs.filter((run) => run.status === "running" || run.status === "queued");
-	const upcoming = snapshot.tasks
-		.filter((task) => task.status === "active" && task.nextRunAt)
-		.sort((left, right) => (left.nextRunAt ?? "").localeCompare(right.nextRunAt ?? ""))
-		.slice(0, 3);
+	const [tab, setTab] = useState<ContextTab>("overview");
+
+	// Context window
+	const ctxUsage = stats?.contextUsage;
+	const modelCtxWindow = conversation?.state.model?.contextWindow;
+	const ctxTokens = ctxUsage?.tokens ?? 0;
+	const ctxMax = ctxUsage?.contextWindow ?? modelCtxWindow ?? 0;
+
+	const toolCount = stats?.toolCalls ?? 0;
+
+	const fileEntries = extractFileChangeRecords(conversation?.messages);
+	const changeEntries = extractChangeSnippets(conversation?.messages);
+	const fileCount = fileEntries.length;
+	const changeCount = changeEntries.length;
+	const activeTools = capabilities?.tools.filter((tool) => tool.active).slice(0, 5) ?? [];
+
 	return (
 		<aside className="context-panel">
 			<header>
-				<strong>上下文</strong>
+				<strong>概览</strong>
 				<button className="icon-button quiet context-close" title="关闭" aria-label="关闭" onClick={onClose}>
 					<X size={16} />
 				</button>
 			</header>
-			<section className="context-section">
-				<div className="context-section-title">
-					<span>助手</span>
-					<span className={`context-status ${conversation?.state.isStreaming ? "working" : "ready"}`}>
-						{conversation?.state.isStreaming ? "处理中" : "就绪"}
-					</span>
-				</div>
-				<dl>
-					<div>
-						<dt>模型</dt>
-						<dd>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "默认"}</dd>
-					</div>
-					<div>
-						<dt>思考</dt>
-						<dd>{conversation?.state.thinkingLevel ?? "—"}</dd>
-					</div>
-					<div>
-						<dt>消息</dt>
-						<dd>{conversation?.state.messageCount ?? 0}</dd>
-					</div>
-				</dl>
-			</section>
-			<section className="context-section">
-				<div className="context-section-title">
-					<span>工作区</span>
-				</div>
-				<div className="workspace-path">
-					<Folder size={15} />
-					<span>{conversation?.instance.cwd ? shortWorkspacePath(conversation.instance.cwd) : "未选择"}</span>
-				</div>
-			</section>
-			<section className="context-section activity-context">
-				<div className="context-section-title">
-					<span>活动</span>
-					<button type="button" onClick={onShowTasks}>
-						任务
-						<ChevronRight size={13} />
-					</button>
-				</div>
-				{activeRuns.map((run) => {
-					const task = snapshot.tasks.find((candidate) => candidate.id === run.taskId);
+			<nav className="context-tabs" role="tablist">
+				{CONTEXT_TABS.map((entry) => {
+					const Icon = entry.icon;
+					let count: number | undefined;
+					if (entry.id === "files") count = fileCount;
+					if (entry.id === "changes") count = changeCount;
 					return (
-						<div className="context-activity" key={run.id}>
-							<span className="activity-icon working">
-								<RefreshCw size={13} className="spin" />
-							</span>
-							<div>
-								<strong>{task?.title ?? "后台任务"}</strong>
-								<span>{statusLabel(run.status)}</span>
-							</div>
-						</div>
+						<button
+							key={entry.id}
+							type="button"
+							role="tab"
+							aria-selected={tab === entry.id}
+							className={`context-tab ${tab === entry.id ? "active" : ""}`}
+							onClick={() => setTab(entry.id)}
+						>
+							<Icon size={13} />
+							<span>{entry.label}</span>
+							{count !== undefined && count > 0 && <span className="context-tab-count">{count}</span>}
+						</button>
 					);
 				})}
-				{upcoming.map((task) => (
-					<div className="context-activity" key={task.id}>
-						<span className="activity-icon">
-							<CalendarClock size={13} />
-						</span>
-						<div>
-							<strong>{task.title}</strong>
-							<span>{formatDate(task.nextRunAt)}</span>
+			</nav>
+
+			{tab === "overview" && (
+				<>
+					<section className="context-section">
+						<div className="context-section-title">
+							<span>Workspace</span>
 						</div>
+						<div className="context-workspace-card">
+							<span className="context-workspace-icon">
+								<Folder size={25} />
+							</span>
+							<div>
+								<strong>
+									{conversation?.instance.cwd ? shortWorkspacePath(conversation.instance.cwd) : "未选择工作区"}
+								</strong>
+								<span>{conversation?.instance.cwd ?? "选择一个工作区后开始"}</span>
+							</div>
+						</div>
+						<div className="context-count-grid">
+							<div>
+								<strong>{fileCount || "—"}</strong>
+								<span>Files</span>
+							</div>
+							<div>
+								<strong>{toolCount || "—"}</strong>
+								<span>Tools</span>
+							</div>
+							<div>
+								<strong>{memoryEntries.length || "—"}</strong>
+								<span>Memories</span>
+							</div>
+						</div>
+					</section>
+
+					<section className="context-section">
+						<div className="context-section-title">
+							<span>Environment</span>
+						</div>
+						<div className="context-fact-list">
+							<div>
+								<span>Platform</span>
+								<strong>Desktop</strong>
+							</div>
+							<div>
+								<span>Mode</span>
+								<strong>{conversation?.instance.mode === "code" ? "Code" : "Work"}</strong>
+							</div>
+							<div>
+								<span>Model</span>
+								<strong>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "Default"}</strong>
+							</div>
+							<div>
+								<span>Thinking</span>
+								<strong>{conversation?.state.thinkingLevel ?? "—"}</strong>
+							</div>
+						</div>
+					</section>
+
+					<section className="context-section">
+						<div className="context-section-title">
+							<span>Active Tools</span>
+							<span className="context-link" onClick={onShowTasks}>
+								Manage Tools <ChevronRight size={13} />
+							</span>
+						</div>
+						<div className="context-tool-list">
+							{activeTools.length > 0 ? (
+								activeTools.map((tool) => (
+									<div className="context-tool-row" key={`${tool.sourceInfo.path}:${tool.name}`}>
+										<span className="context-tool-icon">
+											<Wrench size={13} />
+										</span>
+										<strong>{tool.name}</strong>
+										<span className="context-online-dot" />
+									</div>
+								))
+							) : (
+								<div className="context-empty">当前会话暂无工具信息</div>
+							)}
+						</div>
+					</section>
+
+					<section className="context-section">
+						<div className="context-section-title">
+							<span>Related Files</span>
+							<span className="context-link">{fileCount > 0 ? `Show All (${fileCount})` : "—"}</span>
+						</div>
+						<div className="context-file-list">
+							{fileEntries.slice(0, 5).map((entry) => (
+								<div className="context-file-row" key={entry.path}>
+									<FileText size={14} />
+									<span>{entry.path.split(/[\\/]/).pop() ?? entry.path}</span>
+									{entry.tool === "edit" && <small>正在编辑</small>}
+								</div>
+							))}
+							{fileCount === 0 && <div className="context-empty">还没有关联文件</div>}
+						</div>
+					</section>
+
+					<section className="context-section">
+						<div className="context-section-title">
+							<span>Memory</span>
+							<span className="context-link">
+								{memoryEntries.length > 0 ? `Show All (${memoryEntries.length})` : "—"}
+							</span>
+						</div>
+						<div className="context-memory-list">
+							{memoryEntries.slice(0, 4).map((entry) => (
+								<div className="context-memory-row" key={entry}>
+									<strong>{entry.replace(/^\[[^\]]+\]\s*/, "").split(":")[0]}</strong>
+									<span>{entry.includes(":") ? entry.slice(entry.indexOf(":") + 1).trim() : entry}</span>
+								</div>
+							))}
+							{memoryEntries.length === 0 && <div className="context-empty">还没有可用记忆</div>}
+						</div>
+					</section>
+
+					{ctxMax > 0 && (
+						<section className="context-section context-advanced">
+							<div className="context-section-title">
+								<span>上下文窗口</span>
+								<span className="ctx-window-pct">{Math.round((ctxTokens / ctxMax) * 100)}%</span>
+							</div>
+							<ContextProgressBar value={ctxTokens} max={ctxMax} />
+						</section>
+					)}
+				</>
+			)}
+
+			{tab === "files" && (
+				<section className="context-section">
+					<div className="context-section-title">
+						<span>本次会话涉及文件</span>
+						<span className="context-muted">{fileCount} 个</span>
 					</div>
-				))}
-				{activeRuns.length === 0 && upcoming.length === 0 && (
-					<div className="context-empty">
-						<Clock3 size={17} />
-						<span>暂无定时活动</span>
+					{fileCount === 0 ? (
+						<div className="context-empty">
+							<FileText size={17} />
+							<span>尚无文件操作</span>
+						</div>
+					) : (
+						<div className="file-list">
+							{fileEntries.map((entry) => (
+								<div className="file-row" key={entry.path}>
+									<FileText size={13} />
+									<span className="file-row-name" title={entry.path}>
+										{entry.path.split("/").pop() || entry.path}
+									</span>
+									<span className="file-row-dir" title={entry.path}>
+										{entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : ""}
+									</span>
+								</div>
+							))}
+						</div>
+					)}
+				</section>
+			)}
+
+			{tab === "changes" && (
+				<section className="context-section">
+					<div className="context-section-title">
+						<span>本次会话改动</span>
+						<span className="context-muted">{changeCount} 次</span>
 					</div>
-				)}
-			</section>
+					{changeCount === 0 ? (
+						<div className="context-empty">
+							<GitBranch size={17} />
+							<span>尚无工具改动</span>
+						</div>
+					) : (
+						<div className="change-list">
+							{changeEntries.map((entry, index) => (
+								<div className="change-row" key={`${entry.ts}-${index}`}>
+									<span className={`change-tool change-tool-${entry.tool}`}>{entry.tool}</span>
+									<span className="change-summary" title={entry.summary}>
+										{entry.summary}
+									</span>
+								</div>
+							))}
+						</div>
+					)}
+				</section>
+			)}
+
+			{tab === "terminal" && (
+				<section className="context-section">
+					<div className="context-section-title">
+						<span>终端</span>
+					</div>
+					<div className="terminal-placeholder">
+						<Terminal size={32} />
+						<strong>终端面板即将开放</strong>
+						<p>暂未在桌面接入 shell；后台任务日志在「运行时」页可看。</p>
+					</div>
+				</section>
+			)}
 		</aside>
 	);
 }
@@ -3087,8 +4907,152 @@ const API_TYPE_OPTIONS = [
 	{ value: "openai-responses", label: "OpenAI Responses" },
 ] as const;
 
-export function ModelProvidersPanel() {
+function VisionFallbackPanel({ onSaved }: { onSaved(): Promise<void> | void }) {
+	const [config, setConfig] = useState<VisionFallbackConfig>();
+	const [models, setModels] = useState<VisionFallbackModel[]>([]);
+	const [apiKey, setApiKey] = useState("");
+	const [model, setModel] = useState("glm-4.6v-flash");
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string>();
+
+	const refresh = useCallback(async (): Promise<void> => {
+		try {
+			const next = await desktopApi.getVisionFallback();
+			setConfig(next);
+			setModel(next.model);
+			if (next.configured) {
+				setModels(await desktopApi.getVisionFallbackModels());
+			} else {
+				setModels([]);
+			}
+			setError(undefined);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	}, []);
+
+	useEffect(() => {
+		void refresh();
+	}, [refresh]);
+
+	const save = async (): Promise<void> => {
+		setSaving(true);
+		try {
+			const next = await desktopApi.configureVisionFallback({
+				enabled: config?.enabled !== false,
+				model,
+				...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+			});
+			setConfig(next);
+			setModel(next.model);
+			setApiKey("");
+			setError(undefined);
+			setModels(await desktopApi.getVisionFallbackModels());
+			await onSaved();
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const toggle = async (): Promise<void> => {
+		if (!config?.configured) {
+			setError("请先输入智谱 API Key");
+			return;
+		}
+		setSaving(true);
+		try {
+			setConfig(await desktopApi.configureVisionFallback({ enabled: !config.enabled, model }));
+			setError(undefined);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<section className="vision-fallback-panel">
+			<div className="vision-fallback-heading">
+				<span className="vision-fallback-icon">
+					<ImageIcon size={17} />
+				</span>
+				<div>
+					<strong>智谱视觉补全</strong>
+					<span>GLM-4.6V-Flash 为不支持图片的模型提供识图与 OCR</span>
+				</div>
+				<button
+					type="button"
+					className={`vision-fallback-toggle ${config?.enabled ? "active" : ""}`}
+					aria-label={config?.enabled ? "关闭视觉补全" : "开启视觉补全"}
+					title={config?.enabled ? "关闭视觉补全" : "开启视觉补全"}
+					disabled={saving || !config?.configured}
+					onClick={() => void toggle()}
+				>
+					<i />
+				</button>
+			</div>
+			<div className="vision-fallback-body">
+				<label className="model-form-field">
+					<span>智谱 API Key</span>
+					<input
+						type="password"
+						value={apiKey}
+						placeholder={config?.configured ? "已配置，留空则不修改" : "输入 API Key"}
+						onChange={(event) => setApiKey(event.target.value)}
+					/>
+				</label>
+				<label className="model-form-field">
+					<span>视觉模型</span>
+					<select
+						value={model}
+						disabled={!config?.configured && !apiKey.trim()}
+						onChange={(event) => setModel(event.target.value)}
+					>
+						{(models.length > 0
+							? models
+							: [
+									{
+										id: "glm-4.6v-flash",
+										name: "GLM-4.6V Flash",
+										inputPrice: 0,
+										outputPrice: 0,
+										priceLabel: "免费",
+									},
+								]
+						).map((option) => (
+							<option key={option.id} value={option.id}>
+								{option.name} · {option.priceLabel}
+							</option>
+						))}
+					</select>
+				</label>
+				<button
+					type="button"
+					className="primary"
+					disabled={saving || (!apiKey.trim() && !config?.configured)}
+					onClick={() => void save()}
+				>
+					{saving ? "保存中…" : config?.configured ? "更新配置" : "启用视觉补全"}
+					<Save size={14} />
+				</button>
+			</div>
+			{config?.configured && (
+				<p className="vision-fallback-status">
+					{config.enabled ? "已启用" : "已关闭"} · 图片发送给纯文本模型时将先由 GLM-4.6V-Flash 解析。
+				</p>
+			)}
+			{error && <p className="vision-fallback-error">{error}</p>}
+		</section>
+	);
+}
+
+export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 	const [providers, setProviders] = useState<Record<string, ModelProviderConfig>>({});
+	const [authStatuses, setAuthStatuses] = useState<
+		Record<string, { type?: string; source?: string; configured: boolean }>
+	>({});
 	const [loadingProviders, setLoadingProviders] = useState(true);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [isNew, setIsNew] = useState(false);
@@ -3099,6 +5063,7 @@ export function ModelProvidersPanel() {
 	const [formApi, setFormApi] = useState("openai-completions");
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [loginBusy, setLoginBusy] = useState<string | null>(null);
 
 	const loadProviders = useCallback(async () => {
 		setLoadingProviders(true);
@@ -3113,9 +5078,60 @@ export function ModelProvidersPanel() {
 		}
 	}, []);
 
+	const loadAuthStatus = useCallback(async () => {
+		if (!instanceId) return;
+		try {
+			const statuses = await desktopApi.getProviderAuthStatus(instanceId);
+			const map: Record<string, { type?: string; source?: string; configured: boolean }> = {};
+			for (const entry of statuses) {
+				map[entry.provider] = { type: entry.type, source: entry.source, configured: entry.configured };
+			}
+			setAuthStatuses(map);
+		} catch {
+			// ignore
+		}
+	}, [instanceId]);
+
 	useEffect(() => {
 		void loadProviders();
 	}, [loadProviders]);
+
+	useEffect(() => {
+		void loadAuthStatus();
+	}, [loadAuthStatus]);
+
+	const handleLogin = async (provider: string) => {
+		if (!instanceId) {
+			setError("请先打开一个对话，再登录服务商。");
+			return;
+		}
+		setLoginBusy(provider);
+		setError(null);
+		try {
+			await desktopApi.providerLogin(instanceId, provider, "oauth");
+			await loadAuthStatus();
+			window.dispatchEvent(new Event("openpi:model-providers-changed"));
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setLoginBusy(null);
+		}
+	};
+
+	const handleLogout = async (provider: string) => {
+		if (!instanceId) return;
+		setLoginBusy(provider);
+		setError(null);
+		try {
+			await desktopApi.providerLogout(instanceId, provider);
+			await loadAuthStatus();
+			window.dispatchEvent(new Event("openpi:model-providers-changed"));
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setLoginBusy(null);
+		}
+	};
 
 	const openAddForm = () => {
 		setIsNew(true);
@@ -3271,6 +5287,7 @@ export function ModelProvidersPanel() {
 				</div>
 			) : (
 				<>
+					<VisionFallbackPanel onSaved={loadProviders} />
 					<div className="model-providers-toolbar">
 						<span className="model-providers-count">{totalCount} 个服务商已配置</span>
 						<button type="button" className="primary" onClick={openAddForm}>
@@ -3343,10 +5360,45 @@ export function ModelProvidersPanel() {
 												<strong>
 													{config.name || id}
 													{config.apiKey && <span className="model-api-key-badge">API Key</span>}
+													{authStatuses[id]?.type === "oauth" && (
+														<span className="model-api-key-badge oauth">已登录</span>
+													)}
 												</strong>
-												<span>{config.baseUrl || "默认地址"}</span>
+												<span>
+													{config.baseUrl || "默认地址"}
+													{authStatuses[id]?.configured && !authStatuses[id]?.type && " · 已配置"}
+												</span>
 											</div>
 											<div className="model-provider-actions">
+												{instanceId && authStatuses[id]?.type === "oauth" ? (
+													<button
+														type="button"
+														title="登出"
+														aria-label="登出"
+														disabled={loginBusy === id}
+														onClick={() => void handleLogout(id)}
+													>
+														{loginBusy === id ? (
+															<RefreshCw size={13} className="spin" />
+														) : (
+															<LogOut size={13} />
+														)}
+													</button>
+												) : (
+													<button
+														type="button"
+														title={instanceId ? "登录" : "先打开一个对话再登录"}
+														aria-label="登录"
+														disabled={loginBusy === id || !instanceId}
+														onClick={() => void handleLogin(id)}
+													>
+														{loginBusy === id ? (
+															<RefreshCw size={13} className="spin" />
+														) : (
+															<LogIn size={13} />
+														)}
+													</button>
+												)}
 												<button
 													type="button"
 													title="编辑"
@@ -3381,7 +5433,7 @@ export function CapabilitiesSurface({
 	capabilities,
 	loading,
 	busy,
-	onOpenSidebar,
+	onClose,
 	onReload,
 	onUseSkill,
 	onConfigureMcp,
@@ -3392,14 +5444,14 @@ export function CapabilitiesSurface({
 	capabilities?: ConversationCapabilities;
 	loading: boolean;
 	busy?: string;
-	onOpenSidebar(): void;
+	onClose(): void;
 	onReload(): void;
 	onUseSkill(name: string): void;
 	onConfigureMcp(): void;
 	onInstallPackage(marketPackage: MarketplacePackage): void;
 	onRemoveMcp(source: string, local: boolean): void;
 }) {
-	const [tab, setTab] = useState<CapabilityTab>("market");
+	const [tab, setTab] = useState<CapabilityTab>("models");
 	const [marketKind, setMarketKind] = useState<MarketplaceKind>("skills");
 	const [marketQuery, setMarketQuery] = useState("");
 	const [modelProviderCount, setModelProviderCount] = useState(0);
@@ -3426,6 +5478,11 @@ export function CapabilitiesSurface({
 			.toLowerCase()
 			.includes(normalizedMarketQuery);
 	});
+	const marketplaceCounts = {
+		skills: MARKETPLACE_PACKAGES.filter((marketPackage) => marketPackage.kind === "skills").length,
+		mcp: MARKETPLACE_PACKAGES.filter((marketPackage) => marketPackage.kind === "mcp").length,
+		repositories: MARKETPLACE_PACKAGES.filter((marketPackage) => marketPackage.kind === "repositories").length,
+	};
 	const isInstalled = (marketPackage: MarketplacePackage): boolean => {
 		const sourceIdentity = marketPackage.source.startsWith("git:")
 			? `git:github.com/${marketPackage.packageName}`
@@ -3436,34 +5493,68 @@ export function CapabilitiesSurface({
 			) ?? false
 		);
 	};
-	const tabs: Array<{ id: CapabilityTab; label: string; count: number }> = [
-		{ id: "models", label: "模型", count: modelProviderCount },
-		{ id: "market", label: "市场", count: MARKETPLACE_PACKAGES.length },
-		{ id: "skills", label: "技能", count: capabilities?.skills.length ?? 0 },
-		{ id: "mcp", label: "MCP", count: capabilities?.mcp.tools.length ?? 0 },
-		{ id: "extensions", label: "扩展", count: capabilities?.extensions.length ?? 0 },
-		{ id: "tools", label: "工具", count: capabilities?.tools.length ?? 0 },
-		{ id: "packages", label: "包", count: capabilities?.packages.length ?? 0 },
+	const tabs: Array<{
+		id: CapabilityTab;
+		label: string;
+		description: string;
+		count: number;
+		icon: typeof BookOpen;
+	}> = [
+		{ id: "models", label: "模型", description: "服务商与 API 配置", count: modelProviderCount, icon: Cpu },
+		{
+			id: "market",
+			label: "市场",
+			description: "安装技能、MCP 服务和工作流",
+			count: MARKETPLACE_PACKAGES.length,
+			icon: Store,
+		},
+		{
+			id: "skills",
+			label: "技能",
+			description: "当前会话可调用的能力",
+			count: capabilities?.skills.length ?? 0,
+			icon: BookOpen,
+		},
+		{
+			id: "mcp",
+			label: "MCP",
+			description: "外部服务与工具连接",
+			count: capabilities?.mcp.tools.length ?? 0,
+			icon: Cable,
+		},
+		{
+			id: "extensions",
+			label: "扩展",
+			description: "已加载的本地扩展",
+			count: capabilities?.extensions.length ?? 0,
+			icon: Blocks,
+		},
+		{
+			id: "tools",
+			label: "工具",
+			description: "当前会话已注册的工具",
+			count: capabilities?.tools.length ?? 0,
+			icon: Wrench,
+		},
+		{
+			id: "packages",
+			label: "已安装包",
+			description: "项目与用户级依赖",
+			count: capabilities?.packages.length ?? 0,
+			icon: Package,
+		},
 	];
+	const selectedTab = tabs.find((item) => item.id === tab) ?? tabs[0];
 
 	return (
-		<section className="capabilities-surface">
+		<section className="capabilities-surface settings-surface">
 			<header className="surface-header capability-page-header">
-				<button
-					className="icon-button quiet mobile-only"
-					title="对话列表"
-					aria-label="对话列表"
-					onClick={onOpenSidebar}
-				>
-					<Menu size={18} />
+				<button className="icon-button quiet" title="返回聊天" aria-label="返回聊天" onClick={onClose}>
+					<ArrowLeft size={18} />
 				</button>
 				<div className="surface-heading">
-					<strong>能力</strong>
-					<span>
-						{conversation
-							? `当前对话：${instanceTitle(conversation.instance, conversation.state.sessionName)}`
-							: "先选一个对话再装技能 / 工具"}
-					</span>
+					<strong>设置</strong>
+					<span>模型、扩展和本地工具</span>
 				</div>
 				<button
 					className="icon-button"
@@ -3476,373 +5567,465 @@ export function CapabilitiesSurface({
 				</button>
 			</header>
 
-			<div className="capability-tabs" role="tablist" aria-label="能力类型">
-				{tabs.map((item) => (
-					<button
-						type="button"
-						role="tab"
-						aria-selected={tab === item.id}
-						className={tab === item.id ? "active" : ""}
-						key={item.id}
-						onClick={() => setTab(item.id)}
-					>
-						{item.label}
-						<span>{item.count}</span>
-					</button>
-				))}
-			</div>
+			<div className="settings-workspace">
+				<nav className="settings-navigation" role="tablist" aria-label="设置分类">
+					<span className="settings-navigation-label">设置</span>
+					{tabs.map((item) => {
+						const Icon = item.icon;
+						return (
+							<button
+								type="button"
+								role="tab"
+								aria-selected={tab === item.id}
+								className={tab === item.id ? "active" : ""}
+								key={item.id}
+								onClick={() => setTab(item.id)}
+							>
+								<Icon size={16} />
+								<span>{item.label}</span>
+								{item.count > 0 && <em>{item.count}</em>}
+							</button>
+						);
+					})}
+				</nav>
 
-			<div className="capability-content">
-				{tab === "models" ? (
-					<ModelProvidersPanel />
-				) : !conversation ? (
-					<div className="product-empty large">
-						<Blocks size={32} />
-						<strong>还没有选中对话</strong>
-						<span>能力（技能、MCP、工具）挂在具体会话上。左侧新建或点开一个对话即可管理。</span>
-					</div>
-				) : loading && !capabilities ? (
-					<div className="product-empty">
-						<RefreshCw size={24} className="spin" />
-						<strong>加载能力中…</strong>
-					</div>
-				) : capabilities ? (
-					<>
-						{capabilities.diagnostics.length > 0 && (
-							<div className="capability-diagnostics">
-								{capabilities.diagnostics.map((diagnostic, index) => (
-									<div className={diagnostic.type} key={`${diagnostic.path ?? diagnostic.message}-${index}`}>
-										<Bell size={14} />
-										<span>
-											<strong>{diagnostic.resource}</strong>
-											{diagnostic.message}
-										</span>
-									</div>
-								))}
-							</div>
+				<div className="capability-content settings-content">
+					<header className="settings-content-header">
+						<div>
+							<h1>{selectedTab.label}</h1>
+							<p>{selectedTab.description}</p>
+						</div>
+						{conversation && tab !== "models" && (
+							<span className="settings-session-label">
+								{instanceTitle(conversation.instance, conversation.state.sessionName)}
+							</span>
 						)}
-
-						{tab === "market" && (
-							<div className="marketplace-workspace">
-								<div className="marketplace-controls">
-									<div className="segmented" aria-label="Marketplace category">
-										<button
-											className={marketKind === "skills" ? "active" : ""}
-											onClick={() => setMarketKind("skills")}
+					</header>
+					{tab === "models" ? (
+						<ModelProvidersPanel instanceId={conversation?.instance.id} />
+					) : !conversation ? (
+						<div className="product-empty large">
+							<Blocks size={32} />
+							<strong>还没有选中对话</strong>
+							<span>能力（技能、MCP、工具）挂在具体会话上。左侧新建或点开一个对话即可管理。</span>
+						</div>
+					) : loading && !capabilities ? (
+						<div className="product-empty">
+							<RefreshCw size={24} className="spin" />
+							<strong>加载能力中…</strong>
+						</div>
+					) : capabilities ? (
+						<>
+							{capabilities.diagnostics.length > 0 && (
+								<div className="capability-diagnostics">
+									{capabilities.diagnostics.map((diagnostic, index) => (
+										<div
+											className={diagnostic.type}
+											key={`${diagnostic.path ?? diagnostic.message}-${index}`}
 										>
-											Skills
-										</button>
-										<button
-											className={marketKind === "mcp" ? "active" : ""}
-											onClick={() => setMarketKind("mcp")}
-										>
-											MCP
-										</button>
-										<button
-											className={marketKind === "repositories" ? "active" : ""}
-											onClick={() => setMarketKind("repositories")}
-										>
-											GitHub
-										</button>
-									</div>
-									<label className="search-box">
-										<Search size={14} />
-										<input
-											aria-label="Search marketplace"
-											value={marketQuery}
-											onChange={(event) => setMarketQuery(event.target.value)}
-											placeholder="搜索包"
-										/>
-									</label>
+											<Bell size={14} />
+											<span>
+												<strong>{diagnostic.resource}</strong>
+												{diagnostic.message}
+											</span>
+										</div>
+									))}
 								</div>
-								<div className="marketplace-list">
-									{marketplacePackages.map((marketPackage) => {
-										const installed = isInstalled(marketPackage);
-										const installing = busy === `install-market-${marketPackage.id}`;
-										return (
-											<article className="marketplace-row" key={marketPackage.id}>
-												<span
-													className={`capability-icon ${marketPackage.kind === "skills" ? "skill" : marketPackage.kind === "mcp" ? "mcp" : "package"}`}
-												>
-													{marketPackage.kind === "skills" ? (
-														<BookOpen size={17} />
-													) : marketPackage.kind === "mcp" ? (
-														<Cable size={17} />
-													) : (
-														<Github size={17} />
-													)}
-												</span>
-												<div className="marketplace-copy">
-													<div>
-														<strong>{marketPackage.name}</strong>
-														<span>v{marketPackage.version}</span>
-														<span>by {marketPackage.publisher}</span>
-													</div>
+							)}
+
+							{tab === "market" && (
+								<div className="marketplace-workspace">
+									<section className="settings-market-intro">
+										<div>
+											<span className="settings-market-kicker">
+												<Store size={14} /> OpenPI Marketplace
+											</span>
+											<h2>
+												{marketKind === "skills"
+													? "为助手增加专业技能"
+													: marketKind === "mcp"
+														? "连接 MCP 外部工具"
+														: "扩展自动化工作流"}
+											</h2>
+											<p>安装后会写入当前会话的配置。完成安装后重新加载即可查看可用能力。</p>
+										</div>
+										<div className="settings-market-summary">
+											<span>
+												<strong>{capabilities.packages.length}</strong>
+												已安装
+											</span>
+											<span>
+												<strong>{marketplaceCounts[marketKind]}</strong>
+												可选
+											</span>
+										</div>
+									</section>
+									<div className="marketplace-controls settings-market-controls">
+										<div className="settings-market-tabs" role="tablist" aria-label="市场分类">
+											<button
+												type="button"
+												role="tab"
+												aria-selected={marketKind === "skills"}
+												className={marketKind === "skills" ? "active" : ""}
+												onClick={() => setMarketKind("skills")}
+											>
+												<BookOpen size={14} /> 技能 <span>{marketplaceCounts.skills}</span>
+											</button>
+											<button
+												type="button"
+												role="tab"
+												aria-selected={marketKind === "mcp"}
+												className={marketKind === "mcp" ? "active" : ""}
+												onClick={() => setMarketKind("mcp")}
+											>
+												<Cable size={14} /> MCP <span>{marketplaceCounts.mcp}</span>
+											</button>
+											<button
+												type="button"
+												role="tab"
+												aria-selected={marketKind === "repositories"}
+												className={marketKind === "repositories" ? "active" : ""}
+												onClick={() => setMarketKind("repositories")}
+											>
+												<Github size={14} /> 工作流 <span>{marketplaceCounts.repositories}</span>
+											</button>
+										</div>
+										<label className="search-box settings-market-search">
+											<Search size={14} />
+											<input
+												aria-label="Search marketplace"
+												value={marketQuery}
+												onChange={(event) => setMarketQuery(event.target.value)}
+												placeholder="搜索包"
+											/>
+										</label>
+									</div>
+									<div className="settings-market-grid">
+										{marketplacePackages.map((marketPackage) => {
+											const installed = isInstalled(marketPackage);
+											const installing = busy === `install-market-${marketPackage.id}`;
+											return (
+												<article className="settings-market-card" key={marketPackage.id}>
+													<header>
+														<span
+															className={`capability-icon ${marketPackage.kind === "skills" ? "skill" : marketPackage.kind === "mcp" ? "mcp" : "package"}`}
+														>
+															{marketPackage.kind === "skills" ? (
+																<BookOpen size={17} />
+															) : marketPackage.kind === "mcp" ? (
+																<Cable size={17} />
+															) : (
+																<Github size={17} />
+															)}
+														</span>
+														<div>
+															<strong>{marketPackage.name}</strong>
+															<span>{marketPackage.publisher}</span>
+														</div>
+														{installed && <span className="settings-market-installed">已安装</span>}
+													</header>
 													<p>{marketPackage.description}</p>
 													<div className="marketplace-tags">
 														{marketPackage.tags.map((tag) => (
 															<span key={tag}>{tag}</span>
 														))}
 													</div>
+													<footer>
+														<code>v{marketPackage.version}</code>
+														<button
+															className={installed ? "button" : "button primary"}
+															disabled={mutationDisabled || installed}
+															onClick={() => onInstallPackage(marketPackage)}
+														>
+															{installing ? (
+																<RefreshCw size={14} className="spin" />
+															) : installed ? (
+																<Check size={14} />
+															) : (
+																<Download size={14} />
+															)}
+															{installed ? "Installed" : "Install"}
+														</button>
+													</footer>
+												</article>
+											);
+										})}
+										{marketplacePackages.length === 0 && (
+											<div className="capability-empty">
+												<Store size={25} />
+												<strong>没有匹配的包</strong>
+											</div>
+										)}
+									</div>
+								</div>
+							)}
+
+							{tab === "skills" && (
+								<div className="settings-resource-workspace">
+									<section className="settings-resource-banner">
+										<div>
+											<span className="settings-market-kicker">
+												<BookOpen size={14} /> Skills
+											</span>
+											<strong>为当前助手添加专业工作流</strong>
+											<p>安装的技能会在重新加载后显示在这里，并可通过斜杠命令调用。</p>
+										</div>
+										<button
+											type="button"
+											className="button primary"
+											onClick={() => {
+												setMarketKind("skills");
+												setTab("market");
+											}}
+										>
+											<Store size={14} /> 浏览技能市场
+										</button>
+									</section>
+									<div className="capability-list">
+										{capabilities.skills.map((skill) => (
+											<article className="capability-row" key={skill.filePath}>
+												<span className="capability-icon skill">
+													<BookOpen size={17} />
+												</span>
+												<div className="capability-copy">
+													<div>
+														<strong>{skill.name}</strong>
+														<span className="source-badge">{skill.sourceInfo.scope}</span>
+														{skill.disableModelInvocation && (
+															<span className="source-badge muted">manual</span>
+														)}
+													</div>
+													<p>{skill.description}</p>
+													<code>{skill.filePath}</code>
 												</div>
-												<button
-													className={installed ? "button" : "button primary"}
-													disabled={mutationDisabled || installed}
-													onClick={() => onInstallPackage(marketPackage)}
-												>
-													{installing ? (
-														<RefreshCw size={14} className="spin" />
-													) : installed ? (
-														<Check size={14} />
-													) : (
-														<Download size={14} />
-													)}
-													{installed ? "Installed" : "Install"}
+												<button className="button" onClick={() => onUseSkill(skill.name)}>
+													Use
 												</button>
 											</article>
-										);
-									})}
-									{marketplacePackages.length === 0 && (
-										<div className="capability-empty">
-											<Store size={25} />
-											<strong>没有匹配的包</strong>
+										))}
+										{capabilities.skills.length === 0 && (
+											<div className="capability-empty">
+												<BookOpen size={25} />
+												<strong>还没有技能</strong>
+											</div>
+										)}
+									</div>
+								</div>
+							)}
+
+							{tab === "mcp" && (
+								<div className="mcp-workspace">
+									<section className="mcp-status-band">
+										<span className={`capability-icon mcp ${capabilities.mcp.loaded ? "online" : ""}`}>
+											<Cable size={19} />
+										</span>
+										<div>
+											<strong>Pi MCP Adapter</strong>
+											<span>
+												{capabilities.mcp.loaded
+													? "Loaded"
+													: capabilities.mcp.configured
+														? "Configured"
+														: "Not installed"}
+											</span>
+										</div>
+										<div className="capability-actions">
+											{capabilities.mcp.loaded && (
+												<button
+													className="button"
+													disabled={conversation.state.isStreaming}
+													onClick={onConfigureMcp}
+												>
+													Setup
+												</button>
+											)}
+											<button
+												type="button"
+												className="button"
+												disabled={mutationDisabled}
+												onClick={() => {
+													setMarketKind("mcp");
+													setTab("market");
+												}}
+											>
+												<Store size={14} /> MCP 市场
+											</button>
+											{!capabilities.mcp.configured && (
+												<button
+													className="button primary"
+													disabled={mutationDisabled}
+													onClick={() => onInstallPackage(MCP_ADAPTER_MARKETPLACE_PACKAGE)}
+												>
+													{busy === `install-market-${MCP_ADAPTER_MARKETPLACE_PACKAGE.id}` ? (
+														<RefreshCw size={14} className="spin" />
+													) : (
+														<Plus size={15} />
+													)}
+													Install
+												</button>
+											)}
+											{mcpPackages.map((entry) => (
+												<button
+													className="icon-button danger"
+													title="Remove MCP adapter"
+													aria-label="Remove MCP adapter"
+													disabled={mutationDisabled}
+													key={`${entry.scope}:${entry.source}`}
+													onClick={() => {
+														if (window.confirm(`Remove ${entry.source}?`))
+															onRemoveMcp(entry.source, entry.scope === "project");
+													}}
+												>
+													{busy === "remove-mcp" ? (
+														<RefreshCw size={15} className="spin" />
+													) : (
+														<Trash2 size={15} />
+													)}
+												</button>
+											))}
+										</div>
+									</section>
+									<div className="capability-metrics">
+										<div>
+											<span>Packages</span>
+											<strong>{capabilities.mcp.packageSources.length}</strong>
+										</div>
+										<div>
+											<span>Extensions</span>
+											<strong>{capabilities.mcp.extensionPaths.length}</strong>
+										</div>
+										<div>
+											<span>Commands</span>
+											<strong>{capabilities.mcp.commands.length}</strong>
+										</div>
+										<div>
+											<span>Tools</span>
+											<strong>{capabilities.mcp.tools.length}</strong>
+										</div>
+									</div>
+									{(capabilities.mcp.servers?.length ?? 0) > 0 && (
+										<div className="capability-list compact">
+											{capabilities.mcp.servers?.map((server) => (
+												<div className="capability-row" key={server?.name ?? "unknown"}>
+													<span
+														className={`capability-icon mcp ${
+															server?.status === "connected" ? "online" : ""
+														}`}
+													>
+														<Cable size={16} />
+													</span>
+													<div className="capability-copy">
+														<strong>{server?.name ?? "MCP server"}</strong>
+														<code>
+															{server?.status === "connected"
+																? `${server?.toolCount ?? 0} tool(s)`
+																: server?.status === "starting"
+																	? "starting"
+																	: (server?.error ?? "error")}
+														</code>
+													</div>
+													<span className="active-indicator">{server?.status ?? "unknown"}</span>
+												</div>
+											))}
+										</div>
+									)}
+									{capabilities.mcp.tools.length > 0 && (
+										<div className="capability-list compact">
+											{capabilities.mcp.tools.map((tool) => (
+												<div className="capability-row" key={tool}>
+													<span className="capability-icon tool">
+														<Wrench size={16} />
+													</span>
+													<div className="capability-copy">
+														<strong>{tool}</strong>
+														<code>MCP tool</code>
+													</div>
+													<span className="active-indicator">Active</span>
+												</div>
+											))}
 										</div>
 									)}
 								</div>
-							</div>
-						)}
+							)}
 
-						{tab === "skills" && (
-							<div className="capability-list">
-								{capabilities.skills.map((skill) => (
-									<article className="capability-row" key={skill.filePath}>
-										<span className="capability-icon skill">
-											<BookOpen size={17} />
-										</span>
-										<div className="capability-copy">
-											<div>
-												<strong>{skill.name}</strong>
-												<span className="source-badge">{skill.sourceInfo.scope}</span>
-												{skill.disableModelInvocation && <span className="source-badge muted">manual</span>}
+							{tab === "extensions" && (
+								<div className="capability-list">
+									{capabilities.extensions.map((extension) => (
+										<article className="capability-row" key={extension.path}>
+											<span className="capability-icon extension">
+												<Blocks size={17} />
+											</span>
+											<div className="capability-copy">
+												<div>
+													<strong>{extension.sourceInfo.source}</strong>
+													<span className="source-badge">{extension.sourceInfo.scope}</span>
+												</div>
+												<code>{extension.path}</code>
+												<p>
+													{extension.commands.length} commands · {extension.tools.length} tools
+												</p>
 											</div>
-											<p>{skill.description}</p>
-											<code>{skill.filePath}</code>
+										</article>
+									))}
+									{capabilities.extensions.length === 0 && (
+										<div className="capability-empty">
+											<Blocks size={25} />
+											<strong>还没有扩展</strong>
 										</div>
-										<button className="button" onClick={() => onUseSkill(skill.name)}>
-											Use
-										</button>
-									</article>
-								))}
-								{capabilities.skills.length === 0 && (
-									<div className="capability-empty">
-										<BookOpen size={25} />
-										<strong>还没有技能</strong>
-									</div>
-								)}
-							</div>
-						)}
-
-						{tab === "mcp" && (
-							<div className="mcp-workspace">
-								<section className="mcp-status-band">
-									<span className={`capability-icon mcp ${capabilities.mcp.loaded ? "online" : ""}`}>
-										<Cable size={19} />
-									</span>
-									<div>
-										<strong>Pi MCP Adapter</strong>
-										<span>
-											{capabilities.mcp.loaded
-												? "Loaded"
-												: capabilities.mcp.configured
-													? "Configured"
-													: "Not installed"}
-										</span>
-									</div>
-									<div className="capability-actions">
-										{capabilities.mcp.loaded && (
-											<button
-												className="button"
-												disabled={conversation.state.isStreaming}
-												onClick={onConfigureMcp}
-											>
-												Setup
-											</button>
-										)}
-										{!capabilities.mcp.configured && (
-											<button
-												className="button primary"
-												disabled={mutationDisabled}
-												onClick={() => onInstallPackage(MCP_ADAPTER_MARKETPLACE_PACKAGE)}
-											>
-												{busy === `install-market-${MCP_ADAPTER_MARKETPLACE_PACKAGE.id}` ? (
-													<RefreshCw size={14} className="spin" />
-												) : (
-													<Plus size={15} />
-												)}
-												Install
-											</button>
-										)}
-										{mcpPackages.map((entry) => (
-											<button
-												className="icon-button danger"
-												title="Remove MCP adapter"
-												aria-label="Remove MCP adapter"
-												disabled={mutationDisabled}
-												key={`${entry.scope}:${entry.source}`}
-												onClick={() => {
-													if (window.confirm(`Remove ${entry.source}?`))
-														onRemoveMcp(entry.source, entry.scope === "project");
-												}}
-											>
-												{busy === "remove-mcp" ? (
-													<RefreshCw size={15} className="spin" />
-												) : (
-													<Trash2 size={15} />
-												)}
-											</button>
-										))}
-									</div>
-								</section>
-								<div className="capability-metrics">
-									<div>
-										<span>Packages</span>
-										<strong>{capabilities.mcp.packageSources.length}</strong>
-									</div>
-									<div>
-										<span>Extensions</span>
-										<strong>{capabilities.mcp.extensionPaths.length}</strong>
-									</div>
-									<div>
-										<span>Commands</span>
-										<strong>{capabilities.mcp.commands.length}</strong>
-									</div>
-									<div>
-										<span>Tools</span>
-										<strong>{capabilities.mcp.tools.length}</strong>
-									</div>
+									)}
 								</div>
-								{(capabilities.mcp.servers?.length ?? 0) > 0 && (
-									<div className="capability-list compact">
-										{capabilities.mcp.servers?.map((server) => (
-											<div className="capability-row" key={server?.name ?? "unknown"}>
-												<span
-													className={`capability-icon mcp ${
-														server?.status === "connected" ? "online" : ""
-													}`}
-												>
-													<Cable size={16} />
-												</span>
-												<div className="capability-copy">
-													<strong>{server?.name ?? "MCP server"}</strong>
-													<code>
-														{server?.status === "connected"
-															? `${server?.toolCount ?? 0} tool(s)`
-															: server?.status === "starting"
-																? "starting"
-																: (server?.error ?? "error")}
-													</code>
+							)}
+
+							{tab === "tools" && (
+								<div className="capability-list compact">
+									{capabilities.tools.map((tool) => (
+										<article className="capability-row" key={`${tool.sourceInfo.path}:${tool.name}`}>
+											<span className="capability-icon tool">
+												<Wrench size={16} />
+											</span>
+											<div className="capability-copy">
+												<div>
+													<strong>{tool.name}</strong>
+													<span className="source-badge">{tool.sourceInfo.source}</span>
 												</div>
-												<span className="active-indicator">{server?.status ?? "unknown"}</span>
+												<p>{tool.description}</p>
 											</div>
-										))}
-									</div>
-								)}
-								{capabilities.mcp.tools.length > 0 && (
-									<div className="capability-list compact">
-										{capabilities.mcp.tools.map((tool) => (
-											<div className="capability-row" key={tool}>
-												<span className="capability-icon tool">
-													<Wrench size={16} />
-												</span>
-												<div className="capability-copy">
-													<strong>{tool}</strong>
-													<code>MCP tool</code>
+											<span className={tool.active ? "active-indicator" : "active-indicator inactive"}>
+												{tool.active ? "Active" : "Inactive"}
+											</span>
+										</article>
+									))}
+								</div>
+							)}
+
+							{tab === "packages" && (
+								<div className="capability-list compact">
+									{capabilities.packages.map((entry) => (
+										<article className="capability-row" key={`${entry.scope}:${entry.source}`}>
+											<span className="capability-icon package">
+												<Package size={17} />
+											</span>
+											<div className="capability-copy">
+												<div>
+													<strong>{entry.source}</strong>
+													<span className="source-badge">{entry.scope}</span>
+													{entry.filtered && <span className="source-badge muted">filtered</span>}
 												</div>
-												<span className="active-indicator">Active</span>
+												{entry.installedPath && <code>{entry.installedPath}</code>}
 											</div>
-										))}
-									</div>
-								)}
-							</div>
-						)}
-
-						{tab === "extensions" && (
-							<div className="capability-list">
-								{capabilities.extensions.map((extension) => (
-									<article className="capability-row" key={extension.path}>
-										<span className="capability-icon extension">
-											<Blocks size={17} />
-										</span>
-										<div className="capability-copy">
-											<div>
-												<strong>{extension.sourceInfo.source}</strong>
-												<span className="source-badge">{extension.sourceInfo.scope}</span>
-											</div>
-											<code>{extension.path}</code>
-											<p>
-												{extension.commands.length} commands · {extension.tools.length} tools
-											</p>
+										</article>
+									))}
+									{capabilities.packages.length === 0 && (
+										<div className="capability-empty">
+											<Package size={25} />
+											<strong>还没有配置包</strong>
 										</div>
-									</article>
-								))}
-								{capabilities.extensions.length === 0 && (
-									<div className="capability-empty">
-										<Blocks size={25} />
-										<strong>还没有扩展</strong>
-									</div>
-								)}
-							</div>
-						)}
-
-						{tab === "tools" && (
-							<div className="capability-list compact">
-								{capabilities.tools.map((tool) => (
-									<article className="capability-row" key={`${tool.sourceInfo.path}:${tool.name}`}>
-										<span className="capability-icon tool">
-											<Wrench size={16} />
-										</span>
-										<div className="capability-copy">
-											<div>
-												<strong>{tool.name}</strong>
-												<span className="source-badge">{tool.sourceInfo.source}</span>
-											</div>
-											<p>{tool.description}</p>
-										</div>
-										<span className={tool.active ? "active-indicator" : "active-indicator inactive"}>
-											{tool.active ? "Active" : "Inactive"}
-										</span>
-									</article>
-								))}
-							</div>
-						)}
-
-						{tab === "packages" && (
-							<div className="capability-list compact">
-								{capabilities.packages.map((entry) => (
-									<article className="capability-row" key={`${entry.scope}:${entry.source}`}>
-										<span className="capability-icon package">
-											<Package size={17} />
-										</span>
-										<div className="capability-copy">
-											<div>
-												<strong>{entry.source}</strong>
-												<span className="source-badge">{entry.scope}</span>
-												{entry.filtered && <span className="source-badge muted">filtered</span>}
-											</div>
-											{entry.installedPath && <code>{entry.installedPath}</code>}
-										</div>
-									</article>
-								))}
-								{capabilities.packages.length === 0 && (
-									<div className="capability-empty">
-										<Package size={25} />
-										<strong>还没有配置包</strong>
-									</div>
-								)}
-							</div>
-						)}
-					</>
-				) : null}
+									)}
+								</div>
+							)}
+						</>
+					) : null}
+				</div>
 			</div>
 		</section>
 	);
@@ -4125,6 +6308,177 @@ export function TasksSurface({
 				</div>
 			</div>
 		</section>
+	);
+}
+
+export function ProviderAuthDialog({
+	auth,
+	busy,
+	onClose,
+	onOpenUrl,
+	onDone,
+}: {
+	auth: {
+		provider: string;
+		url?: string;
+		userCode?: string;
+		status: "pending" | "completed" | "failed";
+		message?: string;
+	};
+	busy: boolean;
+	onClose(): void;
+	onOpenUrl(url: string): void;
+	onDone(): void;
+}) {
+	return (
+		<div className="dialog-backdrop">
+			<div className="dialog conversation-dialog auth-dialog">
+				<div className="dialog-header">
+					<div>
+						<span className="eyebrow">服务商登录</span>
+						<h2>{auth.provider}</h2>
+					</div>
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="关闭"
+						aria-label="关闭"
+						disabled={busy}
+						onClick={onClose}
+					>
+						<X size={17} />
+					</button>
+				</div>
+
+				{auth.status === "pending" && (
+					<>
+						<p className="ui-request-message">
+							{auth.userCode ? (
+								<>
+									请在浏览器中打开下面的链接，并输入验证码：
+									<strong className="auth-user-code">{auth.userCode}</strong>
+								</>
+							) : (
+								"请在浏览器中完成授权。"
+							)}
+						</p>
+						{auth.url && (
+							<button
+								type="button"
+								className="button primary"
+								disabled={busy}
+								onClick={() => onOpenUrl(auth.url ?? "")}
+							>
+								<ExternalLink size={15} />
+								打开浏览器
+							</button>
+						)}
+						{auth.message && <p className="ui-request-message muted">{auth.message}</p>}
+						<div className="auth-spinner-row">
+							<RefreshCw size={15} className="spin" />
+							<span>等待授权完成…</span>
+						</div>
+					</>
+				)}
+
+				{auth.status === "completed" && (
+					<>
+						<p className="ui-request-message">登录成功，模型列表已刷新。</p>
+						<div className="dialog-actions">
+							<button type="button" className="button primary" onClick={onDone}>
+								完成
+							</button>
+						</div>
+					</>
+				)}
+
+				{auth.status === "failed" && (
+					<>
+						<p className="ui-request-message error-text">登录失败：{auth.message ?? "未知错误"}</p>
+						<div className="dialog-actions">
+							<button type="button" className="button primary" onClick={onDone}>
+								关闭
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
+export function EditProfileDialog({
+	profile,
+	busy,
+	onClose,
+	onSave,
+}: {
+	profile: { nickname?: string; avatarEmoji?: string };
+	busy: boolean;
+	onClose(): void;
+	onSave(profile: { nickname?: string; avatarEmoji?: string }): Promise<void>;
+}) {
+	const [nickname, setNickname] = useState(profile.nickname ?? "");
+	const [avatarEmoji, setAvatarEmoji] = useState(profile.avatarEmoji ?? "");
+	return (
+		<div
+			className="dialog-backdrop"
+			onMouseDown={(event) => {
+				if (event.target === event.currentTarget && !busy) onClose();
+			}}
+		>
+			<form
+				className="dialog conversation-dialog"
+				onSubmit={(event) => {
+					event.preventDefault();
+					void onSave({ nickname: nickname.trim(), avatarEmoji: avatarEmoji.trim() || undefined });
+				}}
+			>
+				<div className="dialog-header">
+					<div>
+						<span className="eyebrow">本地档案</span>
+						<h2>编辑资料</h2>
+					</div>
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="关闭"
+						aria-label="关闭"
+						disabled={busy}
+						onClick={onClose}
+					>
+						<X size={17} />
+					</button>
+				</div>
+				<label>
+					昵称
+					<input
+						autoFocus
+						maxLength={40}
+						value={nickname}
+						onChange={(event) => setNickname(event.target.value)}
+						placeholder="你的名字"
+					/>
+				</label>
+				<label>
+					头像表情
+					<input
+						maxLength={4}
+						value={avatarEmoji}
+						onChange={(event) => setAvatarEmoji(event.target.value)}
+						placeholder="如 🧑💻"
+					/>
+				</label>
+				<div className="dialog-actions">
+					<button type="button" className="button" disabled={busy} onClick={onClose}>
+						取消
+					</button>
+					<button className="button primary" disabled={busy || nickname.trim().length === 0}>
+						{busy ? "保存中…" : "保存"}
+					</button>
+				</div>
+			</form>
+		</div>
 	);
 }
 

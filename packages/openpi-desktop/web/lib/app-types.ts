@@ -24,6 +24,13 @@ export interface ImageAttachment extends ImageContent {
 	name: string;
 }
 
+export interface DocumentAttachment {
+	id: string;
+	name: string;
+	text: string;
+	path?: string;
+}
+
 export type BlockingConversationUiRequest = Extract<
 	ConversationUiRequest,
 	{ method: "select" | "confirm" | "input" | "editor" }
@@ -45,5 +52,9 @@ export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_IMAGE_DIMENSION = 2_000;
 export const MAX_IMAGE_BASE64_BYTES = 4.5 * 1024 * 1024;
 export const MAX_TOTAL_IMAGE_BASE64_BYTES = 12 * 1024 * 1024;
+export const MAX_DOCUMENT_ATTACHMENTS = 8;
+export const MAX_DOCUMENT_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_DOCUMENT_TEXT_BYTES = 1 * 1024 * 1024;
+export const MAX_TOTAL_DOCUMENT_TEXT_BYTES = 4 * 1024 * 1024;
 
 export type { ModelProviderConfig };

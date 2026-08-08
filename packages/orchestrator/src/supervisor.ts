@@ -52,7 +52,7 @@ function isDirectory(path: string): boolean {
 	}
 }
 
-function sessionLabel(session: SessionInfo): string | undefined {
+function sessionLabel(session: Pick<SessionInfo, "name" | "firstMessage">): string | undefined {
 	const name = session.name?.trim();
 	if (name) {
 		return name;
@@ -94,6 +94,7 @@ export class OrchestratorSupervisor {
 	private readonly liveInstances = new Map<string, LiveInstance>();
 	private readonly resumePromises = new Map<string, Promise<InstanceRecord | undefined>>();
 	private sessionRefreshPromise: Promise<void> | undefined;
+	private sessionIndexReady = false;
 
 	private setStatus(live: LiveInstance, status: InstanceStatus): void {
 		live.record = {
@@ -377,7 +378,7 @@ export class OrchestratorSupervisor {
 	}
 
 	private async refreshSessionIndex(): Promise<void> {
-		const sessions = await SessionManager.listAll();
+		const sessions = await SessionManager.listAllMetadata();
 		const storedBySession = new Map<string, InstanceRecord>();
 		const sessionlessLiveInstances: InstanceRecord[] = [];
 		for (const instance of loadInstances()) {
@@ -432,9 +433,12 @@ export class OrchestratorSupervisor {
 		await this.sessionRefreshPromise;
 	}
 
+	isSessionIndexReady(): boolean {
+		return this.sessionIndexReady;
+	}
+
 	async recoverAfterRestart(): Promise<void> {
 		const recoveredAt = new Date().toISOString();
-		const autoResumeIds = new Set<string>();
 		const storedBySession = new Map<string, InstanceRecord>();
 		for (const instance of loadInstances()) {
 			if (!instance.sessionFile || !existsSync(instance.sessionFile) || !isDirectory(instance.cwd)) {
@@ -449,9 +453,6 @@ export class OrchestratorSupervisor {
 			if (storedBySession.has(key)) {
 				continue;
 			}
-			if (instance.autoResume ?? (instance.status === "online" || instance.status === "starting")) {
-				autoResumeIds.add(instance.id);
-			}
 			try {
 				await radiusPresence.disconnectPi(instance);
 			} catch (error) {
@@ -461,24 +462,21 @@ export class OrchestratorSupervisor {
 				...instance,
 				status: "stopped",
 				radiusPiId: undefined,
-				autoResume: autoResumeIds.has(instance.id),
+				autoResume: false,
 				lastSeenAt: recoveredAt,
 			});
 		}
 
 		saveInstances([...storedBySession.values()]);
 
-		for (const instanceId of autoResumeIds) {
-			try {
-				await this.resumeInstance(instanceId);
-			} catch (error) {
-				console.error(`Failed to restore Pi instance ${instanceId}: ${String(error)}`);
-			}
-		}
-
-		this.sessionRefreshPromise = this.refreshSessionIndex().catch((error) => {
-			console.error(`Failed to refresh Pi session index: ${String(error)}`);
-		});
+		this.sessionIndexReady = false;
+		this.sessionRefreshPromise = this.refreshSessionIndex()
+			.catch((error) => {
+				console.error(`Failed to refresh Pi session index: ${String(error)}`);
+			})
+			.finally(() => {
+				this.sessionIndexReady = true;
+			});
 	}
 
 	listInstances(): InstanceRecord[] {

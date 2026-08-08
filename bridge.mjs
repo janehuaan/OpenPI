@@ -29,7 +29,6 @@ import {
 } from "./paths.mjs";
 
 const require = createRequire(import.meta.url);
-let legacyDaemonRestartPromise;
 
 function resolveAgnesApiKey() {
 	const secrets = loadAgentSecretsEnv();
@@ -654,16 +653,7 @@ export function registerBridge(ipcMain, getMainWindow) {
 				daemonRunning = true;
 				liveInstances = probe.list?.instances ?? (await listInstancesLive());
 				const h = await getHealthSafe(250);
-				if (h) {
-					health = h;
-					if (!Object.hasOwn(h, "sessionsIndexed") && !legacyDaemonRestartPromise) {
-						legacyDaemonRestartPromise = restartDaemon()
-							.catch(() => {})
-							.finally(() => {
-								legacyDaemonRestartPromise = undefined;
-							});
-					}
-				}
+				if (h) health = h;
 			}
 		} catch {
 			daemonRunning = false;
@@ -701,7 +691,6 @@ export function registerBridge(ipcMain, getMainWindow) {
 				version: health.version,
 				uptimeMs: health.uptimeMs,
 				socketPath: health.socketPath,
-				sessionsIndexed: health.sessionsIndexed === true,
 				tasksActive: health.tasksActive ?? tasks.filter((task) => task.status === "active").length,
 				tasksPaused: health.tasksPaused ?? tasks.filter((task) => task.status === "paused").length,
 				runsRunning: health.runsRunning ?? runs.filter((run) => run.status === "running").length,

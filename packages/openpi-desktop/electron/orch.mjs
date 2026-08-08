@@ -83,11 +83,11 @@ export function sendIpcRequest(request, timeoutMs = 15_000) {
 }
 
 /** Probe whether a live daemon answers. Prefer list (works on older builds). */
-export async function probeDaemon() {
+export async function probeDaemon(timeoutMs = 5_000) {
 	const path = socketPath();
 	if (!existsSync(path)) return { alive: false, reason: "no-socket" };
 	try {
-		const list = await sendIpcRequest({ type: "list" }, 5_000);
+		const list = await sendIpcRequest({ type: "list" }, timeoutMs);
 		if (list && list.ok === true) return { alive: true, via: "list", list };
 	} catch (error) {
 		return { alive: false, reason: error instanceof Error ? error.message : String(error) };
@@ -95,9 +95,9 @@ export async function probeDaemon() {
 	return { alive: false, reason: "list-not-ok" };
 }
 
-export async function getHealthSafe() {
+export async function getHealthSafe(timeoutMs = 3_000) {
 	try {
-		const health = await sendIpcRequest({ type: "health" }, 3_000);
+		const health = await sendIpcRequest({ type: "health" }, timeoutMs);
 		if (health && health.ok && health.type === "health_result") return health.health ?? health;
 	} catch {
 		// Older daemons return invalid "undefined" for health — ignore.
@@ -130,7 +130,7 @@ export async function ensureDaemon() {
 }
 
 async function startDaemon() {
-	const probe = await probeDaemon();
+	const probe = await probeDaemon(750);
 	if (probe.alive) {
 		// Restart the daemon when its code differs from the current build
 		// (e.g. after installing a new .app): the long-lived daemon would

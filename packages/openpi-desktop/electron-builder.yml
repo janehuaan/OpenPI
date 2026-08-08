@@ -26,7 +26,7 @@ extraResources:
 # Runtime node_modules is copied in afterPack (builder ignores **/node_modules by default)
 afterPack: scripts/after-pack.cjs
 extraMetadata:
-  main: electron/main.mjs
+  main: electron/main.cjs
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns

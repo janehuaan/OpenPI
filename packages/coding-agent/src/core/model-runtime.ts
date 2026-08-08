@@ -370,6 +370,30 @@ export class ModelRuntime implements Models {
 		return this.snapshot.auth.get(providerId)?.type === "oauth";
 	}
 
+	/** Serializable auth status per provider, for host UIs (e.g. desktop login panel). */
+	getAuthStatuses(): Array<{
+		provider: string;
+		type: string | undefined;
+		source: string | undefined;
+		configured: boolean;
+	}> {
+		const out: Array<{
+			provider: string;
+			type: string | undefined;
+			source: string | undefined;
+			configured: boolean;
+		}> = [];
+		for (const [provider, auth] of this.snapshot.auth) {
+			out.push({
+				provider,
+				type: auth?.type,
+				source: auth?.source,
+				configured: this.snapshot.configuredProviders.has(provider),
+			});
+		}
+		return out.sort((a, b) => a.provider.localeCompare(b.provider));
+	}
+
 	hasConfiguredAuth(providerId: string): boolean {
 		return this.snapshot.configuredProviders.has(providerId);
 	}
