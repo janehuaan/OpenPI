@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { Skill } from "../src/core/skills.ts";
 import { buildSystemPrompt } from "../src/core/system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
@@ -110,5 +111,58 @@ describe("buildSystemPrompt", () => {
 
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
+	});
+});
+
+describe("buildSystemPrompt memoization", () => {
+	const skills: Skill[] = [
+		{
+			name: "test-skill",
+			description: "A test skill",
+			filePath: "/skills/test-skill/SKILL.md",
+			baseDir: "/skills/test-skill",
+			sourceInfo: {
+				path: "/skills/test-skill/SKILL.md",
+				source: "test",
+				scope: "temporary",
+				origin: "top-level",
+			},
+			disableModelInvocation: false,
+		},
+	];
+	const base = {
+		selectedTools: ["read", "bash", "edit", "write"],
+		toolSnippets: { read: "Read files", bash: "Run commands", edit: "Edit files", write: "Write files" },
+		promptGuidelines: ["Be concise"],
+		contextFiles: [{ path: "/proj/AGENTS.md", content: "rules here" }],
+		skills,
+		cwd: "/proj",
+	};
+
+	test("returns identical output for identical inputs (cache hit)", () => {
+		const first = buildSystemPrompt({ ...base });
+		const second = buildSystemPrompt({ ...base });
+		expect(second).toBe(first);
+	});
+
+	test("invalidates when context file content changes", () => {
+		const before = buildSystemPrompt({ ...base, contextFiles: [{ path: "/proj/AGENTS.md", content: "v1" }] });
+		const after = buildSystemPrompt({ ...base, contextFiles: [{ path: "/proj/AGENTS.md", content: "v2" }] });
+		expect(after).not.toBe(before);
+		expect(after).toContain("v2");
+		expect(before).toContain("v1");
+	});
+
+	test("invalidates when selectedTools order-independent changes", () => {
+		const a = buildSystemPrompt({ ...base, selectedTools: ["read", "bash"] });
+		const b = buildSystemPrompt({ ...base, selectedTools: ["bash", "read"] });
+		expect(b).toBe(a);
+	});
+
+	test("invalidates when cwd changes", () => {
+		const a = buildSystemPrompt({ ...base, cwd: "/proj" });
+		const b = buildSystemPrompt({ ...base, cwd: "/other" });
+		expect(b).not.toBe(a);
+		expect(b).toContain("Current working directory: /other");
 	});
 });

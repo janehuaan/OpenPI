@@ -6,6 +6,7 @@ import type {
 	AgnesMediaCapabilities,
 	AgnesVideoRequest,
 	AgnesVideoResult,
+	AvailableModel,
 	ConversationCapabilities,
 	ConversationModelOption,
 	ConversationSnapshot,
@@ -152,6 +153,7 @@ export const desktopApi = {
 	doctor: () => call<{ ok: boolean; output: string }>("doctor"),
 	defaultWorkspace: () => call<string>("default_workspace"),
 	getModelProviders: () => call<Record<string, ModelProviderConfig>>("get_model_providers"),
+	getAvailableModels: (instanceId: string) => call<AvailableModel[]>("get_available_models", { instanceId }),
 	getProviderAuthStatus: (instanceId: string) =>
 		call<Array<{ provider: string; type?: string; source?: string; configured: boolean }>>(
 			"get_provider_auth_status",

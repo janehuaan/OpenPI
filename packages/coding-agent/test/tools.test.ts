@@ -85,6 +85,28 @@ describe("Coding Agent Tools", () => {
 			await expect(readTool.execute("test-call-2", { path: testFile })).rejects.toThrow(/ENOENT|not found/i);
 		});
 
+		it("should detect binary files and avoid dumping garbage text", async () => {
+			const testFile = join(testDir, "blob.bin");
+			// NUL bytes and control chars are a strong binary signal.
+			writeFileSync(testFile, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x00, 0x00, 0x01, 0xde, 0xad, 0xbe, 0xef]));
+
+			const result = await readTool.execute("test-call-2b", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Binary file");
+			expect(output).not.toContain("ELF");
+			expect(output).toContain("strings");
+		});
+
+		it("should treat UTF-8 text with control whitespace as text", async () => {
+			const testFile = join(testDir, "notes.txt");
+			writeFileSync(testFile, "line one\n\tline two\nline three");
+
+			const result = await readTool.execute("test-call-2c", { path: testFile });
+			expect(getTextOutput(result)).toContain("line one");
+			expect(getTextOutput(result)).not.toContain("Binary file");
+		});
+
 		it("should truncate files exceeding line limit", async () => {
 			const testFile = join(testDir, "large.txt");
 			const lines = Array.from({ length: 2500 }, (_, i) => `Line ${i + 1}`);

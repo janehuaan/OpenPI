@@ -4,6 +4,7 @@
 
 ### Added
 
+- Model provider directory in the capabilities panel: lists all built-in pi.dev providers with per-model context window and input/output pricing, inline API-key entry (saved to models.json), OAuth login/logout, and a searchable custom-provider list.
 - MCP panel shows per-server status (name, status, tool count, error) from RPC capabilities `mcp.servers`.
 - Security mode UI writes `settings.json` `securityMode` (builtin gate authority) and keeps `security.json` as a legacy mirror for the openpi-security extension; reads prefer `settings.json`.
 

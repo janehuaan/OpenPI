@@ -4,6 +4,9 @@
 
 ### Added
 
+- Memoized system prompt assembly (`buildSystemPrompt`): deterministic fingerprint (tools, guidelines, skills, context files, cwd) caches the assembled prompt, skipping string rebuilding on unchanged turns.
+- Provider error policy helpers in `provider-composer`: `classifyProviderError` (rate-limit / server / timeout / network / auth / unknown), `shouldRetryProviderError`, and `computeProviderRetryDelayMs` (exponential backoff with rate-limit jitter).
+- `read` tool binary detection: files with NUL bytes or a high ratio of control bytes are reported as binary with `file`/`strings` suggestions instead of emitting garbage text.
 - Built-in marketplace: `pi market` lists and installs official MCP servers, skills collections, and pi ecosystem packages.
 - OpenAI-compatible providers configured in `models.json` without a static `models` array now auto-discover models from `GET {baseUrl}/models` on refresh; startup diagnostics warn when a configured provider still has no models.
 - Builtin security gate: zero-config tool-call interception before extension handlers, with strict/confirm/permissive/bypass modes, session-level confirmation caching, and an audit log at `<cwd>/.pi/security/audit.jsonl`. Enable via `--security-mode` or `settings.json` `securityMode`.

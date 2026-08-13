@@ -31,7 +31,6 @@ import {
 	Image as ImageIcon,
 	ListTodo,
 	LogIn,
-	LogOut,
 	Menu,
 	MessageSquare,
 	Mic,
@@ -138,6 +137,7 @@ import type {
 	AgnesImageRatio,
 	AgnesImageSize,
 	AgnesMediaCapabilities,
+	AvailableModel,
 	ConversationCapabilities,
 	ConversationMessage,
 	ConversationModelOption,
@@ -188,7 +188,7 @@ function hasVisionContext(content: unknown): boolean {
 	return contentText(content).includes("<openpi-vision-context");
 }
 
-export type AppMode = "chat" | "code";
+export type AppMode = "chat" | "code" | "personal";
 
 export function ModeTabBar({
 	mode,
@@ -212,6 +212,15 @@ export function ModeTabBar({
 				>
 					<MessageSquare size={14} />
 					Chat
+				</button>
+				<button
+					type="button"
+					className={mode === "personal" ? "active" : ""}
+					title="Personal"
+					onClick={() => onModeChange("personal")}
+				>
+					<Sparkles size={14} />
+					Personal
 				</button>
 				<button
 					type="button"
@@ -1049,7 +1058,7 @@ export function ReferenceWorkspacePreview({
 					)}
 					<textarea
 						ref={draftInput}
-						placeholder="Ask OpenPI anything..."
+						placeholder="Ask OpenPI anything...（Enter 换行 · Ctrl+Enter 发送）"
 						rows={1}
 						value={draft}
 						onChange={(event) => setDraft(event.target.value)}
@@ -1077,7 +1086,7 @@ export function ReferenceWorkspacePreview({
 									return;
 								}
 							}
-							if (event.key === "Enter" && !event.shiftKey) {
+							if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 								event.preventDefault();
 								void submit().catch(() => undefined);
 							}
@@ -1118,6 +1127,13 @@ export function ReferenceWorkspacePreview({
 									onClick={() => onAppModeChange("chat")}
 								>
 									<MessageSquare size={13} /> Chat
+								</button>
+								<button
+									type="button"
+									className={appMode === "personal" ? "active" : ""}
+									onClick={() => onAppModeChange("personal")}
+								>
+									<Sparkles size={13} /> Personal
 								</button>
 								<button
 									type="button"
@@ -3668,6 +3684,14 @@ export function ChatSurface({
 						</button>
 						<button
 							type="button"
+							className={appMode === "personal" ? "active" : ""}
+							onClick={() => onAppModeChange("personal")}
+						>
+							<Sparkles size={14} />
+							Personal
+						</button>
+						<button
+							type="button"
 							className={appMode === "code" ? "active" : ""}
 							onClick={() => onAppModeChange("code")}
 						>
@@ -4881,31 +4905,31 @@ export function ContextPanel({
 	);
 }
 
-const BUILTIN_PROVIDER_IDS = new Set([
-	"amazon-bedrock",
-	"anthropic",
-	"google",
-	"openai",
-	"azure-openai-responses",
-	"deepseek",
-	"github-copilot",
-	"xai",
-	"groq",
-	"cerebras",
-	"openrouter",
-	"mistral",
-	"perplexity",
-	"together",
-	"fireworks",
-	"grok",
-	"ollama",
-]);
-
 const API_TYPE_OPTIONS = [
 	{ value: "openai-completions", label: "OpenAI Completions" },
 	{ value: "anthropic-messages", label: "Anthropic Messages" },
 	{ value: "openai-responses", label: "OpenAI Responses" },
 ] as const;
+
+interface CatalogProviderEntry {
+	id: string;
+	name: string;
+	models: AvailableModel[];
+	config?: ModelProviderConfig;
+	auth?: { type?: string; source?: string; configured: boolean };
+}
+
+function providerDisplayName(providerId: string, models: AvailableModel[], config?: ModelProviderConfig): string {
+	return config?.name || models.find((model) => model.name)?.provider || providerId;
+}
+
+function providerDefaultBaseUrl(models: AvailableModel[]): string | undefined {
+	return models.find((model) => model.baseUrl)?.baseUrl;
+}
+
+function providerDefaultApi(models: AvailableModel[]): string {
+	return models.find((model) => model.api)?.api ?? "openai-completions";
+}
 
 function VisionFallbackPanel({ onSaved }: { onSaved(): Promise<void> | void }) {
 	const [config, setConfig] = useState<VisionFallbackConfig>();
@@ -5064,6 +5088,9 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [loginBusy, setLoginBusy] = useState<string | null>(null);
+	const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+	const [loadingCatalog, setLoadingCatalog] = useState(true);
+	const [expandedId, setExpandedId] = useState<string | null>(null);
 
 	const loadProviders = useCallback(async () => {
 		setLoadingProviders(true);
@@ -5092,6 +5119,23 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 		}
 	}, [instanceId]);
 
+	const loadCatalog = useCallback(async () => {
+		if (!instanceId) {
+			setAvailableModels([]);
+			setLoadingCatalog(false);
+			return;
+		}
+		setLoadingCatalog(true);
+		try {
+			const models = await desktopApi.getAvailableModels(instanceId);
+			setAvailableModels(models);
+		} catch {
+			setAvailableModels([]);
+		} finally {
+			setLoadingCatalog(false);
+		}
+	}, [instanceId]);
+
 	useEffect(() => {
 		void loadProviders();
 	}, [loadProviders]);
@@ -5099,6 +5143,10 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 	useEffect(() => {
 		void loadAuthStatus();
 	}, [loadAuthStatus]);
+
+	useEffect(() => {
+		void loadCatalog();
+	}, [loadCatalog]);
 
 	const handleLogin = async (provider: string) => {
 		if (!instanceId) {
@@ -5145,14 +5193,27 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 
 	const openEditForm = (id: string) => {
 		const config = providers[id];
-		if (!config) return;
+		const catalogModels = availableModels.filter((model) => model.provider === id);
+		if (!config && catalogModels.length === 0) return;
 		setIsNew(false);
 		setEditingId(id);
 		setFormId(id);
-		setFormName(config.name ?? "");
-		setFormBaseUrl(config.baseUrl ?? "");
-		setFormApiKey(config.apiKey ?? "");
-		setFormApi(config.api ?? "openai-completions");
+		setFormName(config?.name ?? "");
+		setFormBaseUrl(config?.baseUrl ?? providerDefaultBaseUrl(catalogModels) ?? "");
+		setFormApiKey("");
+		setFormApi(config?.api ?? providerDefaultApi(catalogModels));
+	};
+
+	const openCatalogForm = (id: string) => {
+		const config = providers[id];
+		const catalogModels = availableModels.filter((model) => model.provider === id);
+		setIsNew(false);
+		setEditingId(null);
+		setFormId(id);
+		setFormName(config?.name ?? "");
+		setFormBaseUrl(config?.baseUrl ?? providerDefaultBaseUrl(catalogModels) ?? "");
+		setFormApiKey("");
+		setFormApi(config?.api ?? providerDefaultApi(catalogModels));
 	};
 
 	const cancelEdit = () => {
@@ -5160,8 +5221,8 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 		setIsNew(false);
 	};
 
-	const handleSave = async () => {
-		const targetId = isNew ? formId.trim() : editingId;
+	const handleSave = async (providerId?: string) => {
+		const targetId = isNew ? formId.trim() : (providerId ?? editingId);
 		if (!targetId) {
 			setError("服务商 ID 不能为空");
 			return;
@@ -5176,7 +5237,10 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 			if (isNew || formApi !== "openai-completions") config.api = formApi;
 			await desktopApi.saveModelProvider(targetId, config);
 			await loadProviders();
-			cancelEdit();
+			await loadAuthStatus();
+			window.dispatchEvent(new Event("openpi:model-providers-changed"));
+			if (isNew || editingId) cancelEdit();
+			else setFormApiKey("");
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
@@ -5196,10 +5260,31 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 		}
 	};
 
+	const catalogProviderEntries = useMemo<CatalogProviderEntry[]>(() => {
+		const groups = new Map<string, AvailableModel[]>();
+		for (const model of availableModels) {
+			const list = groups.get(model.provider) ?? [];
+			list.push(model);
+			groups.set(model.provider, list);
+		}
+		return [...groups.entries()]
+			.map(([id, models]) => ({
+				id,
+				name: providerDisplayName(id, models, providers[id]),
+				models: models.slice().sort((left, right) => (left.name || left.id).localeCompare(right.name || right.id)),
+				config: providers[id],
+				auth: authStatuses[id],
+			}))
+			.sort((left, right) => left.name.localeCompare(right.name));
+	}, [authStatuses, availableModels, providers]);
+
+	const catalogProviderIds = useMemo(
+		() => new Set(catalogProviderEntries.map((entry) => entry.id)),
+		[catalogProviderEntries],
+	);
+
 	const providerEntries = Object.entries(providers);
-	const builtinEntries = providerEntries.filter(([id]) => BUILTIN_PROVIDER_IDS.has(id));
-	const customEntries = providerEntries.filter(([id]) => !BUILTIN_PROVIDER_IDS.has(id));
-	const totalCount = providerEntries.length;
+	const customEntries = providerEntries.filter(([id]) => !catalogProviderIds.has(id));
 
 	return (
 		<div className="model-providers-panel">
@@ -5287,14 +5372,19 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 				</div>
 			) : (
 				<>
-					<VisionFallbackPanel onSaved={loadProviders} />
 					<div className="model-providers-toolbar">
-						<span className="model-providers-count">{totalCount} 个服务商已配置</span>
 						<button type="button" className="primary" onClick={openAddForm}>
 							<Plus size={14} />
-							添加服务商
+							自定义服务商
 						</button>
+						<span className="model-providers-count">
+							{catalogProviderEntries.length > 0
+								? `pi.dev 支持 ${catalogProviderEntries.length} 个服务商`
+								: "打开对话后加载 pi.dev 服务商"}
+						</span>
 					</div>
+
+					<VisionFallbackPanel onSaved={loadProviders} />
 
 					{loadingProviders ? (
 						<div className="model-providers-loading">
@@ -5345,81 +5435,167 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 								</section>
 							)}
 
-							{builtinEntries.length > 0 && (
-								<section className="model-provider-group">
-									<div className="model-provider-group-heading">
-										<strong>内置服务商</strong>
-										<span>{builtinEntries.length}</span>
+							<section className="model-provider-group">
+								<div className="model-provider-group-heading">
+									<strong>pi.dev 支持的服务商</strong>
+									<span>{catalogProviderEntries.length}</span>
+								</div>
+
+								{loadingCatalog ? (
+									<div className="model-providers-loading">
+										<RefreshCw size={18} className="spin" />
+										<span>加载目录…</span>
 									</div>
-									{builtinEntries.map(([id, config]) => (
-										<article className="model-provider-row" key={id}>
-											<div className="model-provider-icon builtin">
-												<Server size={16} />
-											</div>
-											<div className="model-provider-info">
-												<strong>
-													{config.name || id}
-													{config.apiKey && <span className="model-api-key-badge">API Key</span>}
-													{authStatuses[id]?.type === "oauth" && (
-														<span className="model-api-key-badge oauth">已登录</span>
-													)}
-												</strong>
-												<span>
-													{config.baseUrl || "默认地址"}
-													{authStatuses[id]?.configured && !authStatuses[id]?.type && " · 已配置"}
-												</span>
-											</div>
-											<div className="model-provider-actions">
-												{instanceId && authStatuses[id]?.type === "oauth" ? (
-													<button
-														type="button"
-														title="登出"
-														aria-label="登出"
-														disabled={loginBusy === id}
-														onClick={() => void handleLogout(id)}
-													>
-														{loginBusy === id ? (
-															<RefreshCw size={13} className="spin" />
-														) : (
-															<LogOut size={13} />
-														)}
-													</button>
-												) : (
-													<button
-														type="button"
-														title={instanceId ? "登录" : "先打开一个对话再登录"}
-														aria-label="登录"
-														disabled={loginBusy === id || !instanceId}
-														onClick={() => void handleLogin(id)}
-													>
-														{loginBusy === id ? (
-															<RefreshCw size={13} className="spin" />
-														) : (
-															<LogIn size={13} />
-														)}
-													</button>
-												)}
+								) : catalogProviderEntries.length === 0 ? (
+									<div className="model-providers-empty">
+										<Server size={28} />
+										<strong>暂无可用服务商</strong>
+										<span>打开一个对话后会自动加载 pi.dev 服务商目录。</span>
+									</div>
+								) : (
+									catalogProviderEntries.map((entry) => {
+										const isOauth = entry.auth?.type === "oauth";
+										const configured = entry.auth?.configured || !!entry.config?.apiKey;
+										const expanded = expandedId === entry.id;
+										const defaultBaseUrl = providerDefaultBaseUrl(entry.models);
+										const currentBaseUrl = entry.config?.baseUrl ?? defaultBaseUrl ?? "默认地址";
+										const currentApi = entry.config?.api ?? providerDefaultApi(entry.models);
+										return (
+											<div className="model-provider-catalog-item" key={entry.id}>
 												<button
 													type="button"
-													title="编辑"
-													aria-label="编辑"
-													onClick={() => openEditForm(id)}
+													className="model-provider-catalog-head"
+													onClick={() => {
+														setExpandedId(expanded ? null : entry.id);
+														if (!expanded) openCatalogForm(entry.id);
+													}}
 												>
-													<Pencil size={13} />
+													{expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+													<span className="model-provider-icon builtin">
+														<Server size={16} />
+													</span>
+													<span className="model-provider-info">
+														<strong>{entry.name}</strong>
+														<span>
+															{entry.models.length} 个模型 · {currentBaseUrl}
+														</span>
+													</span>
+													<span className="model-api-key-badge muted">{currentApi}</span>
+													{configured && <span className="model-api-key-badge">已配置</span>}
 												</button>
+												{expanded && (
+													<div className="model-provider-catalog-body">
+														<div className="model-provider-inline-form">
+															<label className="model-form-field">
+																<span>显示名称</span>
+																<input
+																	type="text"
+																	value={formId === entry.id ? formName : (entry.config?.name ?? "")}
+																	placeholder={entry.name}
+																	onChange={(event) => setFormName(event.target.value)}
+																/>
+															</label>
+															<label className="model-form-field">
+																<span>Base URL</span>
+																<input
+																	type="text"
+																	value={formId === entry.id ? formBaseUrl : (currentBaseUrl ?? "")}
+																	placeholder={defaultBaseUrl ?? "默认地址"}
+																	onChange={(event) => setFormBaseUrl(event.target.value)}
+																/>
+															</label>
+															<label className="model-form-field">
+																<span>API Key</span>
+																<input
+																	type="password"
+																	value={formId === entry.id ? formApiKey : ""}
+																	placeholder={configured ? "已配置，输入新 Key 覆盖" : "API Key"}
+																	onChange={(event) => setFormApiKey(event.target.value)}
+																/>
+															</label>
+															<label className="model-form-field">
+																<span>API 类型</span>
+																<select
+																	value={formId === entry.id ? formApi : currentApi}
+																	onChange={(event) => setFormApi(event.target.value)}
+																>
+																	{API_TYPE_OPTIONS.map((option) => (
+																		<option key={option.value} value={option.value}>
+																			{option.label}
+																		</option>
+																	))}
+																</select>
+															</label>
+															<div className="model-provider-inline-actions">
+																<button
+																	type="button"
+																	className="primary"
+																	disabled={saving || formId !== entry.id}
+																	onClick={() => void handleSave(entry.id)}
+																>
+																	{saving ? (
+																		<RefreshCw size={14} className="spin" />
+																	) : (
+																		<Save size={14} />
+																	)}
+																	{configured ? "更新配置" : "保存配置"}
+																</button>
+																{isOauth && (
+																	<button
+																		type="button"
+																		className={configured ? "secondary" : "primary"}
+																		disabled={loginBusy === entry.id || !instanceId}
+																		onClick={() =>
+																			void (configured
+																				? handleLogout(entry.id)
+																				: handleLogin(entry.id))
+																		}
+																	>
+																		{loginBusy === entry.id ? (
+																			<RefreshCw size={14} className="spin" />
+																		) : (
+																			<LogIn size={14} />
+																		)}
+																		{configured ? "登出" : "登录"}
+																	</button>
+																)}
+															</div>
+														</div>
+														<table className="model-catalog-table">
+															<thead>
+																<tr>
+																	<th>模型</th>
+																	<th>上下文</th>
+																	<th>输入 $/M</th>
+																	<th>输出 $/M</th>
+																</tr>
+															</thead>
+															<tbody>
+																{entry.models.map((model) => (
+																	<tr key={model.id}>
+																		<td>{model.name || model.id}</td>
+																		<td>
+																			{model.contextWindow
+																				? `${Math.round(model.contextWindow / 1000)}K`
+																				: "—"}
+																		</td>
+																		<td>
+																			{model.cost?.input != null ? `$${model.cost.input}` : "—"}
+																		</td>
+																		<td>
+																			{model.cost?.output != null ? `$${model.cost.output}` : "—"}
+																		</td>
+																	</tr>
+																))}
+															</tbody>
+														</table>
+													</div>
+												)}
 											</div>
-										</article>
-									))}
-								</section>
-							)}
-
-							{totalCount === 0 && (
-								<div className="model-providers-empty">
-									<Server size={28} />
-									<strong>还没有配置服务商</strong>
-									<span>点击“添加服务商”配置自定义 API 或设置内置服务商的密钥。</span>
-								</div>
-							)}
+										);
+									})
+								)}
+							</section>
 						</>
 					)}
 				</>

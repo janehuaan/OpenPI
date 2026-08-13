@@ -546,3 +546,148 @@ export function configuredRequestAuthStatus(
 	}
 	return { configured: true, source: extension?.apiKey !== undefined ? "fallback" : "models_json_key" };
 }
+
+// ---------------------------------------------------------------------------
+// Provider error classification & retry policy
+// ---------------------------------------------------------------------------
+
+/** Known categories for provider errors. */
+export type ProviderErrorCategory =
+	| "rate_limit"
+	| "server_error"
+	| "timeout"
+	| "network_error"
+	| "auth_error"
+	| "unknown";
+
+/** Node error codes that map to a provider error category. */
+const CODE_TO_CATEGORY: Readonly<Record<string, ProviderErrorCategory>> = {
+	ECONNREFUSED: "network_error",
+	ECONNRESET: "network_error",
+	EHOSTUNREACH: "network_error",
+	ENETUNREACH: "network_error",
+	ENOTFOUND: "network_error",
+	ESOCKETTIMEDOUT: "timeout",
+	ETIMEDOUT: "timeout",
+} as const;
+
+/** HTTP status codes that map to a provider error category. */
+const STATUS_TO_CATEGORY: Readonly<Record<number, ProviderErrorCategory>> = {
+	400: "server_error",
+	401: "auth_error",
+	403: "auth_error",
+	429: "rate_limit",
+	500: "server_error",
+	502: "server_error",
+	503: "server_error",
+	504: "server_error",
+} as const;
+
+/**
+ * Classify a thrown value into a provider error category, or return
+ * `undefined` for non-error / non-recognisable inputs.
+ */
+export function classifyProviderError(thrown: unknown): ProviderErrorCategory | undefined {
+	if (thrown instanceof Error) {
+		const errorRecord = thrown as unknown as Record<string, unknown>;
+		// 1. Check the `code` property first (Node error codes win over message text).
+		const codeProp = errorRecord.code;
+		if (typeof codeProp === "string" && codeProp in CODE_TO_CATEGORY) {
+			return CODE_TO_CATEGORY[codeProp];
+		}
+		// 2. Check numeric HTTP status codes.
+		const numericCode = errorRecord.code as number | undefined;
+		if (typeof numericCode === "number" && STATUS_TO_CATEGORY[numericCode]) {
+			return STATUS_TO_CATEGORY[numericCode];
+		}
+		const status = errorRecord.status as number | undefined;
+		const statusCode = errorRecord.statusCode as number | undefined;
+		const httpStatus = status ?? statusCode;
+		if (typeof httpStatus === "number" && STATUS_TO_CATEGORY[httpStatus]) {
+			return STATUS_TO_CATEGORY[httpStatus];
+		}
+		// 3. Fall back to message text heuristics (case-insensitive).
+		const message = thrown.message.toLowerCase();
+		// rate-limit signals
+		if (/rate limit/.test(message) || /too many requests/.test(message) || /quota exceeded/.test(message)) {
+			return "rate_limit";
+		}
+		// timeout signals
+		if (/timed out/.test(message) || /deadline exceeded/.test(message)) {
+			return "timeout";
+		}
+		// auth failure signals
+		if (/unauthorized/.test(message) || /authentication failed/.test(message) || /invalid api key/.test(message)) {
+			return "auth_error";
+		}
+		// network signals
+		if (
+			/connection refused/.test(message) ||
+			/fetch failed/.test(message) ||
+			/socket hang up/.test(message) ||
+			/websocket closed/.test(message)
+		) {
+			return "network_error";
+		}
+		// server error signals
+		if (/internal server error/.test(message) || /service unavailable/.test(message) || /bad gateway/.test(message)) {
+			return "server_error";
+		}
+		return "unknown";
+	}
+	return undefined;
+}
+
+const CATEGORY_MAX_RETRIES: Readonly<Record<ProviderErrorCategory, number>> = {
+	rate_limit: Number.POSITIVE_INFINITY,
+	server_error: Number.POSITIVE_INFINITY,
+	timeout: 2,
+	network_error: 2,
+	auth_error: 0,
+	unknown: 1,
+} as const;
+
+/**
+ * Decide whether a provider error should be retried given the current
+ * attempt index (0-based) and maximum allowed retries.
+ *
+ * Policy:
+ * - `auth_error`  — never retried (credentials are wrong).
+ * - `rate_limit`  — retried up to `maxRetries` times (back-off).
+ * - `server_error`— retried up to `maxRetries` times.
+ * - `timeout`     — retried up to min(`maxRetries`, 2) times (quick failover).
+ * - `network_error`— retried up to min(`maxRetries`, 2) times (quick failover).
+ * - `unknown`     — retried at most once (attempt === 0 only).
+ */
+export function shouldRetryProviderError(
+	category: ProviderErrorCategory | undefined,
+	attempt: number,
+	maxRetries: number,
+): boolean {
+	if (maxRetries === 0 || attempt >= maxRetries) return false;
+	const effectiveMax = category === undefined ? 1 : Math.min(maxRetries, CATEGORY_MAX_RETRIES[category]);
+	return attempt < effectiveMax;
+}
+
+/**
+ * Compute the delay (in ms) before the next retry attempt.
+ *
+ * For all categories except `rate_limit` this is simple exponential back-off:
+ *   `baseDelayMs * 2^attempt` (floored at 0).
+ *
+ * For `rate_limit` an additional uniform jitter in `[0, baseDelayMs/2)` is
+ * added so that concurrent clients don't thundering-herd the same endpoint.
+ */
+export function computeProviderRetryDelayMs(
+	category: ProviderErrorCategory | undefined,
+	attempt: number,
+	baseDelayMs: number,
+): number {
+	if (baseDelayMs <= 0) return 0;
+	const base = baseDelayMs * 2 ** attempt;
+	if (category === "rate_limit") {
+		const jitter = Math.floor(Math.random() * (baseDelayMs / 2));
+		return base + jitter;
+	}
+	return base;
+}

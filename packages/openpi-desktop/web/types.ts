@@ -1,7 +1,7 @@
 export type TaskStatus = "active" | "paused";
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type InstanceStatus = "starting" | "online" | "stopping" | "stopped" | "error";
-export type AgentMode = "work" | "code";
+export type AgentMode = "work" | "code" | "personal";
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type TaskSchedule = { kind: "once"; runAt: string } | { kind: "cron"; expression: string; timezone?: string };
@@ -338,6 +338,33 @@ export interface ModelProviderConfig {
 	headers?: Record<string, string>;
 	authHeader?: boolean;
 	models?: ModelDefinition[];
+}
+
+/** A single model from the pi.dev catalog (get_available_models), with cost metadata. */
+export interface AvailableModel {
+	provider: string;
+	id: string;
+	name: string;
+	api?: string;
+	baseUrl?: string;
+	reasoning?: boolean;
+	input?: string[];
+	cost?: {
+		input?: number;
+		output?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+	};
+	contextWindow?: number;
+	maxTokens?: number;
+}
+
+/** Auth status for one provider, surfaced by get_provider_auth_status. */
+export interface ProviderAuthStatus {
+	provider: string;
+	type?: string;
+	source?: string;
+	configured: boolean;
 }
 
 export interface VisionFallbackConfig {

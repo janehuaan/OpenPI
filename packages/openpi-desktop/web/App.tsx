@@ -165,7 +165,7 @@ export function App() {
 			searchArchive?: boolean;
 		};
 	}>({});
-	const [includeStopped, setIncludeStopped] = useState(false);
+	const [includeStopped, setIncludeStopped] = useState(true);
 	const [showAllConversations, setShowAllConversations] = useState(false);
 	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
@@ -180,11 +180,13 @@ export function App() {
 	const [conversationOrder, setConversationOrder] = useState<Record<string, number>>({});
 	const [appMode, setAppMode] = useState<AppMode>(() => {
 		if (typeof window === "undefined") return "chat";
-		return window.localStorage.getItem("openpi-app-mode") === "code" ? "code" : "chat";
+		const stored = window.localStorage.getItem("openpi-app-mode");
+		return stored === "code" || stored === "personal" ? stored : "chat";
 	});
 	const [preferredMode, setPreferredMode] = useState<AgentMode>(() => {
 		if (typeof window === "undefined") return "work";
-		return window.localStorage.getItem("openpi-agent-mode") === "code" ? "code" : "work";
+		const stored = window.localStorage.getItem("openpi-agent-mode");
+		return stored === "code" || stored === "personal" ? stored : "work";
 	});
 	const [codeWorkspace, setCodeWorkspace] = useState<string | undefined>(() => {
 		if (typeof window === "undefined") return undefined;
@@ -265,7 +267,7 @@ export function App() {
 	useEffect(() => {
 		window.localStorage.setItem("openpi-app-mode", appMode);
 		// Sync preferredMode with appMode for new conversation creation
-		setPreferredMode(appMode === "code" ? "code" : "work");
+		setPreferredMode(appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work");
 	}, [appMode]);
 
 	useEffect(() => {
@@ -1007,7 +1009,7 @@ export function App() {
 		setBusy("new-conversation");
 		setError(undefined);
 		try {
-			let workspace = requestedWorkspace ?? selectedWorkspace ?? setup.workspace;
+			let workspace = mode === "personal" ? undefined : (requestedWorkspace ?? selectedWorkspace ?? setup.workspace);
 			if (mode === "code" && !workspace) {
 				workspace = await desktopApi.selectWorkspace(codeWorkspace ?? selectedWorkspace ?? setup.workspace);
 				if (!workspace) return;
@@ -1072,8 +1074,13 @@ export function App() {
 		try {
 			let instanceId = selectedInstanceId;
 			if (!instanceId) {
-				const newMode = appMode === "code" ? "code" : "work";
-				let workspace = newMode === "code" ? codeWorkspace : (selectedWorkspace ?? setup.workspace);
+				const newMode = appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work";
+				let workspace =
+					newMode === "code"
+						? codeWorkspace
+						: newMode === "personal"
+							? undefined
+							: (selectedWorkspace ?? setup.workspace);
 				if (newMode === "code" && !workspace) {
 					workspace = await desktopApi.selectWorkspace(setup.workspace);
 					if (!workspace) throw new Error("请选择一个项目后再发送。");
@@ -1178,7 +1185,7 @@ export function App() {
 	function handleModeChange(nextMode: AppMode): void {
 		setAppMode(nextMode);
 		setView("chat");
-		const targetAgentMode = nextMode === "code" ? "code" : "work";
+		const targetAgentMode = nextMode === "code" ? "code" : nextMode === "personal" ? "personal" : "work";
 		setPreferredMode(targetAgentMode);
 		if (selectedAgentInstance?.mode === targetAgentMode) return;
 		// Find the most recent conversation matching the target view
@@ -1742,7 +1749,7 @@ export function App() {
 						void changeCodeWorkspace();
 					} else {
 						void createConversation(
-							appMode === "code" ? "code" : "work",
+							appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work",
 							appMode === "code" ? codeWorkspace : undefined,
 						);
 					}
@@ -1818,7 +1825,13 @@ export function App() {
 						<TodoPanel state={todoState} />
 						<ChatSurface
 							mode={activeAgentMode}
-							workspace={activeAgentMode === "code" ? activeCodeWorkspace : selectedWorkspace}
+							workspace={
+								activeAgentMode === "code"
+									? activeCodeWorkspace
+									: activeAgentMode === "personal"
+										? undefined
+										: selectedWorkspace
+							}
 							conversation={conversation}
 							selectedInstance={selectedAgentInstance}
 							stats={conversationStats}
@@ -1864,7 +1877,7 @@ export function App() {
 									void changeCodeWorkspace();
 								} else {
 									void createConversation(
-										appMode === "code" ? "code" : "work",
+										appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work",
 										appMode === "code" ? codeWorkspace : undefined,
 									);
 								}

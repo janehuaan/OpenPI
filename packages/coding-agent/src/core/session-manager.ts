@@ -4,18 +4,18 @@ import { randomUUID } from "crypto";
 import {
 	appendFileSync,
 	closeSync,
-	createReadStream,
 	existsSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
+	readFileSync,
 	readSync,
 	statSync,
 	writeFileSync,
 } from "fs";
 import { readdir, stat } from "fs/promises";
 import { join, resolve } from "path";
-import { createInterface } from "readline";
+
 import { StringDecoder } from "string_decoder";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
@@ -650,24 +650,78 @@ function extractTextContent(message: Message): string {
 		.join(" ");
 }
 
-function getMessageActivityTime(entry: SessionMessageEntry): number | undefined {
-	const message = entry.message;
-	if (!isMessageWithContent(message)) return undefined;
-	if (message.role !== "user" && message.role !== "assistant") return undefined;
-
-	const msgTimestamp = (message as { timestamp?: number }).timestamp;
-	if (typeof msgTimestamp === "number") {
-		return msgTimestamp;
-	}
-
-	const t = new Date(entry.timestamp).getTime();
-	return Number.isNaN(t) ? undefined : t;
-}
-
 function readSessionChunk(fd: number, position: number, length: number): string {
 	const buffer = Buffer.alloc(length);
 	const bytesRead = readSync(fd, buffer, 0, length, position);
 	return buffer.toString("utf8", 0, bytesRead);
+}
+
+/** Collect the data needed for SessionInfo from already-parsed header + entries. */
+function collectSessionInfoData(
+	header: SessionHeader,
+	entries: SessionEntry[],
+): Pick<SessionInfo, "messageCount" | "firstMessage" | "allMessagesText" | "name" | "modified" | "created"> {
+	let messageCount = 0;
+	let firstMessage = "";
+	const allMessagesTexts: string[] = [];
+	let name: string | undefined;
+	let lastActivityTime: number | undefined;
+
+	for (const entry of entries) {
+		if (entry.type === "session_info") {
+			name = entry.name?.trim() || undefined;
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		messageCount++;
+
+		const message = entry.message;
+		if (!isMessageWithContent(message)) continue;
+		if (message.role !== "user" && message.role !== "assistant") continue;
+
+		const msgTimestamp = (message as { timestamp?: number }).timestamp;
+		if (typeof msgTimestamp === "number") {
+			lastActivityTime = Math.max(lastActivityTime ?? 0, msgTimestamp);
+		}
+
+		const textContent = extractTextContent(message);
+		if (!textContent) continue;
+
+		allMessagesTexts.push(textContent);
+		if (!firstMessage && message.role === "user") {
+			firstMessage = textContent;
+		}
+	}
+
+	const headerTime = new Date(header.timestamp).getTime();
+	const modified =
+		typeof lastActivityTime === "number" && lastActivityTime > 0
+			? new Date(lastActivityTime)
+			: !Number.isNaN(headerTime)
+				? new Date(headerTime)
+				: new Date();
+
+	return {
+		messageCount,
+		firstMessage: firstMessage || "(no messages)",
+		allMessagesText: allMessagesTexts.join(" "),
+		name,
+		modified,
+		created: new Date(header.timestamp),
+	};
+}
+
+/** Parse all JSONL entries from a string. */
+function parseEntriesFromBuffer(content: string): FileEntry[] {
+	const parsed: FileEntry[] = [];
+	const lines = content.split("\n");
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		const entry = parseSessionEntryLine(trimmed);
+		if (entry) parsed.push(entry);
+	}
+	return parsed;
 }
 
 async function buildSessionMetadata(filePath: string): Promise<SessionMetadata | null> {
@@ -733,86 +787,32 @@ async function buildSessionMetadata(filePath: string): Promise<SessionMetadata |
 		return null;
 	}
 }
-
 async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
 	try {
-		const stats = await stat(filePath);
-		let header: SessionHeader | null = null;
-		let messageCount = 0;
-		let firstMessage = "";
-		const allMessages: string[] = [];
-		let name: string | undefined;
-		let lastActivityTime: number | undefined;
-
-		const rl = createInterface({
-			input: createReadStream(filePath, { encoding: "utf8" }),
-			crlfDelay: Infinity,
-		});
-
-		for await (const line of rl) {
-			const entry = parseSessionEntryLine(line);
-			if (!entry) continue;
-
-			if (!header) {
-				if (entry.type !== "session") return null;
-				header = entry;
-				continue;
-			}
-
-			// Extract session name (use latest, including explicit clears)
-			if (entry.type === "session_info") {
-				name = entry.name?.trim() || undefined;
-			}
-
-			if (entry.type !== "message") continue;
-			messageCount++;
-
-			const activityTime = getMessageActivityTime(entry);
-			if (typeof activityTime === "number") {
-				lastActivityTime = Math.max(lastActivityTime ?? 0, activityTime);
-			}
-
-			const message = entry.message;
-			if (!isMessageWithContent(message)) continue;
-			if (message.role !== "user" && message.role !== "assistant") continue;
-
-			const textContent = extractTextContent(message);
-			if (!textContent) continue;
-
-			allMessages.push(textContent);
-			if (!firstMessage && message.role === "user") {
-				firstMessage = textContent;
-			}
-		}
-
+		const raw = readFileSync(filePath, "utf8");
+		const parsed = parseEntriesFromBuffer(raw);
+		const header = parsed.find((e) => e.type === "session") as SessionHeader | undefined;
 		if (!header) return null;
+		const entries = parsed.filter((e) => e.type !== "session") as SessionEntry[];
 
 		const cwd = typeof header.cwd === "string" ? header.cwd : "";
 		const parentSessionPath = header.parentSession;
-		const headerTime = typeof header.timestamp === "string" ? new Date(header.timestamp).getTime() : NaN;
-		const modified =
-			typeof lastActivityTime === "number" && lastActivityTime > 0
-				? new Date(lastActivityTime)
-				: !Number.isNaN(headerTime)
-					? new Date(headerTime)
-					: stats.mtime;
+		const info = collectSessionInfoData(header, entries);
 
 		return {
 			path: filePath,
 			id: header.id,
 			cwd,
-			name,
+			...info,
 			parentSessionPath,
-			created: new Date(header.timestamp),
-			modified,
-			messageCount,
-			firstMessage: firstMessage || "(no messages)",
-			allMessagesText: allMessages.join(" "),
 		};
 	} catch {
 		return null;
 	}
 }
+
+/** Exported for testing */
+export { buildSessionInfo };
 
 export type SessionListProgress = (loaded: number, total: number) => void;
 

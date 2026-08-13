@@ -24,8 +24,62 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 }
 
-/** Build the system prompt with tools, guidelines, and context */
+// ---------------------------------------------------------------------------
+// Deterministic memoization. Agent sessions rebuild the system prompt on every
+// turn, but the assembled string only changes when its inputs change. We cache
+// by a value fingerprint so unchanged turns skip all string assembly.
+// ---------------------------------------------------------------------------
+
+/** Fast non-cryptographic hash (FNV-1a 64-bit) for context file contents. */
+function fnv1a64(input: string): string {
+	let hash = 0xcbf29ce484222325n;
+	for (let i = 0; i < input.length; i++) {
+		hash ^= BigInt(input.charCodeAt(i));
+		hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+	}
+	return hash.toString(36);
+}
+
+/** Fields of a Skill that formatSkillsForPrompt actually renders. */
+function skillFingerprint(skill: Skill): string {
+	return [skill.filePath, skill.name, skill.description, skill.disableModelInvocation ? "1" : "0"].join("\u0000");
+}
+
+function computeFingerprint(options: BuildSystemPromptOptions): string {
+	const parts: string[] = [];
+	parts.push(options.customPrompt ?? "");
+	parts.push((options.selectedTools ?? []).slice().sort().join(","));
+	parts.push(JSON.stringify(options.toolSnippets ?? {}));
+	parts.push(JSON.stringify(options.promptGuidelines ?? []));
+	parts.push(options.appendSystemPrompt ?? "");
+	parts.push(options.cwd);
+	parts.push(JSON.stringify((options.contextFiles ?? []).map((file) => `${file.path}\u0000${fnv1a64(file.content)}`)));
+	parts.push((options.skills ?? []).map(skillFingerprint).sort().join("\u0000"));
+	// The default branch renders the Pi documentation paths too; include them so
+	// a path change (e.g. different install layout) invalidates the cache.
+	parts.push(getReadmePath(), getDocsPath(), getExamplesPath());
+	return parts.join("\u0001");
+}
+
+const promptCache = new Map<string, string>();
+const PROMPT_CACHE_MAX_ENTRIES = 200;
+
+/** Build the system prompt with tools, guidelines, and context (memoized). */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+	const fingerprint = computeFingerprint(options);
+	const cached = promptCache.get(fingerprint);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const result = buildSystemPromptUncached(options);
+	if (promptCache.size >= PROMPT_CACHE_MAX_ENTRIES) {
+		promptCache.clear();
+	}
+	promptCache.set(fingerprint, result);
+	return result;
+}
+
+function buildSystemPromptUncached(options: BuildSystemPromptOptions): string {
 	const {
 		customPrompt,
 		selectedTools,

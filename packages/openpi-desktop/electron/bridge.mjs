@@ -5,6 +5,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { AGNES_IMAGE_MODEL, AGNES_VIDEO_MODEL, createAgnesMediaClient } from "./agnes-media.mjs";
 import {
 	ensureDaemon,
@@ -749,8 +750,8 @@ export function registerBridge(ipcMain, getMainWindow) {
 	});
 
 	ipcMain.handle("openpi:create_conversation", async (_e, { label, cwd, mode } = {}) => {
-		const workspace = cwd || defaultWorkspace();
-		const agentMode = mode === "code" ? "code" : "work";
+		const agentMode = mode === "code" || mode === "personal" ? mode : "work";
+		const workspace = cwd || (agentMode === "personal" ? homedir() : defaultWorkspace());
 		const spawnOnce = async () => {
 			await ensureDaemon();
 			const result = await sendIpcRequest(
@@ -982,6 +983,12 @@ export function registerBridge(ipcMain, getMainWindow) {
 	ipcMain.handle("openpi:get_conversation_models", async (_e, { instanceId }) => {
 		const data = rpcData(await rpc(instanceId, { type: "get_available_models" }));
 		return data?.models ?? data ?? [];
+	});
+
+	ipcMain.handle("openpi:get_available_models", async (_e, { instanceId }) => {
+		const data = rpcData(await rpc(instanceId, { type: "get_available_models" }));
+		const models = Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : [];
+		return models;
 	});
 
 	ipcMain.handle("openpi:set_conversation_model", async (_e, { instanceId, provider, modelId }) => {
@@ -1282,7 +1289,10 @@ export function registerBridge(ipcMain, getMainWindow) {
 			throw new Error("providerId is required");
 		}
 		const current = readModelsConfig();
-		current.providers[providerId] = config;
+		const existing = current.providers?.[providerId] && typeof current.providers[providerId] === "object"
+			? current.providers[providerId]
+			: {};
+		current.providers[providerId] = { ...existing, ...(config && typeof config === "object" ? config : {}) };
 		writeModelsConfig(current);
 		return true;
 	});
