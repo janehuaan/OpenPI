@@ -62,6 +62,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { isDirectResponsePrompt } from "./direct-prompt.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -1391,6 +1392,9 @@ export class AgentSession {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
+		let currentImages = options?.images;
+		let expandedText = text;
+		let directOneShotPrompt = false;
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -1406,7 +1410,6 @@ export class AgentSession {
 
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
-			let currentImages = options?.images;
 			if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
@@ -1425,7 +1428,7 @@ export class AgentSession {
 			}
 
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
-			let expandedText = currentText;
+			expandedText = currentText;
 			if (expandPromptTemplates) {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
@@ -1455,10 +1458,7 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			const hasConfiguredAuth =
-				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
-				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
-			if (!hasConfiguredAuth) {
+			if (!this._modelRuntime.hasConfiguredAuth(this.model.provider)) {
 				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
 				if (isOAuth) {
 					throw new Error(
@@ -1470,15 +1470,19 @@ export class AgentSession {
 				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 			}
 
-			// Check if we need to compact before sending (catches aborted responses).
-			// The user's new prompt is sent below, so do not call agent.continue() here.
+			// Only overflow recovery may block a new prompt. Threshold compaction is
+			// handled after agent runs so a summarization request does not delay first token.
 			const lastAssistant = this._findLastAssistantMessage();
-			if (lastAssistant) {
+			if (lastAssistant && isContextOverflow(lastAssistant, this.model.contextWindow ?? 0)) {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
+			directOneShotPrompt =
+				(this._extensionMode === "print" || this._extensionMode === "json" || this._extensionMode === "rpc") &&
+				!currentImages &&
+				isDirectResponsePrompt(expandedText);
 
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -1492,25 +1496,29 @@ export class AgentSession {
 			});
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
-			for (const msg of this._pendingNextTurnMessages) {
-				// Dedupe: if the same customType + content is already in the
-				// history (injected on a previous turn), skip re-injecting —
-				// the model still sees it via the cached prefix, and we avoid
-				// a per-turn cache write that would drag the hit rate down.
-				const seen = this._lastInjectedCustomContent.get(msg.customType);
-				if (seen !== undefined && seen === stringifyContent(msg.content)) continue;
-				this._lastInjectedCustomContent.set(msg.customType, stringifyContent(msg.content));
-				messages.push(msg);
+			if (!directOneShotPrompt) {
+				for (const msg of this._pendingNextTurnMessages) {
+					// Dedupe: if the same customType + content is already in the
+					// history (injected on a previous turn), skip re-injecting —
+					// the model still sees it via the cached prefix, and we avoid
+					// a per-turn cache write that would drag the hit rate down.
+					const seen = this._lastInjectedCustomContent.get(msg.customType);
+					if (seen !== undefined && seen === stringifyContent(msg.content)) continue;
+					this._lastInjectedCustomContent.set(msg.customType, stringifyContent(msg.content));
+					messages.push(msg);
+				}
+				this._pendingNextTurnMessages = [];
 			}
-			this._pendingNextTurnMessages = [];
 
-			// Emit before_agent_start extension event
-			const result = await this._extensionRunner.emitBeforeAgentStart(
-				expandedText,
-				currentImages,
-				this._baseSystemPrompt,
-				this._baseSystemPromptOptions,
-			);
+			// Direct one-shot answers should not wait for heavy proactive context hooks.
+			const result = directOneShotPrompt
+				? undefined
+				: await this._extensionRunner.emitBeforeAgentStart(
+						expandedText,
+						currentImages,
+						this._baseSystemPrompt,
+						this._baseSystemPromptOptions,
+					);
 			// Add all custom messages from extensions
 			if (result?.messages) {
 				for (const msg of result.messages) {
@@ -1544,7 +1552,28 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		await this._runAgentPrompt(messages);
+		if (!directOneShotPrompt) {
+			await this._runAgentPrompt(messages);
+			return;
+		}
+		const previousTools = this.agent.state.tools;
+		const previousSystemPrompt = this.agent.state.systemPrompt;
+		const directSystemPrompt = buildSystemPrompt({
+			...this._baseSystemPromptOptions,
+			skills: [],
+			contextFiles: [],
+			selectedTools: [],
+			toolSnippets: {},
+			promptGuidelines: [],
+		});
+		this.agent.state.tools = [];
+		this.agent.state.systemPrompt = directSystemPrompt;
+		try {
+			await this._runAgentPrompt(messages);
+		} finally {
+			this.agent.state.tools = previousTools;
+			this.agent.state.systemPrompt = previousSystemPrompt;
+		}
 	}
 
 	/**

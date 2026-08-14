@@ -287,6 +287,32 @@ describe("AgentSession compaction characterization", () => {
 		expect(harness.faux.state.callCount).toBe(1);
 	});
 
+	it("does not run threshold compaction before sending a new prompt", async () => {
+		const harness = await createHarness({
+			settings: { compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 20_000 } },
+			models: [{ id: "faux-1", contextWindow: 200_000, maxTokens: 100 }],
+		});
+		harnesses.push(harness);
+		const sessionInternals = harness.session as unknown as SessionWithCompactionInternals;
+		const thresholdAssistant = createAssistant(harness, {
+			stopReason: "stop",
+			totalTokens: 190_000,
+			timestamp: Date.now(),
+		});
+		harness.session.agent.state.messages = [
+			{ role: "user", content: [{ type: "text", text: "large context" }], timestamp: Date.now() - 1000 },
+			thresholdAssistant,
+		];
+		harness.setResponses([fauxAssistantMessage("next")]);
+
+		const runAutoCompactionSpy = vi.spyOn(sessionInternals, "_runAutoCompaction").mockResolvedValue(false);
+
+		await harness.session.prompt("next prompt");
+
+		expect(runAutoCompactionSpy).not.toHaveBeenCalled();
+		expect(harness.faux.state.callCount).toBe(1);
+	});
+
 	it("ignores stale pre-compaction assistant usage on pre-prompt checks", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);

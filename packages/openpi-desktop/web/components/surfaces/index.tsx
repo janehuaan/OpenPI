@@ -426,6 +426,7 @@ export function ReferenceWorkspacePreview({
 	const projectList = useRef<HTMLDivElement>(null);
 	const chatList = useRef<HTMLDivElement>(null);
 	const autoFollow = useRef(true);
+	const submitting = useRef(false);
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 	const instances = [...projectInstances, ...chatInstances];
 	const selectedInstance = instances.find((instance) => instance.id === selectedInstanceId);
@@ -722,17 +723,22 @@ export function ReferenceWorkspacePreview({
 
 	const submit = async (): Promise<void> => {
 		const message = draft.trim();
-		if ((!message && attachments.length === 0 && documents.length === 0) || isWorking) return;
-		if (message.startsWith("/") && attachments.length === 0 && (await handleLocalSlash(message))) {
+		if ((!message && attachments.length === 0 && documents.length === 0) || isWorking || submitting.current) return;
+		submitting.current = true;
+		try {
+			if (message.startsWith("/") && attachments.length === 0 && (await handleLocalSlash(message))) {
+				setDraft("");
+				setSlashOpen(false);
+				return;
+			}
+			await onSend(message, attachments, documents);
 			setDraft("");
-			setSlashOpen(false);
-			return;
+			setAttachments([]);
+			setDocuments([]);
+			setAttachmentNotice(undefined);
+		} finally {
+			submitting.current = false;
 		}
-		await onSend(message, attachments, documents);
-		setDraft("");
-		setAttachments([]);
-		setDocuments([]);
-		setAttachmentNotice(undefined);
 	};
 
 	return (
@@ -2790,6 +2796,7 @@ export function ChatSurface({
 	const speechRestartTimer = useRef<number | undefined>(undefined);
 	const speechErrorHandler = useRef(onError);
 	speechErrorHandler.current = onError;
+	const submitting = useRef(false);
 	const isStreaming = conversation?.state.isStreaming ?? false;
 	const isWorking = isStreaming || optimisticMessage !== undefined;
 	const storedMessages =
@@ -3262,25 +3269,27 @@ export function ChatSurface({
 
 	async function submit(): Promise<void> {
 		const message = draft.trim();
-		if (sending || isWorking || mediaSubmitting || preparingImages || !canSubmit) return;
+		if (sending || isWorking || mediaSubmitting || preparingImages || !canSubmit || submitting.current) return;
+		submitting.current = true;
 		if (composerMode === "video" && attachments.length > 0) {
 			onError("文生视频暂不接受本地图片，请先移除附件");
+			submitting.current = false;
 			return;
 		}
-		abortSpeechRecognition();
-		if (composerMode === "chat" && message.startsWith("/") && attachments.length === 0) {
-			const handled = await handleLocalSlash(message);
-			if (handled) {
-				setDraft("");
-				setSlashOpen(false);
-				return;
-			}
-		}
 		const pendingAttachments = attachments;
-		setDraft("");
-		setAttachments([]);
-		setSlashOpen(false);
 		try {
+			abortSpeechRecognition();
+			if (composerMode === "chat" && message.startsWith("/") && attachments.length === 0) {
+				const handled = await handleLocalSlash(message);
+				if (handled) {
+					setDraft("");
+					setSlashOpen(false);
+					return;
+				}
+			}
+			setDraft("");
+			setAttachments([]);
+			setSlashOpen(false);
 			if (composerMode === "image") {
 				await generateImage(message, pendingAttachments);
 			} else if (composerMode === "video") {
@@ -3294,6 +3303,8 @@ export function ChatSurface({
 		} catch {
 			setDraft((current) => current || message);
 			setAttachments((current) => (current.length > 0 ? current : pendingAttachments));
+		} finally {
+			submitting.current = false;
 		}
 	}
 

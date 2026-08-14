@@ -939,6 +939,7 @@ export function registerBridge(ipcMain, getMainWindow) {
 			if (controller.signal.aborted) throw new Error("已停止发送");
 			const hasImages = Array.isArray(images) && images.length > 0;
 			let prompt = message;
+			let promptImages = images;
 			if (hasImages && !(await currentModelSupportsImages(instanceId))) {
 				if (controller.signal.aborted) throw new Error("已停止发送");
 				const vision = zhipuVisionConfig();
@@ -947,9 +948,10 @@ export function registerBridge(ipcMain, getMainWindow) {
 				}
 				const report = await describeImagesWithZhipu(vision.model, message, images, controller.signal);
 				prompt = withVisionContext(message, vision.model, report);
+				promptImages = [];
 			}
 			if (controller.signal.aborted) throw new Error("已停止发送");
-			await rpc(instanceId, { type: "prompt", message: prompt, images });
+			await rpc(instanceId, { type: "prompt", message: prompt, images: promptImages });
 			return true;
 		} finally {
 			if (visionRequests.get(instanceId) === controller) visionRequests.delete(instanceId);
@@ -1040,8 +1042,11 @@ export function registerBridge(ipcMain, getMainWindow) {
 		await ensureDaemon();
 		const existing = streams.get(instanceId);
 		if (existing) {
-			existing.kill?.();
-			streams.delete(instanceId);
+			event.sender.send("openpi:conversation-event", {
+				instanceId,
+				event: { type: "rpc_ready" },
+			});
+			return true;
 		}
 		const { orchestratorDir } = await import("./paths.mjs");
 		const path = join(orchestratorDir(), "orchestrator.sock");
@@ -1074,6 +1079,15 @@ export function registerBridge(ipcMain, getMainWindow) {
 			event.sender.send("openpi:conversation-event", {
 				instanceId,
 				event: { type: "stream_error", error: error.message },
+			});
+		});
+		socket.on("close", () => {
+			if (streams.get(instanceId)?.socket === socket) {
+				streams.delete(instanceId);
+			}
+			event.sender.send("openpi:conversation-event", {
+				instanceId,
+				event: { type: "stream_closed" },
 			});
 		});
 		streams.set(instanceId, {

@@ -688,7 +688,25 @@ export function App() {
 				const streamConnected = streamConnectedInstanceId === instanceId;
 				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 4_000;
 				if (!disposed) {
-					setConversation(next);
+					setConversation((current) => {
+						if (
+							streamConnected &&
+							current?.instance.id === instanceId &&
+							current.state.isStreaming &&
+							current.messages.length >= next.messages.length
+						) {
+							return {
+								...next,
+								state: {
+									...next.state,
+									isStreaming: true,
+									messageCount: current.messages.length,
+								},
+								messages: current.messages,
+							};
+						}
+						return next;
+					});
 					if (messageAccepted) {
 						setOptimisticMessage((current) => (current === pending ? undefined : current));
 					}
@@ -1120,7 +1138,9 @@ export function App() {
 			if (sessionName) {
 				setConversationTitles((current) => ({ ...current, [instanceId]: sessionName }));
 			}
-			if (desktopApi.isNative) await desktopApi.watchConversation(instanceId);
+			if (desktopApi.isNative && streamConnectedInstanceId !== instanceId) {
+				await desktopApi.watchConversation(instanceId);
+			}
 			await desktopApi.sendMessage(instanceId, prompt, images, sessionName);
 		} catch (caught) {
 			setOptimisticMessage((current) =>

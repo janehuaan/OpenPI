@@ -353,6 +353,64 @@ describe("AgentSession queue characterization", () => {
 		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "custom", "assistant"]);
 	});
 
+	it("does not consume nextTurn custom messages for direct one-shot prompts", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		await harness.session.bindExtensions({ mode: "rpc" });
+		let sawCarryMessage = false;
+
+		await harness.session.sendCustomMessage(
+			{ customType: "next-turn", content: "carry this", display: true, details: {} },
+			{ deliverAs: "nextTurn" },
+		);
+
+		harness.setResponses([
+			(context) => {
+				sawCarryMessage = context.messages.some(
+					(message) =>
+						message.role === "user" &&
+						typeof message.content !== "string" &&
+						message.content.some((part) => part.type === "text" && part.text === "carry this"),
+				);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		await harness.session.prompt("Say exactly: ok");
+
+		expect(sawCarryMessage).toBe(false);
+		expect(harness.session.messages.some((message) => message.role === "custom")).toBe(false);
+	});
+
+	it("still consumes nextTurn custom messages for normal prompts", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		await harness.session.bindExtensions({ mode: "rpc" });
+		let sawCarryMessage = false;
+
+		await harness.session.sendCustomMessage(
+			{ customType: "next-turn", content: "carry this", display: true, details: {} },
+			{ deliverAs: "nextTurn" },
+		);
+
+		harness.setResponses([
+			(context) => {
+				sawCarryMessage = context.messages.some(
+					(message) =>
+						message.role === "user" &&
+						typeof message.content !== "string" &&
+						message.content.some((part) => part.type === "text" && part.text === "carry this"),
+				);
+				return fauxAssistantMessage("done");
+			},
+		]);
+
+		await harness.session.prompt("normal prompt");
+
+		expect(sawCarryMessage).toBe(true);
+		expect(harness.session.messages.map((message) => message.role)).toEqual(["user", "custom", "assistant"]);
+	});
+
 	it("updates pendingMessageCount and removes queued text before message_start is emitted", async () => {
 		const waiting = await createWaitingHarness();
 		const { harness, waitForToolStart, promptPromise, releaseToolExecution } = waiting;

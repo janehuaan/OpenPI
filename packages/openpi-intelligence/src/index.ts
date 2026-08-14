@@ -31,6 +31,7 @@ import {
 	executionBlockReason,
 	INVESTIGATION_TOOL_NAMES,
 	inferTaskIntent,
+	isDirectResponsePrompt,
 	isReadOnlyBashCommand,
 } from "./readiness.ts";
 import { applyReflectionDecision, createReflectionState, decideReflection } from "./reflection.ts";
@@ -1109,6 +1110,7 @@ export default function (pi: ExtensionAPI) {
 		config = loadIntelligenceConfig(ctx.cwd);
 		if (!config.enabled) return;
 		state.investigationEvidence = [];
+		if (isDirectResponsePrompt(event.prompt)) return;
 		const id = runId();
 		const ledger = new EventLedger(ctx.cwd, id);
 		ledger.append({

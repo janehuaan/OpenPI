@@ -367,6 +367,181 @@ describe("AgentSession model and extension characterization", () => {
 		).toBe(true);
 	});
 
+	it("skips before_agent_start injection for direct print-mode responses", async () => {
+		let beforeStartCalls = 0;
+		let providerToolNames: string[] = [];
+		const echoTool: AgentTool = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo text back",
+			parameters: Type.Object({ text: Type.String() }),
+			execute: async () => ({ content: [{ type: "text", text: "echo" }], details: {} }),
+		};
+		const harness = await createHarness({
+			tools: [echoTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("before_agent_start", async () => {
+						beforeStartCalls += 1;
+						return {
+							message: {
+								customType: "before-start",
+								content: "injected",
+								display: true,
+								details: { injected: true },
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			(context) => {
+				providerToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		await harness.session.prompt("Say exactly: ok");
+
+		expect(beforeStartCalls).toBe(0);
+		expect(providerToolNames).toEqual([]);
+		expect(harness.session.messages.some((message) => message.role === "custom")).toBe(false);
+		expect(harness.session.getActiveToolNames()).toContain("echo");
+	});
+
+	it("keeps before_agent_start injection for print-mode work prompts", async () => {
+		let beforeStartCalls = 0;
+		let providerToolNames: string[] = [];
+		const echoTool: AgentTool = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo text back",
+			parameters: Type.Object({ text: Type.String() }),
+			execute: async () => ({ content: [{ type: "text", text: "echo" }], details: {} }),
+		};
+		const harness = await createHarness({
+			tools: [echoTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("before_agent_start", async () => {
+						beforeStartCalls += 1;
+						return {
+							message: {
+								customType: "before-start",
+								content: "injected",
+								display: true,
+								details: { injected: true },
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			(context) => {
+				providerToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage("done");
+			},
+		]);
+
+		await harness.session.prompt("Fix latency in file.ts");
+
+		expect(beforeStartCalls).toBe(1);
+		expect(providerToolNames).toContain("echo");
+		expect(harness.session.messages.some((message) => message.role === "custom")).toBe(true);
+	});
+
+	it("uses the direct fast path in rpc mode", async () => {
+		let beforeStartCalls = 0;
+		let providerToolNames: string[] = [];
+		const echoTool: AgentTool = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo text back",
+			parameters: Type.Object({ text: Type.String() }),
+			execute: async () => ({ content: [{ type: "text", text: "echo" }], details: {} }),
+		};
+		const harness = await createHarness({
+			tools: [echoTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("before_agent_start", async () => {
+						beforeStartCalls += 1;
+						return {
+							message: {
+								customType: "before-start",
+								content: "injected",
+								display: true,
+								details: { injected: true },
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({ mode: "rpc" });
+		harness.setResponses([
+			(context) => {
+				providerToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage("ok");
+			},
+		]);
+
+		await harness.session.prompt("Say exactly: ok");
+
+		expect(beforeStartCalls).toBe(0);
+		expect(providerToolNames).toEqual([]);
+		expect(harness.session.getActiveToolNames()).toContain("echo");
+	});
+
+	it("keeps before_agent_start injection for rpc work prompts", async () => {
+		let beforeStartCalls = 0;
+		let providerToolNames: string[] = [];
+		const echoTool: AgentTool = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo text back",
+			parameters: Type.Object({ text: Type.String() }),
+			execute: async () => ({ content: [{ type: "text", text: "echo" }], details: {} }),
+		};
+		const harness = await createHarness({
+			tools: [echoTool],
+			extensionFactories: [
+				(pi) => {
+					pi.on("before_agent_start", async () => {
+						beforeStartCalls += 1;
+						return {
+							message: {
+								customType: "before-start",
+								content: "injected",
+								display: true,
+								details: { injected: true },
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({ mode: "rpc" });
+		harness.setResponses([
+			(context) => {
+				providerToolNames = (context.tools ?? []).map((tool) => tool.name);
+				return fauxAssistantMessage("done");
+			},
+		]);
+
+		await harness.session.prompt("Fix latency in file.ts");
+
+		expect(beforeStartCalls).toBe(1);
+		expect(providerToolNames).toContain("echo");
+		expect(harness.session.messages.some((message) => message.role === "custom")).toBe(true);
+	});
+
 	it("bindExtensions emits session_start and reload emits session_shutdown then session_start", async () => {
 		const lifecycleEvents: string[] = [];
 		const harness = await createHarness({
