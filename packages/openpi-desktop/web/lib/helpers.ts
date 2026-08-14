@@ -293,6 +293,31 @@ export function conversationContentMatches(left: unknown, right: unknown): boole
 	);
 }
 
+export function mergeConversationMessage(
+	messages: ConversationMessage[],
+	incoming: ConversationMessage,
+): ConversationMessage[] {
+	const nextMessages = [...messages];
+	let messageIndex = -1;
+	if (incoming.timestamp !== undefined) {
+		messageIndex = nextMessages.findIndex(
+			(message) => message.role === incoming.role && message.timestamp === incoming.timestamp,
+		);
+	}
+	if (messageIndex === -1 && incoming.role !== "user") {
+		for (let index = nextMessages.length - 1; index >= 0; index--) {
+			const message = nextMessages[index];
+			if (message.role === incoming.role && message.timestamp === undefined) {
+				messageIndex = index;
+				break;
+			}
+		}
+	}
+	if (messageIndex === -1) nextMessages.push(incoming);
+	else nextMessages[messageIndex] = incoming;
+	return nextMessages;
+}
+
 export function readBlobAsBase64(blob: Blob): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();

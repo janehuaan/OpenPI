@@ -947,6 +947,14 @@ export function ReferenceWorkspacePreview({
 					<div className="reference-chat-view">
 						{messages
 							.filter((message) => message.role === "user" || message.role === "assistant")
+							.filter((message) => {
+								if (message.role !== "assistant") return true;
+								return Boolean(
+									visibleMessageText(contentText(message.content)) ||
+										contentImages(message.content).length > 0 ||
+										message.errorMessage,
+								);
+							})
 							.map((message, index) => {
 								const text = visibleMessageText(contentText(message.content));
 								const isUser = message.role === "user";

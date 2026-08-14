@@ -38,6 +38,7 @@ import {
 	instanceTitle,
 	isConversationMessage,
 	isRecord,
+	mergeConversationMessage,
 	normalizeConversationModels,
 } from "./lib/helpers";
 import { hashForView, initialView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
@@ -614,15 +615,7 @@ export function App() {
 			}
 			setConversation((current) => {
 				if (!current || current.instance.id !== payload.instanceId) return current;
-				const messageIndex = current.messages.findIndex(
-					(message) =>
-						incoming.timestamp !== undefined &&
-						message.role === incoming.role &&
-						message.timestamp === incoming.timestamp,
-				);
-				const messages = [...current.messages];
-				if (messageIndex === -1) messages.push(incoming);
-				else messages[messageIndex] = incoming;
+				const messages = mergeConversationMessage(current.messages, incoming);
 				return {
 					...current,
 					state: { ...current.state, isStreaming: true, messageCount: messages.length },
