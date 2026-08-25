@@ -55,6 +55,17 @@ npm run install:local --workspace @earendil-works/openpi-desktop
 
 - `Resources/openpi-runtime` — fallback Pi CLI + orchestrator
 - `Resources/openpi-packages` — fallback first-party extensions
+- `Resources/embedding` — local embedding assets copied from `build/embedding`
+
+### Qwen3 embedding packaging
+
+For the target OpenPI memory deployment, place the Q8_0 GGUF model at this exact pre-package path:
+
+```text
+packages/openpi-desktop/build/embedding/qwen3-embedding-0.6b-q8_0.gguf
+```
+
+`electron-builder.yml` already packages `build/embedding` as `Resources/embedding`, so this file will be available in the installed application as `Resources/embedding/qwen3-embedding-0.6b-q8_0.gguf`. The approximately 639 MB model asset is deliberately not downloaded or tracked by this repository; obtain and validate it through the release/build asset process before running `pack:mac`. This is a packaging input only and does not make Qwen or Milvus start automatically.
 
 ## Backend-first updates (prefer no reinstall)
 

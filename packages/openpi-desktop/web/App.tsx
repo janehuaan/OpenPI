@@ -17,7 +17,6 @@ import {
 	ProviderAuthDialog,
 	ReferenceWorkspacePreview,
 	RenameConversationDialog,
-	SecuritySurface,
 	TasksSurface,
 } from "./components/surfaces";
 import { TodoPanel } from "./components/todo-panel";
@@ -41,6 +40,7 @@ import {
 	mergeConversationMessage,
 	normalizeConversationModels,
 } from "./lib/helpers";
+import { reduceTurnProgress, submittedTurnProgress, type TurnProgress } from "./lib/turn-progress";
 import { hashForView, initialView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
 
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
@@ -84,11 +84,8 @@ export function App() {
 	const [setup, setSetup] = useState<{
 		checked: boolean;
 		enabled: boolean;
-		busy: boolean;
-		error?: string;
 		workspace?: string;
-		doctor?: string;
-	}>({ checked: false, enabled: true, busy: false });
+	}>({ checked: false, enabled: true });
 	const [snapshot, setSnapshot] = useState(emptySnapshot);
 	const [conversation, setConversation] = useState<ConversationSnapshot>();
 	const [conversationStats, setConversationStats] = useState<ConversationStats>();
@@ -126,6 +123,7 @@ export function App() {
 	const [error, setError] = useState<string>();
 	// Track which instances are actively processing (agent_start → agent_settled)
 	const [streamingInstances, setStreamingInstances] = useState<Set<string>>(new Set());
+	const [turnProgress, setTurnProgress] = useState<TurnProgress>();
 	const [showCreateTask, setShowCreateTask] = useState(false);
 	const [taskPrefill, setTaskPrefill] = useState<{ title?: string; prompt?: string }>({});
 	const [renamingConversation, setRenamingConversation] = useState<AgentInstance>();
@@ -138,9 +136,8 @@ export function App() {
 	const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceSummary>();
 	const [runningTools, setRunningTools] = useState<RunningTool[]>([]);
 	const [visionFallback, setVisionFallback] = useState<VisionFallbackConfig>();
+	const [autoStartMilvus, setAutoStartMilvus] = useState<boolean>(true);
 	const [workspaceIntelligenceRuns, setWorkspaceIntelligenceRuns] = useState<string[]>([]);
-	const [securityAudit, setSecurityAudit] = useState<string[]>([]);
-	const [securityMode, setSecurityMode] = useState<string>();
 	const [intelligenceDetail, setIntelligenceDetail] = useState<string>("");
 	const [selectedIntelligenceRunId, setSelectedIntelligenceRunId] = useState<string>();
 	const [conversationCommands, setConversationCommands] = useState<string[]>([]);
@@ -194,10 +191,17 @@ export function App() {
 		return window.localStorage.getItem("openpi-code-workspace") || undefined;
 	});
 	const selectedInstanceIdRef = useRef(selectedInstanceId);
+	const runningToolsInstanceIdRef = useRef<string | undefined>(undefined);
 	const conversationCacheRef = useRef<Record<string, ConversationSnapshot>>({});
 	const routeInitializedRef = useRef(false);
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
 	selectedInstanceIdRef.current = selectedInstanceId;
+	const clearRunningTools = useCallback((instanceId?: string): void => {
+		if (instanceId !== undefined && runningToolsInstanceIdRef.current !== instanceId) return;
+		runningToolsInstanceIdRef.current = undefined;
+		setRunningTools([]);
+	}, []);
+
 	const activeConversationUiRequest = pendingConversationUiRequests[0];
 	const isStreaming = Boolean(conversation?.state.isStreaming || optimisticMessage);
 
@@ -321,21 +325,11 @@ export function App() {
 			.setupStatus()
 			.then((status) => {
 				if (disposed) return;
-				setSetup({
-					checked: true,
-					enabled: status.enabled,
-					busy: false,
-					workspace: status.workspace,
-				});
+				setSetup({ checked: true, enabled: status.enabled, workspace: status.workspace });
 			})
-			.catch((caught: unknown) => {
+			.catch((_caught: unknown) => {
 				if (disposed) return;
-				setSetup({
-					checked: true,
-					enabled: false,
-					busy: false,
-					error: caught instanceof Error ? caught.message : String(caught),
-				});
+				setSetup({ checked: true, enabled: false });
 				setInitialLoadComplete(true);
 			});
 		return () => {
@@ -365,15 +359,13 @@ export function App() {
 		let disposed = false;
 		const loadInitialData = async (): Promise<void> => {
 			try {
-				const [profile, fallback, mode] = await Promise.all([
+				const [profile, fallback] = await Promise.all([
 					desktopApi.getUserProfile(),
 					desktopApi.getVisionFallback(),
-					desktopApi.getSecurityMode(),
 				]);
 				if (disposed) return;
 				setUserProfile(profile ?? {});
 				setVisionFallback(fallback);
-				setSecurityMode(mode);
 			} catch (caught) {
 				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
 			} finally {
@@ -453,27 +445,29 @@ export function App() {
 	}, [selectedInstanceId, view]);
 
 	useEffect(() => {
-		if (!setup.checked || !setup.enabled) return;
-		let disposed = false;
-		void desktopApi
-			.getSecurityMode()
-			.then((mode) => {
-				if (!disposed) setSecurityMode(mode);
-			})
-			.catch((caught: unknown) => {
-				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
-			});
-		return () => {
-			disposed = true;
-		};
-	}, [setup.checked, setup.enabled]);
-
-	useEffect(() => {
 		if (!desktopApi.isNative) return;
 		let disposed = false;
 		const unlisten = desktopApi.onConversationEvent((payload) => {
 			if (disposed || payload.instanceId !== selectedInstanceIdRef.current || !isRecord(payload.event)) return;
-			const eventType = typeof payload.event.type === "string" ? payload.event.type : undefined;
+			const event = payload.event;
+			const eventType = typeof event.type === "string" ? event.type : undefined;
+			const assistantMessageEvent = isRecord(event.assistantMessageEvent)
+				? {
+						type:
+							typeof event.assistantMessageEvent.type === "string"
+								? event.assistantMessageEvent.type
+								: undefined,
+					}
+				: undefined;
+			setTurnProgress((current) =>
+				reduceTurnProgress(current, {
+					instanceId: payload.instanceId,
+					type: eventType,
+					assistantMessageEvent,
+					toolName: event.toolName,
+					error: event.error,
+				}),
+			);
 			if (eventType === "extension_ui_request") {
 				if (payload.event.method === "auth" && typeof payload.event.provider === "string") {
 					setAuthDialog({
@@ -533,6 +527,12 @@ export function App() {
 			}
 			if (eventType === "stream_closed" || eventType === "stream_error") {
 				setStreamConnectedInstanceId((current) => (current === payload.instanceId ? undefined : current));
+				clearRunningTools(payload.instanceId);
+				setStreamingInstances((prev) => {
+					const next = new Set(prev);
+					next.delete(payload.instanceId);
+					return next;
+				});
 				setPendingConversationUiRequests((current) =>
 					current.filter((pending) => pending.instanceId !== payload.instanceId),
 				);
@@ -542,7 +542,7 @@ export function App() {
 				return;
 			}
 			if (eventType === "agent_start") {
-				setRunningTools([]);
+				clearRunningTools();
 				setStreamingInstances((prev) => new Set(prev).add(payload.instanceId));
 				setConversation((current) =>
 					current?.instance.id === payload.instanceId
@@ -552,7 +552,7 @@ export function App() {
 				return;
 			}
 			if (eventType === "agent_settled") {
-				setRunningTools([]);
+				clearRunningTools(payload.instanceId);
 				setStreamingInstances((prev) => {
 					const next = new Set(prev);
 					next.delete(payload.instanceId);
@@ -579,12 +579,19 @@ export function App() {
 			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
 				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
 				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
-				if (!toolCallId || !toolName) return;
+				if (!toolCallId || !toolName || selectedInstanceIdRef.current !== payload.instanceId) return;
+				runningToolsInstanceIdRef.current = payload.instanceId;
+				const now = Date.now();
 				setRunningTools((current) => {
-					const next = {
+					const existingTool = current.find((tool) => tool.toolCallId === toolCallId);
+					const next: RunningTool = {
 						toolCallId,
 						toolName,
+						status: eventType === "tool_execution_update" ? "updating" : "running",
 						args: (payload.event as { args?: unknown }).args,
+						partialResult: (payload.event as { partialResult?: unknown }).partialResult,
+						startedAt: existingTool?.startedAt ?? now,
+						updatedAt: now,
 					};
 					const existing = current.findIndex((tool) => tool.toolCallId === toolCallId);
 					if (existing === -1) return [...current, next];
@@ -644,11 +651,15 @@ export function App() {
 		if (!desktopApi.isNative || !selectedInstanceId) return;
 		let disposed = false;
 		void desktopApi.watchConversation(selectedInstanceId).catch((caught: unknown) => {
-			if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
+			if (!disposed) {
+				clearRunningTools(selectedInstanceId);
+				setError(caught instanceof Error ? caught.message : String(caught));
+			}
 		});
 		return () => {
 			disposed = true;
 			setStreamConnectedInstanceId((current) => (current === selectedInstanceId ? undefined : current));
+			clearRunningTools(selectedInstanceId);
 			void desktopApi.stopWatchingConversation(selectedInstanceId);
 		};
 	}, [selectedInstanceId]);
@@ -681,25 +692,8 @@ export function App() {
 				const streamConnected = streamConnectedInstanceId === instanceId;
 				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 4_000;
 				if (!disposed) {
-					setConversation((current) => {
-						if (
-							streamConnected &&
-							current?.instance.id === instanceId &&
-							current.state.isStreaming &&
-							current.messages.length >= next.messages.length
-						) {
-							return {
-								...next,
-								state: {
-									...next.state,
-									isStreaming: true,
-									messageCount: current.messages.length,
-								},
-								messages: current.messages,
-							};
-						}
-						return next;
-					});
+					setConversation(next);
+					if (!next.state.isStreaming) clearRunningTools(instanceId);
 					if (messageAccepted) {
 						setOptimisticMessage((current) => (current === pending ? undefined : current));
 					}
@@ -736,8 +730,8 @@ export function App() {
 	}, [selectedInstanceId, optimisticMessage, streamConnectedInstanceId]);
 
 	useEffect(() => {
-		setRunningTools([]);
-	}, [selectedInstanceId]);
+		clearRunningTools();
+	}, [clearRunningTools, selectedInstanceId]);
 
 	const loadConversationModels = useCallback(async (instanceId: string): Promise<void> => {
 		setLoadingConversationModels(true);
@@ -781,6 +775,10 @@ export function App() {
 		void desktopApi
 			.getVisionFallback()
 			.then(setVisionFallback)
+			.catch(() => undefined);
+		void desktopApi
+			.getAutoStartMilvus()
+			.then(setAutoStartMilvus)
 			.catch(() => undefined);
 	}, []);
 
@@ -877,7 +875,7 @@ export function App() {
 	const selectedWorkspace =
 		activeConversation?.instance.cwd ??
 		snapshot.instances.find((instance) => instance.id === selectedInstanceId)?.cwd;
-	const operationView = view === "memory" || view === "security" || view === "intelligence" || view === "daemon";
+	const operationView = view === "memory" || view === "intelligence" || view === "daemon";
 
 	useEffect(() => {
 		if (!selectedWorkspace) {
@@ -924,7 +922,6 @@ export function App() {
 	useEffect(() => {
 		if (!selectedWorkspace) {
 			if (view === "memory" || view === "chat") setWorkspaceMemory([]);
-			if (view === "security") setSecurityAudit([]);
 			if (view === "intelligence") {
 				setWorkspaceIntelligenceRuns([]);
 				setSelectedIntelligenceRunId(undefined);
@@ -956,7 +953,6 @@ export function App() {
 					}
 					return;
 				}
-				if (view === "security") return;
 				if (view !== "intelligence") return;
 				const runs = await desktopApi.listIntelligenceRuns(selectedWorkspace);
 				if (disposed) return;
@@ -980,26 +976,6 @@ export function App() {
 			if (timer !== undefined) window.clearTimeout(timer);
 		};
 	}, [view, selectedWorkspace, memoryScope]);
-
-	useEffect(() => {
-		if (view !== "security") return;
-		let disposed = false;
-		void Promise.all([
-			desktopApi.getSecurityMode(),
-			selectedWorkspace ? desktopApi.listSecurityAudit(selectedWorkspace) : Promise.resolve([]),
-		])
-			.then(([mode, audit]) => {
-				if (disposed) return;
-				setSecurityMode(mode);
-				setSecurityAudit(audit);
-			})
-			.catch((caught: unknown) => {
-				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
-			});
-		return () => {
-			disposed = true;
-		};
-	}, [view, selectedWorkspace]);
 
 	async function perform(key: string, action: () => Promise<unknown>): Promise<boolean> {
 		setBusy(key);
@@ -1082,8 +1058,9 @@ export function App() {
 			},
 		};
 		setOptimisticMessage(pending);
+		setTurnProgress(submittedTurnProgress(selectedInstanceId ?? "pending"));
+		let instanceId = selectedInstanceId;
 		try {
-			let instanceId = selectedInstanceId;
 			if (!instanceId) {
 				const newMode = appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work";
 				let workspace =
@@ -1117,6 +1094,9 @@ export function App() {
 					],
 				}));
 				setSelectedInstanceId(instance.id);
+				setTurnProgress((current) =>
+					current?.instanceId === "pending" ? { ...current, instanceId: instance.id } : current,
+				);
 				setConversation(undefined);
 				setOptimisticMessage((current) =>
 					current === pending ? { ...current, instanceId: instance.id } : current,
@@ -1124,18 +1104,20 @@ export function App() {
 				setView("chat");
 				setSidebarOpen(false);
 			}
+			if (!instanceId) throw new Error("未选择对话。");
+			const activeInstanceId = instanceId;
 			const sessionName =
 				pending.baselineMessageCount === 0
 					? (message.replace(/\s+/g, " ").trim() || documents[0]?.name || "Image conversation").slice(0, 48)
 					: undefined;
 			if (sessionName) {
-				setConversationTitles((current) => ({ ...current, [instanceId]: sessionName }));
+				setConversationTitles((current) => ({ ...current, [activeInstanceId]: sessionName }));
 			}
-			if (desktopApi.isNative && streamConnectedInstanceId !== instanceId) {
-				await desktopApi.watchConversation(instanceId);
-			}
-			await desktopApi.sendMessage(instanceId, prompt, images, sessionName);
+			if (desktopApi.isNative) await desktopApi.watchConversation(activeInstanceId);
+			await desktopApi.sendMessage(activeInstanceId, prompt, images, sessionName);
 		} catch (caught) {
+			clearRunningTools(instanceId);
+			setTurnProgress(undefined);
 			setOptimisticMessage((current) =>
 				current === pending || current?.message === pending.message ? undefined : current,
 			);
@@ -1151,7 +1133,9 @@ export function App() {
 	function selectConversation(instanceId: string): void {
 		const cached = conversationCacheRef.current[instanceId];
 		setOptimisticMessage(undefined);
+		setTurnProgress(undefined);
 		setTurnMeta(undefined);
+		clearRunningTools();
 		selectedInstanceIdRef.current = instanceId;
 		setConversation(cached);
 		setSelectedInstanceId(instanceId);
@@ -1161,6 +1145,8 @@ export function App() {
 		const instanceId = selectedInstanceIdRef.current;
 		if (!instanceId) return;
 		setOptimisticMessage(undefined);
+		setTurnProgress(undefined);
+		clearRunningTools(instanceId);
 		setBusy((current) => (current === "send-message" ? undefined : current));
 		setConversation((current) => {
 			if (!current || current.instance.id !== instanceId) return current;
@@ -1169,6 +1155,7 @@ export function App() {
 			return next;
 		});
 		void desktopApi.abortConversation(instanceId).catch((caught: unknown) => {
+			clearRunningTools(instanceId);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		});
 	}
@@ -1451,35 +1438,6 @@ export function App() {
 		}
 	}
 
-	async function updateSecurityMode(mode: string): Promise<void> {
-		const previousMode = securityMode;
-		setSecurityMode(mode);
-		if (
-			!(await perform("security-mode", async () => {
-				await desktopApi.writeSecurityMode(mode);
-			}))
-		) {
-			setSecurityMode(previousMode);
-		}
-	}
-
-	async function refreshSecurityAudit(): Promise<void> {
-		setBusy("security-refresh");
-		setError(undefined);
-		try {
-			const [mode, audit] = await Promise.all([
-				desktopApi.getSecurityMode(),
-				selectedWorkspace ? desktopApi.listSecurityAudit(selectedWorkspace) : Promise.resolve([]),
-			]);
-			setSecurityMode(mode);
-			setSecurityAudit(audit);
-		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
-		} finally {
-			setBusy(undefined);
-		}
-	}
-
 	async function refreshIntelligence(): Promise<void> {
 		if (!selectedWorkspace) {
 			setError("Select a conversation workspace first.");
@@ -1538,10 +1496,6 @@ export function App() {
 			await refreshMemory();
 			return;
 		}
-		if (view === "security") {
-			await refreshSecurityAudit();
-			return;
-		}
 		if (view === "intelligence") {
 			await refreshIntelligence();
 			return;
@@ -1581,66 +1535,6 @@ export function App() {
 		);
 	}
 
-	if (!setup.enabled) {
-		return (
-			<div className="setup-shell">
-				<div className="setup-card">
-					<h1>欢迎使用 OpenPI</h1>
-					<p>一键开启记忆、安全、工具与智能规划。日常使用不需要命令行。</p>
-					{setup.workspace && <p className="muted">工作区：{setup.workspace}</p>}
-					{setup.error && <p className="error-text">{setup.error}</p>}
-					{setup.doctor && (
-						<pre className="code-block" style={{ maxHeight: 200, overflow: "auto" }}>
-							{setup.doctor}
-						</pre>
-					)}
-					<div className="button-row">
-						<button
-							type="button"
-							disabled={setup.busy}
-							onClick={() => {
-								setSetup((current) => ({ ...current, busy: true, error: undefined }));
-								void desktopApi
-									.runSetup()
-									.then(async () => {
-										const doctor = await desktopApi.doctor();
-										setSetup({
-											checked: true,
-											enabled: true,
-											busy: false,
-											doctor: doctor.output,
-											workspace: setup.workspace,
-										});
-										void refresh(true);
-									})
-									.catch((caught: unknown) => {
-										setSetup((current) => ({
-											...current,
-											busy: false,
-											error: caught instanceof Error ? caught.message : String(caught),
-										}));
-									});
-							}}
-						>
-							{setup.busy ? "配置中…" : "启用 OpenPI"}
-						</button>
-						<button
-							type="button"
-							disabled={setup.busy}
-							onClick={() => {
-								void desktopApi.doctor().then((result) => {
-									setSetup((current) => ({ ...current, doctor: result.output }));
-								});
-							}}
-						>
-							检查环境
-						</button>
-					</div>
-				</div>
-			</div>
-		);
-	}
-
 	if (view === "chat") {
 		return (
 			<ReferenceWorkspacePreview
@@ -1651,6 +1545,7 @@ export function App() {
 				conversationTitles={conversationTitles}
 				workspaceSummary={workspaceSummary}
 				runningTools={runningTools}
+				turnProgress={turnProgress}
 				optimisticMessage={
 					optimisticMessage &&
 					(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
@@ -1751,6 +1646,7 @@ export function App() {
 				onQueryChange={setChatQuery}
 				onSelect={(instanceId) => {
 					setOptimisticMessage(undefined);
+					setTurnProgress(undefined);
 					setTurnMeta(undefined);
 					selectedInstanceIdRef.current = instanceId;
 					setSelectedInstanceId(instanceId);
@@ -1856,6 +1752,7 @@ export function App() {
 									? optimisticMessage.message
 									: undefined
 							}
+							turnProgress={turnProgress}
 							modelOptions={conversationModels}
 							loadingModels={loadingConversationModels}
 							draftRequest={composerDraftRequest}
@@ -1956,15 +1853,6 @@ export function App() {
 						onSaveEntry={(memoryType, key, value) => void saveMemoryEntry(memoryType, key, value)}
 						onDelete={(memoryType, key) => void deleteMemory(memoryType, key)}
 					/>
-				) : view === "security" ? (
-					<SecuritySurface
-						mode={securityMode}
-						audit={securityAudit}
-						busy={busy}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onModeChange={(mode) => void updateSecurityMode(mode)}
-						onRefresh={() => void refreshSecurityAudit()}
-					/>
 				) : view === "intelligence" ? (
 					<IntelligenceSurface
 						workspace={selectedWorkspace}
@@ -1981,6 +1869,11 @@ export function App() {
 					<DaemonSurface
 						snapshot={snapshot}
 						busy={busy}
+						autoStartMilvus={autoStartMilvus}
+						onAutoStartMilvusChange={(enabled) => {
+							setAutoStartMilvus(enabled);
+							void desktopApi.setAutoStartMilvus(enabled).catch(() => undefined);
+						}}
 						onOpenSidebar={() => setSidebarOpen(true)}
 						onStart={() => void perform("daemon-start", desktopApi.startDaemon)}
 						onStop={() => void perform("daemon-stop", desktopApi.stopDaemon)}

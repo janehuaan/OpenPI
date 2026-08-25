@@ -19,6 +19,7 @@ function createExtension(path: string, withStartupHook = true): Extension {
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
+		statusSegments: new Map(),
 	};
 }
 

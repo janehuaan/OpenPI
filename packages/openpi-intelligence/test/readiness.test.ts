@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { executionBlockReason, inferTaskIntent, isDirectResponsePrompt } from "../src/readiness.ts";
+import { decideStartupPlanning, executionBlockReason, inferTaskIntent } from "../src/readiness.ts";
+
+describe("startup planning decision", () => {
+	it("keeps simple conversational prompts direct", () => {
+		expect(decideStartupPlanning("Hello, how are you?").mode).toBe("direct");
+	});
+
+	it("plans work, complex, workspace, long, and high-risk prompts", () => {
+		expect(decideStartupPlanning("Implement retry backoff").mode).toBe("internal-plan");
+		expect(decideStartupPlanning("Research and compare both options").mode).toBe("internal-plan");
+		expect(decideStartupPlanning("Why does src/app.ts test fail?").mode).toBe("internal-plan");
+		expect(decideStartupPlanning("x".repeat(801)).mode).toBe("internal-plan");
+		expect(decideStartupPlanning("Delete production database tables").mode).toBe("internal-plan");
+	});
+
+	it("honors explicit planning modes", () => {
+		expect(decideStartupPlanning("Hello", "always").mode).toBe("internal-plan");
+		expect(decideStartupPlanning("Implement retry backoff", "never").mode).toBe("direct");
+	});
+});
 
 describe("inferTaskIntent", () => {
 	it("classifies read-only prompts", () => {
@@ -15,22 +34,6 @@ describe("inferTaskIntent", () => {
 	it("classifies high-risk prompts", () => {
 		const intent = inferTaskIntent("Please delete production database tables");
 		expect(intent.kind).toBe("high-risk");
-	});
-});
-
-describe("isDirectResponsePrompt", () => {
-	it("detects explicit direct response requests", () => {
-		expect(isDirectResponsePrompt("Say exactly: ok")).toBe(true);
-		expect(isDirectResponsePrompt("请直接回复：ok")).toBe(true);
-	});
-
-	it("keeps ordinary short questions on the intelligence path", () => {
-		expect(isDirectResponsePrompt("What is 2+2?")).toBe(false);
-	});
-
-	it("keeps codebase and work prompts on the intelligence path", () => {
-		expect(isDirectResponsePrompt("Fix the first token latency in packages/coding-agent")).toBe(false);
-		expect(isDirectResponsePrompt("Why does test/foo.test.ts fail?")).toBe(false);
 	});
 });
 

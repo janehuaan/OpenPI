@@ -9,9 +9,9 @@ import type {
 
 export const emptySnapshot: DesktopSnapshot = { daemonRunning: false, instances: [], tasks: [], runs: [], health: {} };
 
-export type View = "chat" | "tasks" | "capabilities" | "memory" | "security" | "intelligence" | "daemon";
+export type View = "chat" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
 export type TaskFilter = "all" | "active" | "paused";
-export type CapabilityTab = "market" | "skills" | "mcp" | "extensions" | "tools" | "packages" | "models";
+export type CapabilityTab = "market" | "skills" | "mcp" | "extensions" | "tools" | "packages" | "models" | "kernel";
 
 export interface OptimisticUserMessage {
 	instanceId?: string;

@@ -1,6 +1,6 @@
 import type { View } from "./app-types.ts";
 
-const VIEW_VALUES = new Set<string>(["chat", "tasks", "capabilities", "memory", "security", "intelligence", "daemon"]);
+const VIEW_VALUES = new Set<string>(["chat", "tasks", "capabilities", "memory", "intelligence", "daemon"]);
 
 export const VIEW_STORAGE_KEY = "openpi-active-view";
 

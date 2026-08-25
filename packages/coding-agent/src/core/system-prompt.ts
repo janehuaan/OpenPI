@@ -3,7 +3,7 @@
  */
 
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
-import { formatSkillsForPrompt, type Skill } from "./skills.ts";
+import { formatSkillsForPrompt, type Skill, type SkillsPromptMode } from "./skills.ts";
 
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
@@ -22,6 +22,8 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
+	/** How the skill catalog is injected: full (default) | compact | none. */
+	skillsPromptMode?: SkillsPromptMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +57,7 @@ function computeFingerprint(options: BuildSystemPromptOptions): string {
 	parts.push(options.cwd);
 	parts.push(JSON.stringify((options.contextFiles ?? []).map((file) => `${file.path}\u0000${fnv1a64(file.content)}`)));
 	parts.push((options.skills ?? []).map(skillFingerprint).sort().join("\u0000"));
+	parts.push(options.skillsPromptMode ?? "full");
 	// The default branch renders the Pi documentation paths too; include them so
 	// a path change (e.g. different install layout) invalidates the cache.
 	parts.push(getReadmePath(), getDocsPath(), getExamplesPath());
@@ -207,7 +210,7 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 
 	// Append skills section (only if read tool is available)
 	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
+		prompt += formatSkillsForPrompt(skills, options.skillsPromptMode ?? "full");
 	}
 
 	prompt += `\nCurrent working directory: ${promptCwd}`;

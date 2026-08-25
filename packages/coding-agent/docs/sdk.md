@@ -8,7 +8,7 @@ The SDK provides programmatic access to pi's agent capabilities. Use it to embed
 - Build a custom UI (web, desktop, mobile)
 - Integrate agent capabilities into existing applications
 - Create automated pipelines with agent reasoning
-- Build custom tools that spawn sub-agents
+- Use built-in sub-agents or build custom tools that delegate to them
 - Test agent behavior programmatically
 
 See [examples/sdk/](../examples/sdk/) for working examples from minimal to full control.

@@ -129,8 +129,12 @@ const NotifyParams = Type.Object({
 async function runNotify(title: string, body: string): Promise<string> {
 	const template = process.env.OPENPI_NOTIFY_CLI?.trim();
 	if (template) {
-		const script = template.replaceAll("{title}", title).replaceAll("{body}", body).replaceAll("{message}", body);
-		const res = await runShell(script);
+		// Reject templates that perform string substitution — they are command-injection vectors.
+		// Only allow fixed-format commands (no {title}/{body} placeholders) to prevent shell injection.
+		if (/{title}|{body}|{message}/.test(template)) {
+			return "OPENPI_NOTIFY_CLI template contains unsupported placeholders. Use a fixed command without {title}/{body} interpolation.";
+		}
+		const res = await runShell(template);
 		if (res.code !== 0) {
 			return `Notification command failed (exit ${res.code}): ${res.stderr || "unknown error"}`;
 		}
@@ -150,8 +154,15 @@ async function runNotify(title: string, body: string): Promise<string> {
 		return `Failed to send notification: ${res.stderr || "notify-send unavailable"}`;
 	}
 	if (process.platform === "win32") {
-		const script = `powershell -NoProfile -Command "[System.Windows.Forms.MessageBox]::Show(${JSON.stringify(body)}, ${JSON.stringify(title)})"`;
-		const res = await runShell(script);
+		// Use Start-Process with -ArgumentList to avoid shell injection via the message text.
+		const psArgs = [
+			"-NoProfile",
+			"-Command",
+			`Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show($args[0], $args[1])`,
+			body,
+			title,
+		];
+		const res = await runCommand("powershell", psArgs);
 		if (res.code === 0) return "Notification sent (powershell).";
 		return `Failed to send notification: ${res.stderr || "powershell unavailable"}`;
 	}

@@ -20,7 +20,8 @@
 	"files": [
 		"src",
 		"README.md",
-		"CHANGELOG.md"
+		"CHANGELOG.md",
+		"models"
 	],
 	"scripts": {
 		"test": "vitest --run",
@@ -40,5 +41,9 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"private": true
+	"private": true,
+	"dependencies": {
+		"@huggingface/transformers": "4.2.0",
+		"@zilliz/milvus2-sdk-node": "3.0.4"
+	}
 }

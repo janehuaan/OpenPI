@@ -51,7 +51,6 @@ import {
 	Send,
 	Server,
 	Share2,
-	ShieldCheck,
 	Slash,
 	Sparkles,
 	Square,
@@ -125,6 +124,7 @@ import {
 	videoDimensions,
 } from "../../lib/media";
 import { joinSpeechText } from "../../lib/speech-recognition";
+import type { TurnProgress } from "../../lib/turn-progress";
 import {
 	MARKETPLACE_PACKAGES,
 	type MarketplaceKind,
@@ -166,13 +166,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 
 // re-export helpers used by App if needed - actually surfaces are self-contained
 
-type MoreView = "tasks" | "capabilities" | "memory" | "security" | "intelligence" | "daemon";
+type MoreView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
 
 const MORE_ITEMS: Array<{ id: MoreView; label: string; hint: string; icon: typeof BookOpen }> = [
 	{ id: "memory", label: "记忆", hint: "跨对话记住的偏好", icon: BookOpen },
 	{ id: "tasks", label: "定时任务", hint: "后台自动化", icon: ListTodo },
 	{ id: "capabilities", label: "能力与扩展", hint: "技能 / MCP / 工具", icon: Blocks },
-	{ id: "security", label: "安全策略", hint: "确认 / 拦截规则", icon: ShieldCheck },
 	{ id: "intelligence", label: "智能规划", hint: "多步计划记录", icon: BrainCircuit },
 	{ id: "daemon", label: "运行时", hint: "本地服务状态", icon: Server },
 ];
@@ -186,6 +185,25 @@ function visibleMessageText(text: string): string {
 
 function hasVisionContext(content: unknown): boolean {
 	return contentText(content).includes("<openpi-vision-context");
+}
+
+function TurnProgressRow({ progress }: { progress?: TurnProgress }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!progress) return;
+		setNow(Date.now());
+		const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+		return () => window.clearInterval(timer);
+	}, [progress]);
+	if (!progress) return null;
+	const seconds = Math.max(0, Math.floor((now - progress.startedAt) / 1_000));
+	return (
+		<div className="turn-progress" role="status" aria-live="polite">
+			<span className="turn-progress-dot" aria-hidden="true" />
+			<span>{progress.label}</span>
+			{seconds > 0 && <span className="turn-progress-elapsed">{seconds} 秒</span>}
+		</div>
+	);
 }
 
 export type AppMode = "chat" | "code" | "personal";
@@ -340,6 +358,7 @@ export function ReferenceWorkspacePreview({
 	conversationTitles,
 	workspaceSummary,
 	runningTools,
+	turnProgress,
 	optimisticMessage,
 	memoryEntries,
 	memoryCount,
@@ -376,6 +395,7 @@ export function ReferenceWorkspacePreview({
 	conversationTitles: Record<string, string>;
 	workspaceSummary?: WorkspaceSummary;
 	runningTools: RunningTool[];
+	turnProgress?: TurnProgress;
 	optimisticMessage?: ConversationMessage;
 	memoryEntries: string[];
 	memoryCount: number;
@@ -426,7 +446,6 @@ export function ReferenceWorkspacePreview({
 	const projectList = useRef<HTMLDivElement>(null);
 	const chatList = useRef<HTMLDivElement>(null);
 	const autoFollow = useRef(true);
-	const submitting = useRef(false);
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 	const instances = [...projectInstances, ...chatInstances];
 	const selectedInstance = instances.find((instance) => instance.id === selectedInstanceId);
@@ -686,7 +705,6 @@ export function ReferenceWorkspacePreview({
 					memory: "memory",
 					tasks: "tasks",
 					capabilities: "capabilities",
-					security: "security",
 					intelligence: "intelligence",
 					daemon: "daemon",
 				};
@@ -723,22 +741,17 @@ export function ReferenceWorkspacePreview({
 
 	const submit = async (): Promise<void> => {
 		const message = draft.trim();
-		if ((!message && attachments.length === 0 && documents.length === 0) || isWorking || submitting.current) return;
-		submitting.current = true;
-		try {
-			if (message.startsWith("/") && attachments.length === 0 && (await handleLocalSlash(message))) {
-				setDraft("");
-				setSlashOpen(false);
-				return;
-			}
-			await onSend(message, attachments, documents);
+		if ((!message && attachments.length === 0 && documents.length === 0) || isWorking) return;
+		if (message.startsWith("/") && attachments.length === 0 && (await handleLocalSlash(message))) {
 			setDraft("");
-			setAttachments([]);
-			setDocuments([]);
-			setAttachmentNotice(undefined);
-		} finally {
-			submitting.current = false;
+			setSlashOpen(false);
+			return;
 		}
+		await onSend(message, attachments, documents);
+		setDraft("");
+		setAttachments([]);
+		setDocuments([]);
+		setAttachmentNotice(undefined);
 	};
 
 	return (
@@ -946,9 +959,8 @@ export function ReferenceWorkspacePreview({
 				<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
 					<div className="reference-chat-view">
 						{messages
-							.filter((message) => message.role === "user" || message.role === "assistant")
 							.filter((message) => {
-								if (message.role !== "assistant") return true;
+								if (message.role !== "assistant") return message.role === "user";
 								return Boolean(
 									visibleMessageText(contentText(message.content)) ||
 										contentImages(message.content).length > 0 ||
@@ -970,9 +982,7 @@ export function ReferenceWorkspacePreview({
 												<div className="reference-assistant-message">
 													<MarkdownText text={text} />
 												</div>
-											) : (
-												<p>正在生成…</p>
-											)}
+											) : null}
 											{isUser && hasVisionContext(message.content) && (
 												<span className="reference-vision-badge">
 													<ImageIcon size={12} /> GLM-4.6V 视觉解析
@@ -994,6 +1004,7 @@ export function ReferenceWorkspacePreview({
 								);
 							})}
 					</div>
+					<TurnProgressRow progress={turnProgress} />
 					{isWorking && (
 						<div className="reference-streaming-indicator" aria-label="OpenPI 正在回复">
 							<span />
@@ -1748,7 +1759,6 @@ const LOCAL_SLASH: Array<{
 		hint: "打开能力与扩展",
 		kind: "nav",
 	},
-	{ id: "security", match: /^\/(security|安全)\s*$/i, label: "/安全", hint: "打开安全策略", kind: "nav" },
 	{
 		id: "intelligence",
 		match: /^\/(intelligence|智能|intel)\s*$/i,
@@ -1759,7 +1769,7 @@ const LOCAL_SLASH: Array<{
 	{ id: "daemon", match: /^\/(daemon|runtime|运行时)\s*$/i, label: "/运行时", hint: "打开本地服务", kind: "nav" },
 ];
 
-type ChatNavView = "tasks" | "capabilities" | "memory" | "security" | "intelligence" | "daemon";
+type ChatNavView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
 
 const MEMORY_STARTERS: Array<{ type: string; key: string; value: string; label: string }> = [
 	{
@@ -1790,16 +1800,6 @@ interface ParsedMemoryEntry {
 	parsed: boolean;
 }
 
-interface ParsedSecurityAudit {
-	title: string;
-	target?: string;
-	decision?: string;
-	reason?: string;
-	timestamp?: string | number;
-	raw: string;
-	parsed: boolean;
-}
-
 export function parseMemoryEntry(raw: string): ParsedMemoryEntry {
 	const match = raw.match(/^\[(user|feedback|project|lesson)\]\s+([^:]+):\s*(.*)$/i);
 	if (!match) return { type: "unknown", key: "Unrecognized entry", value: raw, raw, parsed: false };
@@ -1810,33 +1810,6 @@ export function parseMemoryEntry(raw: string): ParsedMemoryEntry {
 		raw,
 		parsed: true,
 	};
-}
-
-export function parseSecurityAudit(raw: string): ParsedSecurityAudit {
-	try {
-		const parsed: unknown = JSON.parse(raw);
-		if (!isRecord(parsed)) throw new Error("Audit entry is not an object");
-		const title =
-			typeof parsed.tool === "string"
-				? parsed.tool
-				: typeof parsed.action === "string"
-					? parsed.action
-					: typeof parsed.event === "string"
-						? parsed.event
-						: "Security event";
-		return {
-			title,
-			target: typeof parsed.target === "string" ? parsed.target : undefined,
-			decision: typeof parsed.decision === "string" ? parsed.decision : undefined,
-			reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
-			timestamp:
-				typeof parsed.timestamp === "string" || typeof parsed.timestamp === "number" ? parsed.timestamp : undefined,
-			raw,
-			parsed: true,
-		};
-	} catch {
-		return { title: "Unparsed security event", raw, parsed: false };
-	}
 }
 
 export function formatAuditTimestamp(value?: string | number): string {
@@ -2226,149 +2199,6 @@ export function MemorySurface({
 	);
 }
 
-export function SecuritySurface({
-	mode,
-	audit,
-	busy,
-	onOpenSidebar,
-	onModeChange,
-	onRefresh,
-}: {
-	mode?: string;
-	audit: string[];
-	busy?: string;
-	onOpenSidebar(): void;
-	onModeChange(mode: string): void;
-	onRefresh(): void;
-}) {
-	const auditEntries = audit.map(parseSecurityAudit);
-	const blockedCount = auditEntries.filter((entry) => entry.decision?.toLowerCase() === "blocked").length;
-	const modeMeta: Record<string, { label: string; description: string }> = {
-		strict: { label: "严格", description: "高风险操作直接拒绝，适合无人值守" },
-		confirm: { label: "确认", description: "敏感操作先问你，日常推荐" },
-		permissive: { label: "宽松", description: "大多放行，只拦极端危险操作" },
-		bypass: { label: "放开", description: "除非破坏系统/项目，否则全部放行" },
-	};
-	const activeModeMeta = mode ? modeMeta[mode] : undefined;
-	const refreshing = busy === "security-refresh";
-	return (
-		<section className="operations-surface">
-			<header className="surface-header operation-page-header">
-				<button
-					className="icon-button quiet mobile-only"
-					title="对话列表"
-					aria-label="对话列表"
-					onClick={onOpenSidebar}
-				>
-					<Menu size={18} />
-				</button>
-				<div className="surface-heading">
-					<strong>安全</strong>
-					<span>系统级策略 · 对所有项目和新会话生效</span>
-				</div>
-				<div className="surface-actions">
-					<button
-						className="icon-button quiet"
-						title="刷新"
-						aria-label="刷新"
-						disabled={refreshing}
-						onClick={onRefresh}
-					>
-						<RefreshCw size={17} className={refreshing ? "spin" : undefined} />
-					</button>
-				</div>
-			</header>
-			<div className="operations-scroll">
-				<div className="operations-content product-page">
-					<section className="product-hero-card">
-						<span className="operation-icon security">
-							<ShieldCheck size={18} />
-						</span>
-						<div>
-							<strong>{mode ? `当前策略：${activeModeMeta?.label ?? mode}` : "正在读取系统策略…"}</strong>
-							<p>{activeModeMeta?.description ?? "从用户级配置读取安全策略"}</p>
-						</div>
-						{blockedCount > 0 && <span className="memory-count-pill">{blockedCount} 次拦截</span>}
-					</section>
-					<section className="security-policy product-section">
-						<div className="security-policy-copy">
-							<span>切换模式</span>
-							<strong>改完立即对所有工作区生效</strong>
-						</div>
-						<div className="segmented security-modes" aria-label="安全模式">
-							{(["strict", "confirm", "permissive", "bypass"] as const).map((candidate) => (
-								<button
-									type="button"
-									className={mode === candidate ? "active" : ""}
-									key={candidate}
-									disabled={!mode || busy === "security-mode"}
-									onClick={() => onModeChange(candidate)}
-								>
-									{modeMeta[candidate].label}
-								</button>
-							))}
-						</div>
-					</section>
-					<div className="operation-panel security-audit">
-						<div className="operation-panel-title">
-							<div>
-								<h2>最近决策</h2>
-								<span>助手调用敏感工具时的放行 / 拦截记录</span>
-							</div>
-							<History size={16} />
-						</div>
-						<div className="operation-list">
-							{auditEntries.length === 0 ? (
-								<div className="product-empty">
-									<ShieldCheck size={28} />
-									<strong>还没有安全事件</strong>
-									<span>当助手要执行删除、写敏感路径等操作时，记录会出现在这里。安静是好事。</span>
-								</div>
-							) : (
-								auditEntries.map((entry, index) => {
-									const decision = entry.decision?.toLowerCase();
-									const tone =
-										decision === "blocked" || decision === "denied"
-											? "blocked"
-											: decision === "allowed" || decision === "approved"
-												? "allowed"
-												: "neutral";
-									const decisionZh =
-										decision === "blocked" || decision === "denied"
-											? "已拦截"
-											: decision === "allowed" || decision === "approved"
-												? "已放行"
-												: decision === "confirmed"
-													? "已确认"
-													: entry.decision;
-									return (
-										<div className="audit-row" key={`${entry.raw}-${index}`}>
-											<span className={`audit-mark ${tone}`}>
-												<ShieldCheck size={15} />
-											</span>
-											<div className="audit-copy">
-												<div>
-													<strong>{entry.title}</strong>
-													{entry.decision && (
-														<span className={`audit-decision ${tone}`}>{decisionZh}</span>
-													)}
-												</div>
-												<span>{entry.target ?? (entry.parsed ? "无目标" : entry.raw)}</span>
-												{entry.reason && <small>{entry.reason}</small>}
-											</div>
-											<time>{formatAuditTimestamp(entry.timestamp)}</time>
-										</div>
-									);
-								})
-							)}
-						</div>
-					</div>
-				</div>
-			</div>
-		</section>
-	);
-}
-
 export function IntelligenceSurface({
 	workspace,
 	runs,
@@ -2518,6 +2348,8 @@ export function IntelligenceSurface({
 export function DaemonSurface({
 	snapshot,
 	busy,
+	autoStartMilvus,
+	onAutoStartMilvusChange,
 	onOpenSidebar,
 	onStart,
 	onStop,
@@ -2527,6 +2359,8 @@ export function DaemonSurface({
 }: {
 	snapshot: DesktopSnapshot;
 	busy?: string;
+	autoStartMilvus?: boolean;
+	onAutoStartMilvusChange(enabled: boolean): void;
 	onOpenSidebar(): void;
 	onStart(): void;
 	onStop(): void;
@@ -2605,6 +2439,24 @@ export function DaemonSurface({
 								</button>
 							)}
 						</div>
+					</div>
+					<div className="daemon-milvus-band">
+						<span className="daemon-symbol">
+							<Database size={20} />
+						</span>
+						<div>
+							<strong>自动拉起 Milvus</strong>
+							<small>对话需要语义记忆检索时，自动启动本地的 Milvus 向量库（Docker）</small>
+						</div>
+						<button
+							type="button"
+							className={`milvus-auto-toggle ${autoStartMilvus ? "active" : ""}`}
+							aria-label={autoStartMilvus ? "关闭自动拉起 Milvus" : "开启自动拉起 Milvus"}
+							title={autoStartMilvus ? "关闭自动拉起 Milvus" : "开启自动拉起 Milvus"}
+							onClick={() => onAutoStartMilvusChange(!autoStartMilvus)}
+						>
+							<i />
+						</button>
 					</div>
 					<div className="operations-metrics four">
 						<div>
@@ -2708,6 +2560,7 @@ export function ChatSurface({
 	stats,
 	providerBalance,
 	optimisticMessage,
+	turnProgress,
 	modelOptions,
 	loadingModels,
 	draftRequest,
@@ -2740,6 +2593,7 @@ export function ChatSurface({
 	stats?: ConversationStats;
 	providerBalance?: { currency: string; totalBalance: number } | null;
 	optimisticMessage?: ConversationMessage;
+	turnProgress?: TurnProgress;
 	modelOptions: ConversationModelOption[];
 	loadingModels: boolean;
 	draftRequest?: { id: string; text: string };
@@ -2804,7 +2658,6 @@ export function ChatSurface({
 	const speechRestartTimer = useRef<number | undefined>(undefined);
 	const speechErrorHandler = useRef(onError);
 	speechErrorHandler.current = onError;
-	const submitting = useRef(false);
 	const isStreaming = conversation?.state.isStreaming ?? false;
 	const isWorking = isStreaming || optimisticMessage !== undefined;
 	const storedMessages =
@@ -3263,7 +3116,6 @@ export function ChatSurface({
 					memory: "memory",
 					tasks: "tasks",
 					capabilities: "capabilities",
-					security: "security",
 					intelligence: "intelligence",
 					daemon: "daemon",
 				};
@@ -3277,27 +3129,25 @@ export function ChatSurface({
 
 	async function submit(): Promise<void> {
 		const message = draft.trim();
-		if (sending || isWorking || mediaSubmitting || preparingImages || !canSubmit || submitting.current) return;
-		submitting.current = true;
+		if (sending || isWorking || mediaSubmitting || preparingImages || !canSubmit) return;
 		if (composerMode === "video" && attachments.length > 0) {
 			onError("文生视频暂不接受本地图片，请先移除附件");
-			submitting.current = false;
 			return;
 		}
-		const pendingAttachments = attachments;
-		try {
-			abortSpeechRecognition();
-			if (composerMode === "chat" && message.startsWith("/") && attachments.length === 0) {
-				const handled = await handleLocalSlash(message);
-				if (handled) {
-					setDraft("");
-					setSlashOpen(false);
-					return;
-				}
+		abortSpeechRecognition();
+		if (composerMode === "chat" && message.startsWith("/") && attachments.length === 0) {
+			const handled = await handleLocalSlash(message);
+			if (handled) {
+				setDraft("");
+				setSlashOpen(false);
+				return;
 			}
-			setDraft("");
-			setAttachments([]);
-			setSlashOpen(false);
+		}
+		const pendingAttachments = attachments;
+		setDraft("");
+		setAttachments([]);
+		setSlashOpen(false);
+		try {
 			if (composerMode === "image") {
 				await generateImage(message, pendingAttachments);
 			} else if (composerMode === "video") {
@@ -3311,8 +3161,6 @@ export function ChatSurface({
 		} catch {
 			setDraft((current) => current || message);
 			setAttachments((current) => (current.length > 0 ? current : pendingAttachments));
-		} finally {
-			submitting.current = false;
 		}
 	}
 
@@ -3606,6 +3454,7 @@ export function ChatSurface({
 									/>
 								),
 							)}
+							<TurnProgressRow progress={turnProgress} />
 							{isWorking && (
 								<div className="agent-progress">
 									<span className="agent-avatar">

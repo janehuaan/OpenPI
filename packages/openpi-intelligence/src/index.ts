@@ -25,13 +25,13 @@ import {
 	memoryCompactionInstructions,
 	upsertMemory,
 } from "./memory-manager.ts";
-import { createIntentPlan, createModelDrivenPlan, plannerInstructions } from "./planner.ts";
+import { createIntentPlan, createModelDrivenPlan, createStartupPlan } from "./planner.ts";
 import {
 	assessReadiness,
+	decideStartupPlanning,
 	executionBlockReason,
 	INVESTIGATION_TOOL_NAMES,
 	inferTaskIntent,
-	isDirectResponsePrompt,
 	isReadOnlyBashCommand,
 } from "./readiness.ts";
 import { applyReflectionDecision, createReflectionState, decideReflection } from "./reflection.ts";
@@ -1109,8 +1109,9 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		config = loadIntelligenceConfig(ctx.cwd);
 		if (!config.enabled) return;
+		const startupDecision = decideStartupPlanning(event.prompt, config.planning);
+		if (startupDecision.mode === "direct") return;
 		state.investigationEvidence = [];
-		if (isDirectResponsePrompt(event.prompt)) return;
 		const id = runId();
 		const ledger = new EventLedger(ctx.cwd, id);
 		ledger.append({
@@ -1125,14 +1126,14 @@ export default function (pi: ExtensionAPI) {
 		const intent = inferTaskIntent(event.prompt);
 		const matched = matchCapabilities(capabilities, event.prompt, 12);
 		const contextItemIds = snapshot.selected.map((item) => item.candidate.id);
-		const useModelPlanner =
-			config.planning === "always" || (config.planning === "auto" && intent.kind !== "read-only");
-		const generated = useModelPlanner
-			? await createModelDrivenPlan(ctx, intent, matched, contextItemIds, config.contextBudget)
-			: {
-					plan: createIntentPlan(intent, matched, contextItemIds, config.contextBudget),
-					source: "fallback" as const,
-				};
+		const generated = await createStartupPlan({
+			planning: config.planning,
+			ctx,
+			intent,
+			capabilities: matched,
+			contextItemIds,
+			budget: config.contextBudget,
+		});
 		let plan = generated.plan;
 		let planSource = generated.source;
 		let planFallbackError = generated.error;
@@ -1241,7 +1242,6 @@ export default function (pi: ExtensionAPI) {
 <verification>${intent.verification.map((item) => `- ${item}`).join("\n")}</verification>
 <plan>${plan.nodes.map((node) => `${node.id}: ${node.objective} | verify=${node.verification.join("; ")}`).join("\n")}</plan>
 <instruction>${readiness.status === "ready" ? "Follow the validated plan in dependency order. Do not skip verification." : "Do not execute state-changing tools. Resolve the readiness gaps first."}</instruction>
-${plannerInstructions(matched)}
 </task_readiness>`;
 		return {
 			message: {

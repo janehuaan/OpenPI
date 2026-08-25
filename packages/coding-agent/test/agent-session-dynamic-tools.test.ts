@@ -57,7 +57,7 @@ describe("AgentSession dynamic tool registration", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
-			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			model: getModel("openai", "gpt-5.6-luna")!,
 			settingsManager,
 			sessionManager,
 			resourceLoader,
@@ -107,7 +107,7 @@ describe("AgentSession dynamic tool registration", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
-			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			model: getModel("openai", "gpt-5.6-luna")!,
 			settingsManager,
 			sessionManager,
 			resourceLoader,
@@ -167,7 +167,7 @@ describe("AgentSession dynamic tool registration", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
-			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			model: getModel("openai", "gpt-5.6-luna")!,
 			settingsManager,
 			sessionManager,
 			resourceLoader,

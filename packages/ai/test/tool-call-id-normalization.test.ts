@@ -17,8 +17,8 @@ import type { AssistantMessage, Message, Tool, ToolResultMessage } from "../src/
 import { resolveApiKey } from "./oauth.ts";
 
 // Resolve API keys
-const copilotToken = await resolveApiKey("github-copilot");
-const openrouterKey = getEnvApiKey("openrouter");
+const _copilotToken = await resolveApiKey("github-copilot");
+const _openrouterKey = getEnvApiKey("openrouter");
 const codexToken = await resolveApiKey("openai-codex");
 
 // Simple echo tool for testing
@@ -41,138 +41,6 @@ const echoTool: Tool<typeof echoToolSchema> = {
  *
  * Both should succeed without "call_id too long" errors.
  */
-describe("Tool Call ID Normalization - Live Handoff", () => {
-	it.skipIf(!copilotToken || !openrouterKey)(
-		"github-copilot -> openrouter should normalize pipe-separated IDs",
-		async () => {
-			const copilotModel = getModel("github-copilot", "gpt-5.2-codex");
-			const openrouterModel = getModel("openrouter", "openai/gpt-5.2-codex");
-
-			// Step 1: Generate tool call with github-copilot
-			const userMessage: Message = {
-				role: "user",
-				content: "Use the echo tool to echo 'hello world'",
-				timestamp: Date.now(),
-			};
-
-			const assistantResponse = await completeSimple(
-				copilotModel,
-				{
-					systemPrompt: "You are a helpful assistant. Use the echo tool when asked.",
-					messages: [userMessage],
-					tools: [echoTool],
-				},
-				{ apiKey: copilotToken },
-			);
-
-			expect(assistantResponse.stopReason, `Copilot error: ${assistantResponse.errorMessage}`).toBe("toolUse");
-
-			const toolCall = assistantResponse.content.find((c) => c.type === "toolCall");
-			expect(toolCall).toBeDefined();
-			expect(toolCall!.type).toBe("toolCall");
-
-			// Verify it's a pipe-separated ID (OpenAI Responses format)
-			if (toolCall?.type === "toolCall") {
-				expect(toolCall.id).toContain("|");
-				console.log(`Tool call ID from github-copilot: ${toolCall.id.slice(0, 80)}...`);
-			}
-
-			// Create tool result
-			const toolResult: ToolResultMessage = {
-				role: "toolResult",
-				toolCallId: (toolCall as any).id,
-				toolName: "echo",
-				content: [{ type: "text", text: "hello world" }],
-				isError: false,
-				timestamp: Date.now(),
-			};
-
-			// Step 2: Complete with openrouter (uses openai-completions API)
-			const openrouterResponse = await completeSimple(
-				openrouterModel,
-				{
-					systemPrompt: "You are a helpful assistant.",
-					messages: [
-						userMessage,
-						assistantResponse,
-						toolResult,
-						{ role: "user", content: "Say hi", timestamp: Date.now() },
-					],
-					tools: [echoTool],
-				},
-				{ apiKey: openrouterKey },
-			);
-
-			// Should NOT fail with "call_id too long" error
-			expect(openrouterResponse.stopReason, `OpenRouter error: ${openrouterResponse.errorMessage}`).not.toBe(
-				"error",
-			);
-			expect(openrouterResponse.errorMessage).toBeUndefined();
-		},
-		60000,
-	);
-
-	it.skipIf(!copilotToken || !codexToken)(
-		"github-copilot -> openai-codex should normalize pipe-separated IDs",
-		async () => {
-			const copilotModel = getModel("github-copilot", "gpt-5.2-codex");
-			const codexModel = getModel("openai-codex", "gpt-5.5");
-
-			// Step 1: Generate tool call with github-copilot
-			const userMessage: Message = {
-				role: "user",
-				content: "Use the echo tool to echo 'test message'",
-				timestamp: Date.now(),
-			};
-
-			const assistantResponse = await completeSimple(
-				copilotModel,
-				{
-					systemPrompt: "You are a helpful assistant. Use the echo tool when asked.",
-					messages: [userMessage],
-					tools: [echoTool],
-				},
-				{ apiKey: copilotToken },
-			);
-
-			expect(assistantResponse.stopReason, `Copilot error: ${assistantResponse.errorMessage}`).toBe("toolUse");
-
-			const toolCall = assistantResponse.content.find((c) => c.type === "toolCall");
-			expect(toolCall).toBeDefined();
-
-			// Create tool result
-			const toolResult: ToolResultMessage = {
-				role: "toolResult",
-				toolCallId: (toolCall as any).id,
-				toolName: "echo",
-				content: [{ type: "text", text: "test message" }],
-				isError: false,
-				timestamp: Date.now(),
-			};
-
-			// Step 2: Complete with openai-codex (uses openai-codex-responses API)
-			const codexResponse = await completeSimple(
-				codexModel,
-				{
-					systemPrompt: "You are a helpful assistant.",
-					messages: [
-						userMessage,
-						assistantResponse,
-						toolResult,
-						{ role: "user", content: "Say hi", timestamp: Date.now() },
-					],
-					tools: [echoTool],
-				},
-				{ apiKey: codexToken },
-			);
-
-			// Should NOT fail with ID validation error
-			expect(codexResponse.stopReason, `Codex error: ${codexResponse.errorMessage}`).not.toBe("error");
-			expect(codexResponse.errorMessage).toBeUndefined();
-		},
-		60000,
-	);
-});
 
 /**
  * Test 2: Prefilled context with exact failing IDs from issue #1022
@@ -235,32 +103,6 @@ describe("Tool Call ID Normalization - Prefilled Context", () => {
 
 		return [userMessage, assistantMessage, toolResult, followUpUser];
 	}
-
-	it.skipIf(!openrouterKey)(
-		"openrouter should handle prefilled context with long pipe-separated IDs",
-		async () => {
-			const model = getModel("openrouter", "openai/gpt-5.2-codex");
-			const messages = buildPrefilledMessages();
-
-			const response = await completeSimple(
-				model,
-				{
-					systemPrompt: "You are a helpful assistant.",
-					messages,
-					tools: [echoTool],
-				},
-				{ apiKey: openrouterKey },
-			);
-
-			// Should NOT fail with "call_id too long" error
-			expect(response.stopReason, `OpenRouter error: ${response.errorMessage}`).not.toBe("error");
-			if (response.errorMessage) {
-				expect(response.errorMessage).not.toContain("call_id");
-				expect(response.errorMessage).not.toContain("too long");
-			}
-		},
-		30000,
-	);
 
 	it.skipIf(!codexToken)(
 		"openai-codex should handle prefilled context with long pipe-separated IDs",

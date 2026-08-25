@@ -5,7 +5,6 @@
  * compact-safe re-injection, heuristic + LLM extract, and AutoDream maintain.
  */
 
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { globalMemoryDir, loadMemoryConfig } from "./config.ts";
@@ -30,7 +29,7 @@ import {
 	saveMeta,
 	shouldMaintain,
 } from "./maintain.ts";
-import { loadSemanticEmbedderOptions, prewarmSemanticCache, SemanticEmbedder, semanticRerank } from "./semantic.ts";
+import { MemoryRetrievalService } from "./memory-retrieval.ts";
 import { formatSelectiveSnapshot, selectSnapshotEntries } from "./snapshot.ts";
 import {
 	deleteTopic,
@@ -52,7 +51,6 @@ import {
 	upsertEntry,
 } from "./store.ts";
 import { EXCLUSION_LIST, type MemoryConfig, type MemoryIndexEntry } from "./types.ts";
-import { entriesFingerprint, hybridSearch, reindexVectors } from "./vectors.ts";
 
 const MemoryParams = Type.Object({
 	action: Type.String({
@@ -72,10 +70,19 @@ export default function (pi: ExtensionAPI) {
 	// Per-session inject-set cache: keeps the proactive memory prefix
 	// byte-stable across turns (prompt-cache friendly) while still letting
 	// the first turn pick the most relevant memories via hybrid retrieval.
-	const injectSetCache = new Map<string, { fingerprint: string; rankedRest: MemoryIndexEntry[] }>();
+	const injectSetCache = new Map<
+		string,
+		{ fingerprint: string; rankedRest: MemoryIndexEntry[]; ranking?: Promise<void> }
+	>();
 	let config = loadMemoryConfig(process.cwd());
 	let lastAgentEndExtractAt = 0;
 	let lastDigestRefreshAt = 0;
+
+	let retrievalService: MemoryRetrievalService | undefined;
+	function getRetrievalService(): MemoryRetrievalService {
+		retrievalService ??= new MemoryRetrievalService(config);
+		return retrievalService;
+	}
 
 	function refreeze(cwd: string): void {
 		config = loadMemoryConfig(cwd);
@@ -149,42 +156,11 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			}
 
 			if (action === "list" || action === "query") {
-				const hybridOpts = (dir: string) =>
-					config.vectorSearch
-						? {
-								memoryDirectory: dir,
-								hybrid: true as const,
-								alpha: config.vectorAlpha,
-								limit: 50,
-								searchArchive: config.searchArchive,
-								archiveSearchLimit: config.archiveSearchLimit,
-								archiveSearchMinScore: config.archiveSearchMinScore,
-							}
-						: {
-								searchArchive: config.searchArchive,
-								archiveSearchLimit: config.archiveSearchLimit,
-								archiveSearchMinScore: config.archiveSearchMinScore,
-								memoryDirectory: dir,
-								hybrid: false as const,
-								limit: 50,
-							};
 				const matched =
 					scope === "global"
-						? queryEntries(
-								globalEntries,
-								params.keyword,
-								type,
-								bodyResolverGlobal(globalDir),
-								hybridOpts(globalDir),
-							)
+						? queryEntries(globalEntries, params.keyword, type, bodyResolverGlobal(globalDir))
 						: params.scope
-							? queryEntries(
-									projectEntries,
-									params.keyword,
-									type,
-									bodyResolverProject(ctx.cwd),
-									hybridOpts(memoryDir(ctx.cwd)),
-								)
+							? queryEntries(projectEntries, params.keyword, type, bodyResolverProject(ctx.cwd))
 							: queryEntries(
 									mergeUnique(globalEntries, projectEntries),
 									params.keyword,
@@ -193,37 +169,15 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 										readTopic(ctx.cwd, entry.type, entry.key) ??
 										readTopicAt(globalDir, entry.type, entry.key) ??
 										"",
-									hybridOpts(memoryDir(ctx.cwd)),
 								);
-				// Optional semantic rerank: blends embedding similarity with the
-				// hybrid/BM25 ranking when an embedding API key is configured.
-				let finalMatched = matched;
-				if (config.semanticSearch && matched.length > 0 && params.keyword?.trim()) {
-					const embedderOptions = loadSemanticEmbedderOptions();
-					if (embedderOptions) {
-						const cacheDir = scope === "global" ? globalDir : memoryDir(ctx.cwd);
-						const reranked = await semanticRerank(
-							new SemanticEmbedder({
-								...embedderOptions,
-								cachePath: join(cacheDir, "semantic-cache.json"),
-							}),
-							params.keyword,
-							matched,
-							(entry) => `${entry.type} ${entry.key} ${entry.value}`,
-							(entry) => `${entry.type}:${entry.key}`,
-							{ alpha: config.vectorAlpha, maxCandidates: 50 },
-						);
-						if (reranked) finalMatched = reranked;
-					}
-				}
 
 				const text =
-					finalMatched.length === 0
+					matched.length === 0
 						? "No memories found."
-						: finalMatched.map((entry) => `[${entry.type}] ${entry.key}: ${entry.value}`).join("\n");
+						: matched.map((entry) => `[${entry.type}] ${entry.key}: ${entry.value}`).join("\n");
 				return {
 					content: [{ type: "text", text }],
-					details: { count: finalMatched.length, action, scope, hybrid: config.vectorSearch },
+					details: { count: matched.length, action, scope, hybrid: false },
 				};
 			}
 
@@ -384,9 +338,25 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			loadActiveOrRecover(dir, config.maxIndexEntries);
 			ensureDurabilityLayout(gdir);
 			loadActiveOrRecover(gdir, config.maxIndexEntries);
-			// Ensure vectors exist for fast proactive search (project + global)
-			reindexVectors(dir, loadIndex(ctx.cwd), (e) => readTopic(ctx.cwd, e.type, e.key) ?? "");
-			reindexVectors(gdir, loadIndexFile(gdir), (e) => readTopicAt(gdir, e.type, e.key) ?? "");
+			// Canonical vector sync is proactive enrichment; do not hold session readiness.
+			void new Promise<void>((resolve) => setTimeout(resolve, 0))
+				.then(async () => {
+					await Promise.all([
+						getRetrievalService().upsertEntries(loadIndex(ctx.cwd), {
+							cwd: ctx.cwd,
+							scope: "project",
+							bodyResolver: (e) => readTopic(ctx.cwd, e.type, e.key) ?? "",
+						}),
+						getRetrievalService().upsertEntries(loadIndexFile(gdir), {
+							cwd: ctx.cwd,
+							scope: "global",
+							bodyResolver: (e) => readTopicAt(gdir, e.type, e.key) ?? "",
+						}),
+					]);
+				})
+				.catch(() => {
+					// Best-effort proactive index sync.
+				});
 		} catch {
 			// ignore
 		}
@@ -490,20 +460,33 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 		const cached = injectSetCache.get(sessionId);
 		let rankedRest: MemoryIndexEntry[] | undefined;
 		if (!cached || cached.fingerprint !== fingerprint) {
-			const pinSet = new Set(config.pinTypes);
-			const others = frozen.filter(
-				(entry) => !pinSet.has(entry.type) && !(entry.type === "project" && entry.key.startsWith("session-")),
-			);
+			// Do not await proactive retrieval. First turn receives the deterministic
+			// frozen snapshot; background ranking is available on a later turn.
+			const next: { fingerprint: string; rankedRest: MemoryIndexEntry[]; ranking?: Promise<void> } = {
+				fingerprint,
+				rankedRest: [],
+			};
+			injectSetCache.set(sessionId, next);
+			rankedRest = next.rankedRest;
 			const max = Math.max(config.pinTypes.length + 2, config.maxSnapshotEntries);
-			const hits = config.vectorSearch
-				? hybridSearch(others, event.prompt ?? "", memoryDir(ctx.cwd), {
-						bodyResolver: resolveBody,
-						limit: max,
-						alpha: config.vectorAlpha,
-					})
-				: [];
-			rankedRest = hits.map((hit) => hit.entry);
-			injectSetCache.set(sessionId, { fingerprint, rankedRest });
+			next.ranking = new Promise<void>((resolve) => setTimeout(resolve, 0))
+				.then(async () => {
+					// Proactive vector retrieval is best-effort enrichment only; the
+					// deterministic frozen snapshot is used for the first turn.
+					const hits = config.vectorSearch
+						? await getRetrievalService().queryEntries(event.prompt ?? "", {
+								cwd: ctx.cwd,
+								scope: "project",
+								limit: max,
+							})
+						: [];
+					const ranked = hits.map((hit) => hit.entry);
+					const current = injectSetCache.get(sessionId);
+					if (current?.fingerprint === fingerprint) current.rankedRest = ranked;
+				})
+				.catch(() => {
+					// Proactive enrichment must never delay or fail provider startup.
+				});
 		} else {
 			rankedRest = cached.rankedRest;
 		}
@@ -560,11 +543,11 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 							saveMeta(ctx.cwd, meta);
 							refreeze(ctx.cwd);
 							try {
-								reindexVectors(
-									memoryDir(ctx.cwd),
-									loadIndex(ctx.cwd),
-									(e) => readTopic(ctx.cwd, e.type, e.key) ?? "",
-								);
+								await getRetrievalService().upsertEntries(loadIndex(ctx.cwd), {
+									cwd: ctx.cwd,
+									scope: "project",
+									bodyResolver: (e) => readTopic(ctx.cwd, e.type, e.key) ?? "",
+								});
 							} catch {
 								// ignore
 							}
@@ -648,10 +631,18 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			refreeze(ctx.cwd);
 			// Keep search indexes warm for next turn inject
 			try {
-				reindexVectors(memoryDir(ctx.cwd), loadIndex(ctx.cwd), (e) => readTopic(ctx.cwd, e.type, e.key) ?? "");
+				await getRetrievalService().upsertEntries(loadIndex(ctx.cwd), {
+					cwd: ctx.cwd,
+					scope: "project",
+					bodyResolver: (e) => readTopic(ctx.cwd, e.type, e.key) ?? "",
+				});
 				if (config.promoteUserToGlobal) {
 					const gdir = globalMemoryDir();
-					reindexVectors(gdir, loadIndexFile(gdir), (e) => readTopicAt(gdir, e.type, e.key) ?? "");
+					await getRetrievalService().upsertEntries(loadIndexFile(gdir), {
+						cwd: ctx.cwd,
+						scope: "global",
+						bodyResolver: (e) => readTopicAt(gdir, e.type, e.key) ?? "",
+					});
 				}
 			} catch {
 				// ignore
@@ -754,7 +745,11 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 
 			// Refresh vectors so next session proactive inject is warm
 			try {
-				reindexVectors(memoryDir(ctx.cwd), loadIndex(ctx.cwd), (e) => readTopic(ctx.cwd, e.type, e.key) ?? "");
+				await getRetrievalService().upsertEntries(loadIndex(ctx.cwd), {
+					cwd: ctx.cwd,
+					scope: "project",
+					bodyResolver: (e) => readTopic(ctx.cwd, e.type, e.key) ?? "",
+				});
 			} catch {
 				// ignore
 			}
@@ -803,13 +798,9 @@ function messagesToTurns(messages: unknown[]): TranscriptTurn[] {
 }
 
 /** Fire-and-forget semantic cache pre-warm after a memory save/update. */
-function prewarmOnSave(config: MemoryConfig, params: { value?: string; body?: string }, dir: string): void {
-	if (!config.semanticSearch) return;
-	const options = loadSemanticEmbedderOptions();
-	if (!options) return;
-	const text = [params.body ?? params.value ?? ""].join(" ");
-	if (!text.trim()) return;
-	void prewarmSemanticCache(options, [text], join(dir, "semantic-cache.json"));
+function prewarmOnSave(_config: MemoryConfig, _params: { value?: string; body?: string }, _dir: string): void {
+	// Vector indexing is handled by MemoryRetrievalService.upsertEntries on the
+	// next index sync; explicit cache pre-warm is no longer needed.
 }
 
 function mergeUnique(globalEntries: MemoryIndexEntry[], project: MemoryIndexEntry[]): MemoryIndexEntry[] {
@@ -817,4 +808,19 @@ function mergeUnique(globalEntries: MemoryIndexEntry[], project: MemoryIndexEntr
 	for (const entry of globalEntries) map.set(`${entry.type}:${entry.key}`, entry);
 	for (const entry of project) map.set(`${entry.type}:${entry.key}`, entry);
 	return [...map.values()];
+}
+
+function entriesFingerprint(entries: MemoryIndexEntry[]): string {
+	if (entries.length === 0) return "0";
+	let h = entries.length * 0x9e3779b1;
+	const step = Math.max(1, Math.floor(entries.length / 64));
+	for (let i = 0; i < entries.length; i += step) {
+		const e = entries[i]!;
+		h ^= e.key.length + e.value.length * 17 + e.type.charCodeAt(0);
+		h = Math.imul(h, 0x01000193);
+		if (e.key.length > 0) h ^= e.key.charCodeAt(0) << 8;
+		if (e.value.length > 0) h ^= e.value.charCodeAt(0);
+	}
+	const last = entries[entries.length - 1]!;
+	return `${entries.length}:${(h >>> 0).toString(16)}:${last.key}:${last.value.length}`;
 }

@@ -88,6 +88,12 @@ function applyConfigFields(config: MemoryConfig, record: Record<string, unknown>
 	if (typeof record.digestRefreshMinIntervalMs === "number" && record.digestRefreshMinIntervalMs > 0) {
 		config.digestRefreshMinIntervalMs = Math.floor(record.digestRefreshMinIntervalMs);
 	}
+	if (typeof record.sessionDigestRetentionDays === "number" && record.sessionDigestRetentionDays >= 0) {
+		config.sessionDigestRetentionDays = Math.floor(record.sessionDigestRetentionDays);
+	}
+	if (typeof record.wipRetentionDays === "number" && record.wipRetentionDays >= 0) {
+		config.wipRetentionDays = Math.floor(record.wipRetentionDays);
+	}
 }
 
 export function globalMemoryDir(): string {

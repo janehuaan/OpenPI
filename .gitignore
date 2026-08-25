@@ -73,3 +73,25 @@ packages/openpi-desktop/build/ggml-silero-v6.2.0.bin
 data/
 upload_*.jpg
 ~/
+
+# OpenPI build artifacts, model weights, and generated roots (not source)
+.pi/jobs/
+.pi/vector-store.json
+.pi/hf-sessions/
+packages/openpi-memory/models/
+*.gguf
+*.onnx
+*.dmg
+*.dmg.blockmap
+undefined
+index-*.js
+main.cjs
+preload.cjs
+skills-lock.json
+.pi/tasks/
+packages/openpi-desktop/build/embedding/*.gguf
+packages/openpi-desktop/build/embedding/*.dylib
+/index.html
+packages/openpi-desktop/build/ggml-*.bin
+packages/openpi-desktop/build/*.bak
+packages/openpi-desktop/build/icon.iconset/*@2x.png

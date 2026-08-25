@@ -196,7 +196,9 @@ function providerModelDiagnostics(modelRuntime: ModelRuntime): AgentSessionRunti
 		const providers = value.providers ?? {};
 		for (const [providerId, config] of Object.entries(providers)) {
 			if (typeof config !== "object" || config === null) continue;
-			const record = config as { apiKey?: unknown; baseUrl?: unknown; models?: unknown };
+			const record = config as { apiKey?: unknown; baseUrl?: unknown; models?: unknown; enabled?: unknown };
+			// Disabled providers are intentionally hidden from the runtime.
+			if (record.enabled === false) continue;
 			const hasCredentials = typeof record.apiKey === "string" || typeof record.baseUrl === "string";
 			if (!hasCredentials) continue;
 			const hasModels = Array.isArray(record.models) && record.models.length > 0;

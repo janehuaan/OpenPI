@@ -78,6 +78,8 @@ export interface AgentInstance {
 	sessionId?: string;
 	sessionFile?: string;
 	radiusPiId?: string;
+	createdAt?: string;
+	lastSeenAt?: string;
 }
 
 export interface WorkspaceSummary {
@@ -104,7 +106,14 @@ export interface DocumentTextExtractionResult {
 export interface RunningTool {
 	toolCallId: string;
 	toolName: string;
+	status: "running" | "updating" | "completed" | "failed";
 	args?: unknown;
+	partialResult?: unknown;
+	result?: unknown;
+	startedAt: number;
+	updatedAt: number;
+	completedAt?: number;
+	isError?: boolean;
 }
 
 export interface ConversationMessage {
@@ -332,6 +341,7 @@ export interface ModelDefinition {
 
 export interface ModelProviderConfig {
 	name?: string;
+	enabled?: boolean;
 	baseUrl?: string;
 	apiKey?: string;
 	api?: string;
@@ -357,6 +367,16 @@ export interface AvailableModel {
 	};
 	contextWindow?: number;
 	maxTokens?: number;
+}
+
+/** A single status-bar segment rendered by the desktop status bar / usage card. */
+export interface StatusSegment {
+	id: string;
+	label: string;
+	value: string;
+	hint?: string;
+	progress?: number;
+	tone?: "normal" | "warn" | "error";
 }
 
 /** Auth status for one provider, surfaced by get_provider_auth_status. */

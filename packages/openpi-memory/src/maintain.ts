@@ -2,10 +2,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { archiveEntry, backupMemoryDirectory } from "./durability.ts";
 import { similarText } from "./extract.ts";
-import { dedupeEntries, loadIndexFile, memoryDir, readTopicAt, saveIndexAt, topicFileName } from "./store.ts";
+import {
+	dedupeEntries,
+	isExpiredAt,
+	loadIndexFile,
+	loadMetadataAt,
+	memoryDir,
+	metadataId,
+	readTopicAt,
+	sanitizeKey,
+	saveIndexAt,
+	saveMetadataAt,
+	topicFileName,
+} from "./store.ts";
 import type { MemoryConfig, MemoryIndexEntry, MemoryType } from "./types.ts";
 import { MEMORY_TYPES } from "./types.ts";
-import { reindexVectors } from "./vectors.ts";
 
 export interface MemoryMeta {
 	lastMaintainAt?: string;
@@ -74,6 +85,7 @@ export function maintainMemoryDirectory(directory: string, config: MemoryConfig)
 	const before = beforeEntries.length;
 	let merged = 0;
 	let pruned = 0;
+	const metadata = loadMetadataAt(directory);
 
 	const byType = new Map<MemoryType, MemoryIndexEntry[]>();
 	for (const type of MEMORY_TYPES) byType.set(type, []);
@@ -86,6 +98,38 @@ export function maintainMemoryDirectory(directory: string, config: MemoryConfig)
 		const list = byType.get(type) ?? [];
 		const kept: MemoryIndexEntry[] = [];
 		for (const entry of list) {
+			if (isExpiredAt(directory, entry)) {
+				const body = readTopicAt(directory, entry.type, entry.key);
+				archiveEntry(directory, entry.type, entry.key, entry.value, body, "expired");
+				const topic = path.join(directory, topicFileName(entry.type, entry.key));
+				if (fs.existsSync(topic)) fs.unlinkSync(topic);
+				delete metadata.entries[metadataId(entry.type, entry.key)];
+				pruned += 1;
+				continue;
+			}
+			const repaired = repairKey(
+				entry.key,
+				entry.value,
+				type,
+				new Set([...beforeEntries, ...kept].map((e) => `${e.type}:${e.key}`)),
+			);
+			if (repaired !== entry.key) {
+				const oldTopic = path.join(directory, topicFileName(type, entry.key));
+				const newTopic = path.join(directory, topicFileName(type, repaired));
+				const body = readTopicAt(directory, type, entry.key);
+				archiveEntry(directory, type, entry.key, entry.value, body, "repair-key");
+				if (body && fs.existsSync(oldTopic) && !fs.existsSync(newTopic)) fs.renameSync(oldTopic, newTopic);
+				const oldMeta = metadata.entries[metadataId(type, entry.key)];
+				if (oldMeta) {
+					delete metadata.entries[metadataId(type, entry.key)];
+					metadata.entries[metadataId(type, repaired)] = {
+						...oldMeta,
+						key: repaired,
+						updatedAt: new Date().toISOString(),
+					};
+				}
+				entry.key = repaired;
+			}
 			if (entry.value.trim().length < 6 || /^(ok|yes|no|test|asdf|xxx)$/i.test(entry.value.trim())) {
 				const body = readTopicAt(directory, entry.type, entry.key);
 				archiveEntry(directory, entry.type, entry.key, entry.value, body, "prune-noise");
@@ -126,9 +170,20 @@ export function maintainMemoryDirectory(directory: string, config: MemoryConfig)
 
 	const deduped = dedupeEntries(next);
 	const saved = saveIndexAt(directory, deduped, config.maxIndexEntries);
-	// Rebuild vector index so retrieval stays sharp after merges
-	reindexVectors(directory, saved, (entry) => readTopicAt(directory, entry.type, entry.key) ?? "");
+	saveMetadataAt(directory, metadata);
 	return { before, after: saved.length, merged, pruned };
+}
+
+function repairKey(key: string, value: string, type: MemoryType, occupied: Set<string>): string {
+	const canonical = sanitizeKey(key);
+	const separatorCount = (key.match(/[-_]/g) ?? []).length;
+	const lowInformation = canonical.length < 3 || /^[-_]+$/.test(key) || separatorCount / Math.max(1, key.length) > 0.4;
+	if (!lowInformation) return key;
+	const base = sanitizeKey(value).slice(0, 48) || `${type}-memory`;
+	let candidate = base;
+	let n = 2;
+	while (occupied.has(`${type}:${candidate}`) && candidate !== key) candidate = `${base.slice(0, 56)}-${n++}`;
+	return candidate;
 }
 
 /** Idle-time organize: backup + maintain + reindex when due. */

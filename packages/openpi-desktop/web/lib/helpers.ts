@@ -105,6 +105,18 @@ export function formatTime(value?: number): string {
 	return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
+/** Compact conversation timestamp: today → "HH:mm", else → "M/D". */
+export function formatConversationTime(value?: string): string {
+	if (!value) return "";
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	const now = new Date();
+	if (date.toDateString() === now.toDateString()) {
+		return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(date);
+	}
+	return new Intl.DateTimeFormat(undefined, { month: "numeric", day: "numeric" }).format(date);
+}
+
 export function scheduleLabel(task: TaskDefinition): string {
 	return task.schedule.kind === "once"
 		? `单次 · ${formatDate(task.schedule.runAt)}`

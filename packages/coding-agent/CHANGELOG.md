@@ -4,6 +4,7 @@
 
 ### Added
 
+- Dynamic context: `settings.json` `skillsPromptMode` (`full` default | `compact` | `none`) controls how the skill catalog is injected into the system prompt. `compact` renders a short index without locations; `none` replaces the catalog with a one-line pointer and injects only the skills relevant to the current conversation per turn (keyword-scored against the recent messages). New `skill_search` tool lets the agent find and load skills on demand (name/description/path matches). Cuts startup system-prompt size by up to ~75% (e.g. 87KB → 21KB with 146 installed skills).
 - Memoized system prompt assembly (`buildSystemPrompt`): deterministic fingerprint (tools, guidelines, skills, context files, cwd) caches the assembled prompt, skipping string rebuilding on unchanged turns.
 - Provider error policy helpers in `provider-composer`: `classifyProviderError` (rate-limit / server / timeout / network / auth / unknown), `shouldRetryProviderError`, and `computeProviderRetryDelayMs` (exponential backoff with rate-limit jitter).
 - `read` tool binary detection: files with NUL bytes or a high ratio of control bytes are reported as binary with `file`/`strings` suggestions instead of emitting garbage text.

@@ -25,7 +25,7 @@ function buildEmptyToolResult(toolCallId: string, timestamp: number): ToolResult
 
 describe("OpenAI Responses convertResponsesMessages empty tool result", () => {
 	it("uses '(no tool output)' placeholder for empty tool results without images", () => {
-		const model = getModel("openai", "gpt-4o-mini");
+		const model = getModel("openai", "gpt-5.6-luna");
 		const now = Date.now();
 		const assistant: AssistantMessage = {
 			role: "assistant",

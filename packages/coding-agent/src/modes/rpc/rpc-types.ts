@@ -12,6 +12,7 @@ import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
+import type { StatusSegment } from "../../core/status-segments.ts";
 import type { TodoState } from "../../core/tools/todo.ts";
 
 // ============================================================================
@@ -32,6 +33,7 @@ export type RpcCommand =
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
 	| { id?: string; type: "cycle_model" }
+	| { id?: string; type: "get_model_catalog" }
 	| { id?: string; type: "get_available_models" }
 
 	// Provider auth (desktop login panel)
@@ -61,6 +63,7 @@ export type RpcCommand =
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
+	| { id?: string; type: "get_status_segments" }
 	| { id?: string; type: "get_session_todo" }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string }
@@ -206,6 +209,13 @@ export type RpcResponse =
 	| {
 			id?: string;
 			type: "response";
+			command: "get_model_catalog";
+			success: true;
+			data: { models: Model<any>[] };
+	  }
+	| {
+			id?: string;
+			type: "response";
 			command: "get_available_models";
 			success: true;
 			data: { models: Model<any>[] };
@@ -254,6 +264,13 @@ export type RpcResponse =
 
 	// Session
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_status_segments";
+			success: true;
+			data: { segments: StatusSegment[] };
+	  }
 	| { id?: string; type: "response"; command: "get_session_todo"; success: true; data: TodoState | null }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }

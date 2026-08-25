@@ -68,7 +68,7 @@ function buildEmptyToolResult(toolCallId: string, timestamp: number): ToolResult
 
 describe("openai-completions convertMessages", () => {
 	it("batches tool-result images after consecutive tool results", () => {
-		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini");
+		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-5.6-luna");
 		const model: Model<"openai-completions"> = {
 			...baseModel,
 			api: "openai-completions",
@@ -114,7 +114,7 @@ describe("openai-completions convertMessages", () => {
 	});
 
 	it("uses '(no tool output)' placeholder for empty tool results without images", () => {
-		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini");
+		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-5.6-luna");
 		const model: Model<"openai-completions"> = {
 			...baseModel,
 			api: "openai-completions",

@@ -160,9 +160,9 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("Preparing summary...", "info");
 			}
 
-			const model = getModel("openai", "gpt-5.2");
+			const model = getModel("openai", "gpt-5-chat-latest");
 			if (!model && ctx.hasUI) {
-				ctx.ui.notify("Model openai/gpt-5.2 not found", "warning");
+				ctx.ui.notify("Model openai/gpt-5-chat-latest not found", "warning");
 			}
 
 			const auth = model ? await ctx.modelRegistry.getApiKeyAndHeaders(model) : undefined;
@@ -170,7 +170,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(auth.error, "warning");
 			}
 			if (auth?.ok && !auth.apiKey && ctx.hasUI) {
-				ctx.ui.notify("No API key for openai/gpt-5.2", "warning");
+				ctx.ui.notify("No API key for openai/gpt-5-chat-latest", "warning");
 			}
 
 			if (!model || !auth?.ok || !auth.apiKey) {

@@ -18,7 +18,7 @@ describe.skipIf(!process.env.OPENAI_API_KEY)("xhigh reasoning", () => {
 	describe("codex-max (supports xhigh)", () => {
 		// Note: codex models only support the responses API, not chat completions
 		it("should work with openai-responses", async () => {
-			const model = getModel("openai", "gpt-5.3-codex");
+			const model = getModel("openai", "gpt-5.6-luna");
 			const s = stream(model, makeContext(), { reasoningEffort: "xhigh" });
 			let hasThinking = false;
 
@@ -37,7 +37,7 @@ describe.skipIf(!process.env.OPENAI_API_KEY)("xhigh reasoning", () => {
 
 	describe("gpt-5-mini (does not support xhigh)", () => {
 		it("should error with openai-responses when using xhigh", async () => {
-			const model = getModel("openai", "gpt-5-mini");
+			const model = getModel("openai", "gpt-5.6-luna");
 			const s = stream(model, makeContext(), { reasoningEffort: "xhigh" });
 
 			for await (const _ of s) {
@@ -50,7 +50,7 @@ describe.skipIf(!process.env.OPENAI_API_KEY)("xhigh reasoning", () => {
 		});
 
 		it("should error with openai-completions when using xhigh", async () => {
-			const { compat: _compat, ...baseModel } = getModel("openai", "gpt-5-mini");
+			const { compat: _compat, ...baseModel } = getModel("openai", "gpt-5.6-luna");
 			void _compat;
 			const model: Model<"openai-completions"> = {
 				...baseModel,

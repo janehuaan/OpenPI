@@ -64,7 +64,7 @@ describe("AgentHarness", () => {
 	it("constructs directly and exposes queue modes", () => {
 		const session = new Session(new InMemorySessionStorage());
 		const env = new NodeExecutionEnv({ cwd: process.cwd() });
-		const initialModel = getModel("anthropic", "claude-sonnet-4-5");
+		const initialModel = getModel("openai", "gpt-5.6-luna");
 		const harness = new AgentHarness({
 			models,
 			env,
@@ -468,7 +468,7 @@ describe("AgentHarness", () => {
 	it("preserves app tool types for getters and update events", async () => {
 		const session = new Session(new InMemorySessionStorage());
 		const env = new NodeExecutionEnv({ cwd: process.cwd() });
-		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const model = getModel("openai", "gpt-5.6-luna");
 		type AppTool = AgentTool<typeof calculateTool.parameters, undefined> & { source: "builtin" | "extension" };
 		const inspectTool: AppTool = { ...calculateTool, name: "inspect", source: "builtin" };
 		const searchTool: AppTool = { ...calculateTool, name: "search", source: "extension" };
@@ -540,7 +540,7 @@ describe("AgentHarness", () => {
 	it("validates constructor tool names", () => {
 		const session = new Session(new InMemorySessionStorage());
 		const env = new NodeExecutionEnv({ cwd: process.cwd() });
-		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const model = getModel("openai", "gpt-5.6-luna");
 		expect(
 			() => new AgentHarness({ env, session, models, model, tools: [calculateTool], activeToolNames: ["missing"] }),
 		).toThrow(/Unknown tool/);
@@ -571,7 +571,7 @@ describe("AgentHarness", () => {
 	it("preserves app resource types for getters and update events", async () => {
 		const session = new Session(new InMemorySessionStorage());
 		const env = new NodeExecutionEnv({ cwd: process.cwd() });
-		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const model = getModel("openai", "gpt-5.6-luna");
 		const harness = new AgentHarness<AppSkill, AppPromptTemplate, AgentTool>({ env, session, models, model });
 		const skill: AppSkill = {
 			name: "inspect",

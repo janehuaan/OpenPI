@@ -174,6 +174,28 @@ describe("test harness", () => {
 		expect(reconstructed).toBe("hello world");
 	});
 
+	it("emits first-token latency diagnostics without message content", async () => {
+		harness = await createHarness({ responses: ["hello"] });
+
+		await harness.session.prompt("hi");
+
+		const diagnostics = harness.eventsOfType("latency_diagnostic");
+		const hook = diagnostics.find((event) => event.phase === "before_agent_start");
+		const providerStart = diagnostics.find((event) => event.phase === "provider_start");
+		const firstUpdate = diagnostics.find((event) => event.phase === "first_message_update");
+
+		expect(hook?.durationMs).toBeGreaterThanOrEqual(0);
+		expect(providerStart).toBeDefined();
+		expect(firstUpdate).toMatchObject({
+			phase: "first_message_update",
+			requestId: providerStart?.requestId,
+		});
+		if (firstUpdate?.phase === "first_message_update") {
+			expect(firstUpdate.elapsedMs).toBeGreaterThanOrEqual(0);
+			expect("message" in firstUpdate).toBe(false);
+		}
+	});
+
 	it("streams thinking deltas", async () => {
 		harness = await createHarness({
 			responses: [{ thinking: "let me think about this", text: "answer" }],

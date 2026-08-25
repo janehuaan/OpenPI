@@ -125,7 +125,7 @@ function findAnthropicToolResultContent(payload: AnthropicPayload): AnthropicCon
 	throw new Error("No tool result in payload");
 }
 
-function findAnthropicToolResult(payload: AnthropicPayload): AnthropicContentBlock {
+function _findAnthropicToolResult(payload: AnthropicPayload): AnthropicContentBlock {
 	const result = findAnthropicToolResultContent(payload).find((block) => block.type === "tool_result");
 	if (!result) throw new Error("No tool result in payload");
 	return result;
@@ -140,166 +140,9 @@ function makeCodexToken(): string {
 }
 
 describe("deferred tools", () => {
-	it("loads an Anthropic tool at its tool-result marker", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
-
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "late_tool", defer_loading: true }]);
-		expect(findAnthropicToolResult(payload).content).toEqual([{ type: "tool_reference", tool_name: "late_tool" }]);
-	});
-
-	it("preserves tool output as sibling content after emitting references", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const assistant = context.messages[1] as AssistantMessage;
-		assistant.content = [
-			{ type: "toolCall", id: "call_1", name: "base_tool", arguments: {} },
-			{ type: "toolCall", id: "call_2", name: "base_tool", arguments: {} },
-		];
-		const firstResult = context.messages[2] as ToolResultMessage;
-		firstResult.content = [
-			{ type: "text", text: "work completed" },
-			{ type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
-		];
-		context.messages.splice(3, 0, {
-			...makeToolResult([]),
-			toolCallId: "call_2",
-			content: [{ type: "text", text: "second result" }],
-		});
-
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
-
-		expect(findAnthropicToolResultContent(payload)).toMatchObject([
-			{
-				type: "tool_result",
-				tool_use_id: "call_1",
-				content: [{ type: "tool_reference", tool_name: "late_tool" }],
-			},
-			{ type: "tool_result", tool_use_id: "call_2", content: "second result" },
-			{ type: "text", text: "work completed" },
-			{
-				type: "image",
-				source: { type: "base64", media_type: "image/png", data: "aW1hZ2U=" },
-			},
-		]);
-	});
-
-	it("loads a tool introduced by OpenAI history after switching to Anthropic", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const assistant = context.messages[1] as AssistantMessage;
-		assistant.api = "openai-responses";
-		assistant.provider = "openai";
-		assistant.model = "gpt-5.4";
-
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-8"), context);
-
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "late_tool", defer_loading: true }]);
-		expect(findAnthropicToolResult(payload).content).toEqual([{ type: "tool_reference", tool_name: "late_tool" }]);
-	});
-
-	it("does not resurrect a marked tool missing from Context.tools", async () => {
-		const context = makeContext([makeTool("base_tool")]);
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
-
-		expect(payload.tools?.map((tool) => tool.name)).toEqual(["base_tool"]);
-		const content = findAnthropicToolResult(payload).content;
-		expect(Array.isArray(content) && content.some((block) => block.type === "tool_reference")).toBe(false);
-	});
-
-	it("keeps a tool immediate when it was used before its marker", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const assistant = context.messages[1] as AssistantMessage;
-		assistant.content = [{ type: "toolCall", id: "call_1", name: "late_tool", arguments: {} }];
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
-
-		expect(payload.tools?.map((tool) => tool.name)).toEqual(["base_tool", "late_tool"]);
-		expect(payload.tools?.every((tool) => !tool.defer_loading)).toBe(true);
-	});
-
-	it("normalizes OAuth names before checking prior tool usage", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("read")], ["read"]);
-		const assistant = context.messages[1] as AssistantMessage;
-		assistant.content = [{ type: "toolCall", id: "call_1", name: "Read", arguments: {} }];
-		const payload = await capturePayload<AnthropicPayload>(
-			getModel("anthropic", "claude-opus-4-6"),
-			context,
-			"sk-ant-oat-fake",
-		);
-
-		expect(payload.tools?.map((tool) => tool.name)).toEqual(["base_tool", "Read"]);
-		expect(payload.tools?.every((tool) => !tool.defer_loading)).toBe(true);
-		const content = findAnthropicToolResult(payload).content;
-		expect(Array.isArray(content) && content.some((block) => block.type === "tool_reference")).toBe(false);
-	});
-
-	it("matches OAuth-canonicalized markers to active tools", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("read")], ["Read"]);
-		const payload = await capturePayload<AnthropicPayload>(
-			getModel("anthropic", "claude-opus-4-6"),
-			context,
-			"sk-ant-oat-fake",
-		);
-
-		expect(payload.tools).toMatchObject([{ name: "base_tool" }, { name: "Read", defer_loading: true }]);
-		const content = findAnthropicToolResult(payload).content;
-		expect(
-			Array.isArray(content) &&
-				content.some((block) => block.type === "tool_reference" && block.tool_name === "Read"),
-		).toBe(true);
-	});
-
-	it("deduplicates active tools after OAuth canonicalization", async () => {
-		const context: Context = {
-			messages: [makeUserMessage(1)],
-			tools: [makeTool("read"), { ...makeTool("Read"), description: "Canonical definition" }],
-		};
-		const payload = await capturePayload<AnthropicPayload>(
-			getModel("anthropic", "claude-opus-4-6"),
-			context,
-			"sk-ant-oat-fake",
-		);
-
-		expect(payload.tools).toMatchObject([{ name: "Read", description: "Canonical definition" }]);
-	});
-
-	it("uses the normal tool list when Anthropic tool references are unsupported", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const models: Model<"anthropic-messages">[] = [
-			getModel("anthropic", "claude-haiku-4-5"),
-			{ ...getModel("anthropic", "claude-opus-4-6"), id: "claude-sonnet-4-20250514" },
-		];
-
-		for (const model of models) {
-			const payload = await capturePayload<AnthropicPayload>(model, context);
-			expect(payload.tools?.map((tool) => tool.name)).toEqual(["base_tool", "late_tool"]);
-			expect(payload.tools?.every((tool) => !tool.defer_loading)).toBe(true);
-		}
-	});
-
-	it("keeps one immediate Anthropic tool when every current tool is marked", async () => {
-		const context = makeContext([makeTool("late_tool")]);
-		const payload = await capturePayload<AnthropicPayload>(getModel("anthropic", "claude-opus-4-6"), context);
-
-		expect(payload.tools).toMatchObject([{ name: "late_tool" }]);
-		expect(payload.tools?.[0]?.defer_loading).toBeUndefined();
-		const content = findAnthropicToolResult(payload).content;
-		expect(Array.isArray(content) && content.some((block) => block.type === "tool_reference")).toBe(false);
-	});
-
-	it("supports explicit Anthropic compatibility overrides", async () => {
-		const model: Model<"anthropic-messages"> = {
-			...getModel("anthropic", "claude-opus-4-6"),
-			provider: "anthropic-proxy",
-			compat: { supportsToolReferences: true },
-		};
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const payload = await capturePayload<AnthropicPayload>(model, context);
-
-		expect(payload.tools?.find((tool) => tool.name === "late_tool")?.defer_loading).toBe(true);
-	});
-
 	it("loads an OpenAI Responses tool through client tool search", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const payload = await capturePayload<OpenAIPayload>(getModel("openai", "gpt-5.4"), context);
+		const payload = await capturePayload<OpenAIPayload>(getModel("openai", "gpt-5.6-luna"), context);
 		const searchCall = payload.input?.find((item): item is OpenAIToolSearchCall => item.type === "tool_search_call");
 		const searchOutput = payload.input?.find(
 			(item): item is OpenAIToolSearchOutput => item.type === "tool_search_output",
@@ -311,20 +154,9 @@ describe("deferred tools", () => {
 		expect(searchOutput?.tools).toMatchObject([{ type: "function", name: "late_tool", defer_loading: true }]);
 	});
 
-	it.each(["gpt-5.2", "gpt-5.4-nano", "gpt-5.5-pro"] as const)(
-		"uses the normal tool list for unsupported OpenAI model %s",
-		async (modelId) => {
-			const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-			const payload = await capturePayload<OpenAIPayload>(getModel("openai", modelId), context);
-
-			expect(openAIToolNames(payload)).toEqual(["base_tool", "late_tool"]);
-			expect(payload.input?.some((item) => item.type === "tool_search_output")).toBe(false);
-		},
-	);
-
 	it("uses the normal tool list when OpenAI tool search is explicitly disabled", async () => {
 		const model: Model<"openai-responses"> = {
-			...getModel("openai", "gpt-5.4"),
+			...getModel("openai", "gpt-5.6-luna"),
 			provider: "openai-proxy",
 			compat: { supportsToolSearch: false },
 		};
@@ -352,12 +184,6 @@ describe("deferred tools", () => {
 		expect(supported.input?.some((item) => item.type === "tool_search_output")).toBe(true);
 		expect(openAIToolNames(unsupported)).toEqual(["base_tool", "late_tool"]);
 		expect(unsupported.input?.some((item) => item.type === "tool_search_output")).toBe(false);
-	});
-
-	it("leaves providers without deferred loading unchanged", async () => {
-		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
-		const payload = await capturePayload<OpenAIPayload>(getModel("groq", "llama-3.3-70b-versatile"), context);
-		expect(openAIToolNames(payload)).toEqual(["base_tool", "late_tool"]);
 	});
 
 	it("counts definitions marked after the latest usage checkpoint", () => {

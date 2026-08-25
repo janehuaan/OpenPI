@@ -10,9 +10,9 @@ import { createAgentSession, ModelRuntime } from "@earendil-works/pi-coding-agen
 const modelRuntime = await ModelRuntime.create();
 
 // Option 1: Find a specific built-in model by provider/id
-const opus = getModel("anthropic", "claude-opus-4-5");
-if (opus) {
-	console.log(`Found model: ${opus.provider}/${opus.id}`);
+const codex = getModel("openai-codex", "gpt-5.4");
+if (codex) {
+	console.log(`Found model: ${codex.provider}/${codex.id}`);
 }
 
 // Option 2: Find model via registry (includes custom models from models.json)

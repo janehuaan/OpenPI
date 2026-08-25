@@ -54,18 +54,19 @@ export async function buildContextSnapshot(
 	messages: AgentMessage[],
 	config: IntelligenceConfig,
 	runId: string,
+	options: { semantic?: boolean } = {},
 ): Promise<ContextSnapshot> {
 	const preferences = loadContextPreferences(cwd);
 	const exclusions = [...config.excludedPatterns, ...preferences.exclusions];
 	const candidateGroups = await Promise.all([
 		Promise.resolve(collectCodeCandidates(cwd, prompt, exclusions)),
 		collectGitCandidates(pi, cwd),
-		Promise.resolve(collectMemoryCandidates(cwd, prompt)),
+		collectMemoryCandidates(cwd, prompt, config),
 		Promise.resolve(collectKnowledgeCandidates(cwd, prompt)),
 		Promise.resolve(collectConversationCandidates(messages, prompt)),
 	]);
 	const candidates = candidateGroups.flat().filter((candidate) => !isExcluded(candidate.uri, exclusions));
-	await applySemanticScores(candidates, prompt, config);
+	if (options.semantic !== false) await applySemanticScores(candidates, prompt, config);
 	const selected = selectContext(candidates, prompt, config.contextBudget, new Set(preferences.pins));
 	return { runId, prompt, createdAt: new Date().toISOString(), candidates, selected };
 }

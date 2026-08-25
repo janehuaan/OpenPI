@@ -82,11 +82,12 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 			commands: new Map(),
 			flags: new Map(),
 			shortcuts: new Map(),
+			statusSegments: new Map(),
 		};
 	}
 
 	async function createSession(extensions: Extension[]) {
-		const model = getModel("anthropic", "claude-sonnet-4-5")!;
+		const model = getModel("openai", "gpt-5.6-luna")!;
 		const agent = new Agent({
 			getApiKey: () => API_KEY,
 			initialState: {
@@ -257,6 +258,7 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 			commands: new Map(),
 			flags: new Map(),
 			shortcuts: new Map(),
+			statusSegments: new Map(),
 		};
 
 		await createSession([throwingExtension]);
@@ -306,6 +308,7 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 			commands: new Map(),
 			flags: new Map(),
 			shortcuts: new Map(),
+			statusSegments: new Map(),
 		};
 
 		const extension2: Extension = {
@@ -337,6 +340,7 @@ describe.skipIf(!API_KEY)("Compaction extensions", () => {
 			commands: new Map(),
 			flags: new Map(),
 			shortcuts: new Map(),
+			statusSegments: new Map(),
 		};
 
 		await createSession([extension1, extension2]);

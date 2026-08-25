@@ -52,6 +52,8 @@ function toInstanceSummary(instance: InstanceRecord): InstanceSummary {
 		sessionId: instance.sessionId,
 		sessionFile: instance.sessionFile,
 		radiusPiId: instance.radiusPiId,
+		createdAt: instance.createdAt,
+		lastSeenAt: instance.lastSeenAt,
 	};
 }
 

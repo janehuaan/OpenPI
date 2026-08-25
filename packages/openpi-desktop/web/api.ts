@@ -21,6 +21,7 @@ import type {
 	ImageContent,
 	MediaSaveInput,
 	ModelProviderConfig,
+	StatusSegment,
 	TaskDefinition,
 	TaskRun,
 	ThinkingLevel,
@@ -37,6 +38,7 @@ type OpenPiBridge = {
 	onConversationEvent: (handler: (payload: { instanceId: string; event: unknown }) => void) => () => void;
 	onRefreshData: (handler: () => void) => () => void;
 	onSpeechEvent: (handler: (event: SpeechInputEvent) => void) => () => void;
+	onDaemonRestartDeferred: (handler: () => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -57,9 +59,10 @@ export const desktopApi = {
 		call<DesktopSnapshot>("get_snapshot", { includeStopped: Boolean(opts?.includeStopped) }),
 	getConversation: (instanceId: string) => call<ConversationSnapshot>("get_conversation", { instanceId }),
 	getConversationStats: (instanceId: string) => call<ConversationStats>("get_conversation_stats", { instanceId }),
-	getSessionTodo: (instanceId: string) => call<TodoState | null>("get_session_todo", { instanceId }),
 	getProviderBalance: (provider: string) =>
 		call<{ currency: string; totalBalance: number } | null>("get_provider_balance", { provider }),
+	getSessionTodo: (instanceId: string) => call<TodoState | null>("get_session_todo", { instanceId }),
+	getStatusSegments: (instanceId: string) => call<StatusSegment[]>("get_status_segments", { instanceId }),
 	getConversationModels: (instanceId: string) =>
 		call<ConversationModelOption[]>("get_conversation_models", { instanceId }),
 	getConversationCapabilities: (instanceId: string) =>
@@ -141,18 +144,14 @@ export const desktopApi = {
 			project: { before: number; after: number; merged: number; pruned: number };
 			global: { before: number; after: number; merged: number; pruned: number };
 		}>("maintain_memory", { cwd }),
-	listSecurityAudit: (cwd: string) => call<string[]>("list_security_audit", { cwd }),
-	getSecurityMode: () => call<string>("get_security_mode"),
 	listIntelligenceRuns: (cwd: string) => call<string[]>("list_intelligence_runs", { cwd }),
 	readIntelligenceRun: (cwd: string, runId: string) => call<string>("read_intelligence_run", { cwd, runId }),
-	writeSecurityMode: (mode: string) => call<boolean>("write_security_mode", { mode }),
 	stopInstance: (instanceId: string) => call<boolean>("stop_instance", { instanceId }),
 	getConversationCommands: (instanceId: string) => call<string[]>("get_conversation_commands", { instanceId }),
 	setupStatus: () => call<{ enabled: boolean; agentDir: string; workspace: string; repoRoot: string }>("setup_status"),
-	runSetup: () => call<{ ok: boolean }>("run_setup"),
-	doctor: () => call<{ ok: boolean; output: string }>("doctor"),
 	defaultWorkspace: () => call<string>("default_workspace"),
 	getModelProviders: () => call<Record<string, ModelProviderConfig>>("get_model_providers"),
+	getModelCatalog: (instanceId: string) => call<AvailableModel[]>("get_model_catalog", { instanceId }),
 	getAvailableModels: (instanceId: string) => call<AvailableModel[]>("get_available_models", { instanceId }),
 	getProviderAuthStatus: (instanceId: string) =>
 		call<Array<{ provider: string; type?: string; source?: string; configured: boolean }>>(
@@ -163,11 +162,19 @@ export const desktopApi = {
 		call<{ provider: string; type: string }>("provider_login", { instanceId, provider, authType }),
 	providerLogout: (instanceId: string, provider: string) => call<boolean>("provider_logout", { instanceId, provider }),
 	openExternal: (url: string) => call<boolean>("open_external", { url }),
-	getUserProfile: () => call<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>("get_user_profile"),
-	saveUserProfile: (profile: { nickname?: string; avatarEmoji?: string }) =>
-		call<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>("save_user_profile", profile),
+	getUserProfile: () =>
+		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; synced?: boolean; updatedAt?: string }>(
+			"get_user_profile",
+		),
+	saveUserProfile: (profile: { nickname?: string; avatar?: string; avatarEmoji?: string }) =>
+		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; synced?: boolean; updatedAt?: string }>(
+			"save_user_profile",
+			profile,
+		),
 	getVisionFallback: () => call<VisionFallbackConfig>("get_vision_fallback"),
 	getVisionFallbackModels: () => call<VisionFallbackModel[]>("get_vision_fallback_models"),
+	getAutoStartMilvus: () => call<boolean>("get_auto_start_milvus"),
+	setAutoStartMilvus: (enabled: boolean) => call<boolean>("set_auto_start_milvus", { enabled }),
 	configureVisionFallback: async (input: { apiKey?: string; enabled: boolean; model?: string }) => {
 		const result = await call<VisionFallbackConfig>("configure_vision_fallback", input);
 		window.dispatchEvent(new Event("openpi:model-providers-changed"));
@@ -205,5 +212,10 @@ export const desktopApi = {
 		const api = bridge();
 		if (!api) return () => undefined;
 		return api.onSpeechEvent(handler);
+	},
+	onDaemonRestartDeferred: (handler: () => void) => {
+		const api = bridge();
+		if (!api) return () => undefined;
+		return api.onDaemonRestartDeferred(handler);
 	},
 };

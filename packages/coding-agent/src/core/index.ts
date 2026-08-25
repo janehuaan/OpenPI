@@ -78,3 +78,17 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+export type {
+	ParallelSubAgentTask,
+	ParallelSubAgentTaskResult,
+	RunSubAgentDependencies,
+	RunSubAgentTaskOptions,
+	SubAgentResult,
+} from "./sub-agent.ts";
+export {
+	findWritePathConflicts,
+	runSubAgentTask,
+	runSubAgentTasks,
+	SUB_AGENT_SYSTEM_PROMPT,
+	SUB_AGENT_TOOL_NAME,
+} from "./sub-agent.ts";

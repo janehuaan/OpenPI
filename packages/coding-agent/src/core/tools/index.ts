@@ -50,6 +50,7 @@ export {
 	type ReadToolInput,
 	type ReadToolOptions,
 } from "./read.ts";
+export { createSkillSearchToolDefinition } from "./skill-search.ts";
 export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -80,6 +81,7 @@ export {
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.ts";
+import type { Skill } from "../skills.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createCodeIndexToolDefinition } from "./code-index.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
@@ -88,6 +90,7 @@ import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { createSessionSearchToolDefinition } from "./session-search.ts";
+import { createSkillSearchToolDefinition } from "./skill-search.ts";
 import {
 	createCompleteStepToolDefinition,
 	createTodoListToolDefinition,
@@ -114,7 +117,8 @@ export type ToolName =
 	| "todo_list"
 	| "complete_step"
 	| "session_search"
-	| "code_index";
+	| "code_index"
+	| "skill_search";
 export const allToolNames: Set<ToolName> = new Set([
 	"read",
 	"bash",
@@ -130,6 +134,7 @@ export const allToolNames: Set<ToolName> = new Set([
 	"complete_step",
 	"session_search",
 	"code_index",
+	"skill_search",
 ]);
 
 export interface ToolsOptions {
@@ -140,6 +145,8 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
+	/** Loaded skills, used by the skill_search tool. */
+	skills?: Skill[];
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -172,6 +179,8 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createSessionSearchToolDefinition();
 		case "code_index":
 			return createCodeIndexToolDefinition();
+		case "skill_search":
+			return createSkillSearchToolDefinition(options?.skills ?? []);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -207,6 +216,8 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return wrapToolDefinition(createSessionSearchToolDefinition());
 		case "code_index":
 			return wrapToolDefinition(createCodeIndexToolDefinition());
+		case "skill_search":
+			return wrapToolDefinition(createSkillSearchToolDefinition(options?.skills ?? []));
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -248,6 +259,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		complete_step: createCompleteStepToolDefinition(),
 		session_search: createSessionSearchToolDefinition(),
 		code_index: createCodeIndexToolDefinition(),
+		skill_search: createSkillSearchToolDefinition(options?.skills ?? []),
 	};
 }
 
@@ -285,5 +297,6 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		complete_step: wrapToolDefinition(createCompleteStepToolDefinition()),
 		session_search: wrapToolDefinition(createSessionSearchToolDefinition()),
 		code_index: wrapToolDefinition(createCodeIndexToolDefinition()),
+		skill_search: wrapToolDefinition(createSkillSearchToolDefinition(options?.skills ?? [])),
 	};
 }

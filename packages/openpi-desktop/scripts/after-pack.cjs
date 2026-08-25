@@ -9,10 +9,8 @@ const { join } = require("node:path");
 
 const OPENPI_PACKAGES = [
 	"openpi-memory",
-	"openpi-security",
 	"openpi-tools",
 	"openpi-intelligence",
-	"openpi-bootstrap",
 ];
 
 function dittoOrCp(src, dest) {

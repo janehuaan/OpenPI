@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityDescriptor, ContextBudget, PlanNode, TaskPlan } from "../src/contract.ts";
-import { createDeterministicPlan, shouldPlan } from "../src/planner.ts";
+import { createDeterministicPlan, createStartupPlan, shouldPlan } from "../src/planner.ts";
 import { claimWritePaths, createWorkflow, readyNodes, refreshWorkflow, releaseWritePaths } from "../src/workflow.ts";
 
 const budget: ContextBudget = {
@@ -112,6 +112,36 @@ describe("shouldPlan", () => {
 	it("triggers for long prompts or many capabilities", () => {
 		expect(shouldPlan("x".repeat(801), 1)).toBe(true);
 		expect(shouldPlan("hi", 3)).toBe(true);
+	});
+});
+
+describe("startup planning", () => {
+	it("uses deterministic planning for auto without invoking a model planner", async () => {
+		const result = await createStartupPlan({
+			planning: "auto",
+			ctx: {} as never,
+			intent: {
+				version: 1,
+				id: "intent-1",
+				prompt: "Implement retry backoff",
+				kind: "work",
+				objective: "Implement retry backoff",
+				deliverables: ["Retry backoff"],
+				constraints: [],
+				assumptions: [],
+				ambiguities: [],
+				requiredContext: ["scheduler"],
+				successCriteria: ["works"],
+				verification: ["test"],
+				risk: "high",
+				createdAt: "2026-01-01T00:00:00.000Z",
+			},
+			capabilities,
+			contextItemIds: [],
+			budget,
+		});
+		expect(result.source).toBe("fallback");
+		expect(result.plan.nodes).toHaveLength(3);
 	});
 });
 

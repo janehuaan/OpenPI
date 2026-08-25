@@ -80,6 +80,101 @@ export interface Skill {
 	disableModelInvocation: boolean;
 }
 
+/** How the skill catalog is injected into the system prompt. */
+export type SkillsPromptMode = "full" | "compact" | "none";
+
+/** Minimum score required for a skill to be considered relevant. Prevents single-character overlap from hijacking context. */
+const MIN_RELEVANCE_SCORE = 2;
+/** Minimum query word count required before falling back to score=1 matching. */
+const MIN_QUERY_WORD_COUNT = 3;
+
+/**
+ * Dangerous shell-pattern lines that must not enter the LLM context.
+ * These patterns indicate a skill that instructs the model to change process state
+ * (cwd, env, aliases, sourced files) — which bypasses all security gates.
+ */
+const DANGEROUS_INSTRUCTION_LINES =
+	/^(?:\s*(?:cd\b|export\b|unset\b|alias\b|source\b|\.\s|eval\b|pip\s+install\b|npm\s+(?:install|add|link)\b|yarn\s+add\b|pnpm\s+add\b|curl\s+.*\|\s*(?:bash|sh|zsh)\b|wget\s+.*\|\s*(?:bash|sh)\b|bash\s+-c\b|sh\s+-c\b))/im;
+
+/**
+ * Strip lines from a skill body that would instruct the LLM to mutate process state.
+ * Preserves comments and descriptive prose; removes actionable shell-change directives.
+ */
+export function sanitizeSkillContent(content: string): string {
+	return content
+		.split("\n")
+		.filter((line) => {
+			// Keep comment lines and blank lines
+			const trimmed = line.trim();
+			if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith("//") || trimmed.startsWith("---"))
+				return true;
+			return !DANGEROUS_INSTRUCTION_LINES.test(trimmed);
+		})
+		.join("\n")
+		.trim();
+}
+
+/**
+ * Score skills by keyword overlap between `text` and skill name/description.
+ * Returns the top `max` matching skills sorted by relevance.
+ *
+ * A minimum score threshold prevents single-word overlap (e.g. "rm" matching
+ * "format") from injecting irrelevant skills into the context.
+ */
+export function selectRelevantSkills(skills: Skill[], text: string, max = 5): Skill[] {
+	const words = text
+		.toLowerCase()
+		.split(/[^a-z0-9\u4e00-\u9fff]+/)
+		.filter((word) => word.length >= 2);
+	if (words.length === 0) return [];
+	const scored = skills
+		.filter((skill) => !skill.disableModelInvocation)
+		.map((skill) => {
+			const haystack = `${skill.name} ${skill.description}`.toLowerCase();
+			let score = 0;
+			for (const word of words) {
+				if (haystack.includes(word)) score++;
+			}
+			return { skill, score };
+		})
+		.filter((entry) => entry.score >= MIN_RELEVANCE_SCORE)
+		.sort((a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name));
+	// Fallback: if no skill reaches MIN_RELEVANCE_SCORE but the query is long enough,
+	// accept score=1 matches to avoid returning nothing on complex queries.
+	if (scored.length === 0 && words.length >= MIN_QUERY_WORD_COUNT) {
+		const fallback = skills
+			.filter((skill) => !skill.disableModelInvocation)
+			.map((skill) => {
+				const haystack = `${skill.name} ${skill.description}`.toLowerCase();
+				let score = 0;
+				for (const word of words) {
+					if (haystack.includes(word)) score++;
+				}
+				return { skill, score };
+			})
+			.filter((entry) => entry.score === 1)
+			.sort((a, b) => b.skill.name.localeCompare(a.skill.name));
+		if (fallback.length > 0) scored.push(...fallback);
+	}
+	return scored.slice(0, max).map((entry) => entry.skill);
+}
+
+/**
+ * Build a compact "relevant skills" block (name + description + path) for the
+ * current task. Returns undefined when nothing matches. Used for per-turn
+ * dynamic context injection.
+ */
+export function buildRelevantSkillsMessage(skills: Skill[], text: string, max = 5): string | undefined {
+	const matches = selectRelevantSkills(skills, text, max);
+	if (matches.length === 0) return undefined;
+	const lines = ["Relevant skills for the current task (load the file with read when needed):", ""];
+	for (const skill of matches) {
+		lines.push(`- ${skill.name}: ${skill.description}`);
+		lines.push(`  path: ${skill.filePath}`);
+	}
+	return lines.join("\n");
+}
+
 export interface LoadSkillsResult {
 	skills: Skill[];
 	diagnostics: ResourceDiagnostic[];
@@ -332,11 +427,38 @@ function loadSkillFromFile(
  * Skills with disableModelInvocation=true are excluded from the prompt
  * (they can only be invoked explicitly via /skill:name commands).
  */
-export function formatSkillsForPrompt(skills: Skill[]): string {
+function truncateDescription(value: string, max: number): string {
+	return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+export function formatSkillsForPrompt(skills: Skill[], mode: SkillsPromptMode = "full"): string {
 	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
 
 	if (visibleSkills.length === 0) {
 		return "";
+	}
+
+	if (mode === "none") {
+		return `\n\n${visibleSkills.length} skills are available. Use the skill_search tool to find and load the relevant SKILL.md when a task needs specialized instructions.`;
+	}
+
+	if (mode === "compact") {
+		const lines = [
+			"\n\nThe following skills provide specialized instructions for specific tasks.",
+			"Names and short descriptions are listed; use the skill_search tool to get a skill's full path, then read it when the task matches.",
+			"",
+			"<available_skills>",
+		];
+
+		for (const skill of visibleSkills) {
+			lines.push("  <skill>");
+			lines.push(`    <name>${escapeXml(skill.name)}</name>`);
+			lines.push(`    <description>${escapeXml(truncateDescription(skill.description, 140))}</description>`);
+			lines.push("  </skill>");
+		}
+
+		lines.push("</available_skills>");
+		return lines.join("\n");
 	}
 
 	const lines = [

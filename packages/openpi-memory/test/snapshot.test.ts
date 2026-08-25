@@ -1,21 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { selectSnapshotEntries } from "../src/snapshot.ts";
-import type { MemoryConfig, MemoryIndexEntry } from "../src/types.ts";
+import { DEFAULT_MEMORY_CONFIG, type MemoryConfig, type MemoryIndexEntry } from "../src/types.ts";
 
-const config = {
+const config: MemoryConfig = {
+	...DEFAULT_MEMORY_CONFIG,
 	proactiveInject: true,
 	maxSnapshotEntries: 5,
 	pinTypes: ["user", "feedback"],
-	maintainGlobal: true,
-	vectorSearch: true,
-	vectorAlpha: 0.55,
-	semanticSearch: false,
-	autoBackup: true,
-	maxIndexEntries: 200,
-	includeGlobal: true,
-	flushOnCompact: true,
-	extractOnShutdown: true,
-} as MemoryConfig;
+};
 
 function entry(type: string, key: string, value: string): MemoryIndexEntry {
 	return { type: type as MemoryIndexEntry["type"], key, value };

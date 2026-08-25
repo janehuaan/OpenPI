@@ -181,6 +181,7 @@ const ModelOverrideSchema = Type.Object({
 
 const ProviderConfigSchema = Type.Object({
 	name: Type.Optional(Type.String({ minLength: 1 })),
+	enabled: Type.Optional(Type.Boolean()),
 	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
 	apiKey: Type.Optional(Type.String({ minLength: 1 })),
 	api: Type.Optional(Type.String({ minLength: 1 })),
@@ -188,6 +189,8 @@ const ProviderConfigSchema = Type.Object({
 	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
 	compat: Type.Optional(ProviderCompatSchema),
 	authHeader: Type.Optional(Type.Boolean()),
+	contextWindow: Type.Optional(Type.Number()),
+	maxTokens: Type.Optional(Type.Number()),
 	models: Type.Optional(Type.Array(ModelDefinitionSchema)),
 	modelOverrides: Type.Optional(Type.Record(Type.String(), ModelOverrideSchema)),
 });
@@ -267,6 +270,9 @@ export class ModelConfig {
 		const config = parsed as ModelsJson;
 		const providers = new Map<string, ModelsJsonProvider>();
 		for (const [providerId, provider] of Object.entries(config.providers)) {
+			// Disabled providers are excluded from the runtime entirely: their
+			// models, availability checks, and auth status never surface.
+			if (provider.enabled === false) continue;
 			providers.set(providerId, deepFreeze(structuredClone(provider)));
 		}
 		return new ModelConfig(providers);

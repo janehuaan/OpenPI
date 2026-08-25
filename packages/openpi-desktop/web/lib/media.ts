@@ -80,3 +80,32 @@ export function mediaErrorMessage(value: unknown): string {
 	}
 	return "媒体生成失败";
 }
+
+/**
+ * Read an image file and produce a square-cropped, downscaled PNG data URL
+ * (max `maxSize` px on the long edge) for a user avatar.
+ */
+export async function fileToAvatarDataUrl(file: File, maxSize = 256): Promise<string> {
+	const dataUrl = await new Promise<string>((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onload = () => resolve(String(reader.result));
+		reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
+		reader.readAsDataURL(file);
+	});
+	const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+		const img = new Image();
+		img.onload = () => resolve(img);
+		img.onerror = () => reject(new Error("图片加载失败"));
+		img.src = dataUrl;
+	});
+	const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+	const width = Math.max(1, Math.round(image.naturalWidth * scale));
+	const height = Math.max(1, Math.round(image.naturalHeight * scale));
+	const canvas = document.createElement("canvas");
+	canvas.width = width;
+	canvas.height = height;
+	const ctx = canvas.getContext("2d");
+	if (!ctx) throw new Error("无法创建画布");
+	ctx.drawImage(image, 0, 0, width, height);
+	return canvas.toDataURL("image/png");
+}

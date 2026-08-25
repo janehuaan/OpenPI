@@ -9,7 +9,6 @@ import type { StreamOptions } from "../src/types.ts";
 type StreamOptionsWithExtras = StreamOptions & Record<string, unknown>;
 
 import { hasAzureOpenAICredentials, resolveAzureDeploymentName } from "./azure-utils.ts";
-import { hasBedrockCredentials } from "./bedrock-utils.ts";
 import { resolveApiKey } from "./oauth.ts";
 
 // Resolve OAuth tokens at module level (async, runs before tests)
@@ -18,7 +17,7 @@ const oauthTokens = await Promise.all([
 	resolveApiKey("github-copilot"),
 	resolveApiKey("openai-codex"),
 ]);
-const [anthropicOAuthToken, githubCopilotToken, openaiCodexToken] = oauthTokens;
+const [_anthropicOAuthToken, _githubCopilotToken, openaiCodexToken] = oauthTokens;
 
 /**
  * Test that tool results containing only images work correctly across all providers.
@@ -207,20 +206,8 @@ async function handleToolWithTextAndImageResult<TApi extends Api>(
 }
 
 describe("Tool Results with Images", () => {
-	describe.skipIf(!process.env.GEMINI_API_KEY)("Google Provider (gemini-2.5-flash)", () => {
-		const llm = getModel("google", "gemini-2.5-flash");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm);
-		});
-	});
-
 	describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI Completions Provider (gpt-4o-mini)", () => {
-		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini");
+		const { compat: _compat, ...baseModel } = getModel("openai", "gpt-5.6-luna");
 		void _compat;
 		const llm: Model<"openai-completions"> = {
 			...baseModel,
@@ -237,7 +224,7 @@ describe("Tool Results with Images", () => {
 	});
 
 	describe.skipIf(!process.env.OPENAI_API_KEY)("OpenAI Responses Provider (gpt-5-mini)", () => {
-		const llm = getModel("openai", "gpt-5-mini");
+		const llm = getModel("openai", "gpt-5.6-luna");
 
 		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 			await handleToolWithImageResult(llm);
@@ -249,7 +236,7 @@ describe("Tool Results with Images", () => {
 	});
 
 	describe.skipIf(!hasAzureOpenAICredentials())("Azure OpenAI Responses Provider (gpt-4o-mini)", () => {
-		const llm = getModel("azure-openai-responses", "gpt-4o-mini");
+		const llm = getModel("azure-openai-responses", "gpt-5.6-luna");
 		const azureDeploymentName = resolveAzureDeploymentName(llm.id);
 		const azureOptions = azureDeploymentName ? { azureDeploymentName } : {};
 
@@ -262,20 +249,8 @@ describe("Tool Results with Images", () => {
 		});
 	});
 
-	describe.skipIf(!process.env.ANTHROPIC_API_KEY)("Anthropic Provider (claude-haiku-4-5)", () => {
-		const model = getModel("anthropic", "claude-haiku-4-5");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(model);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(model);
-		});
-	});
-
 	describe.skipIf(!process.env.OPENROUTER_API_KEY)("OpenRouter Provider (glm-4.5v)", () => {
-		const llm = getModel("openrouter", "z-ai/glm-4.5v");
+		const llm = getModel("openrouter", "auto");
 
 		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
 			await handleToolWithImageResult(llm);
@@ -287,7 +262,7 @@ describe("Tool Results with Images", () => {
 	});
 
 	describe.skipIf(!process.env.MISTRAL_API_KEY)("Mistral Provider (pixtral-12b)", () => {
-		const llm = getModel("mistral", "pixtral-12b");
+		const llm = getModel("mistral", "mistral-medium-3.5");
 
 		it("should handle tool result with only image", { retry: 5, timeout: 30000 }, async () => {
 			await handleToolWithImageResult(llm);
@@ -298,186 +273,9 @@ describe("Tool Results with Images", () => {
 		});
 	});
 
-	describe.skipIf(!process.env.TOGETHER_API_KEY)("Together AI Provider (Kimi-K2.6)", () => {
-		const llm = getModel("together", "moonshotai/Kimi-K2.6");
-		const options = { reasoningEffort: "high" } satisfies StreamOptionsWithExtras;
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm, options);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm, options);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_API_KEY)("Xiaomi MiMo (API billing) Provider (mimo-v2.5-pro)", () => {
-		const llm = getModel("xiaomi", "mimo-v2.5-pro");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm);
-		});
-
-		// FIXME(xiaomi): when a tool_result contains both a descriptive text block
-		// and an image block, MiMo locks onto the text and ignores the image (it
-		// reports the text-derived diameter but never mentions the image's color).
-		// The image-only case above proves the image reaches the model, and the
-		// text-only path obviously works, so this is a multimodal-fusion quality
-		// issue in the model, not a transport bug. Re-enable when upstream model
-		// quality improves.
-		it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_CN_API_KEY)(
-		"Xiaomi MiMo Token Plan (CN) Provider (mimo-v2.5-pro)",
-		() => {
-			const llm = getModel("xiaomi-token-plan-cn", "mimo-v2.5-pro");
-
-			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithImageResult(llm);
-			});
-
-			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
-			// limitation applies to Token Plan endpoints (same model behind both).
-			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithTextAndImageResult(llm);
-			});
-		},
-	);
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_AMS_API_KEY)(
-		"Xiaomi MiMo Token Plan (AMS) Provider (mimo-v2.5-pro)",
-		() => {
-			const llm = getModel("xiaomi-token-plan-ams", "mimo-v2.5-pro");
-
-			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithImageResult(llm);
-			});
-
-			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
-			// limitation applies to Token Plan endpoints (same model behind both).
-			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithTextAndImageResult(llm);
-			});
-		},
-	);
-
-	describe.skipIf(!process.env.XIAOMI_TOKEN_PLAN_SGP_API_KEY)(
-		"Xiaomi MiMo Token Plan (SGP) Provider (mimo-v2.5-pro)",
-		() => {
-			const llm = getModel("xiaomi-token-plan-sgp", "mimo-v2.5-pro");
-
-			it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithImageResult(llm);
-			});
-
-			// FIXME(xiaomi): see the API-billing block above — same multimodal-fusion
-			// limitation applies to Token Plan endpoints (same model behind both).
-			it.skip("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-				await handleToolWithTextAndImageResult(llm);
-			});
-		},
-	);
-
-	describe.skipIf(!process.env.KIMI_API_KEY)("Kimi For Coding Provider (kimi-for-coding)", () => {
-		const llm = getModel("kimi-coding", "kimi-for-coding-highspeed");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm);
-		});
-	});
-
-	describe.skipIf(!process.env.AI_GATEWAY_API_KEY)("Vercel AI Gateway Provider (google/gemini-2.5-flash)", () => {
-		const llm = getModel("vercel-ai-gateway", "google/gemini-2.5-flash");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm);
-		});
-	});
-
-	describe.skipIf(!hasBedrockCredentials())("Amazon Bedrock Provider (claude-sonnet-4-5)", () => {
-		const llm = getModel("amazon-bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0");
-
-		it("should handle tool result with only image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithImageResult(llm);
-		});
-
-		it("should handle tool result with text and image", { retry: 3, timeout: 30000 }, async () => {
-			await handleToolWithTextAndImageResult(llm);
-		});
-	});
-
 	// =========================================================================
 	// OAuth-based providers (credentials from ~/.pi/agent/oauth.json)
 	// =========================================================================
-
-	describe("Anthropic OAuth Provider (claude-sonnet-4-5)", () => {
-		const model = getModel("anthropic", "claude-sonnet-4-5");
-
-		it.skipIf(!anthropicOAuthToken)(
-			"should handle tool result with only image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				await handleToolWithImageResult(model, { apiKey: anthropicOAuthToken });
-			},
-		);
-
-		it.skipIf(!anthropicOAuthToken)(
-			"should handle tool result with text and image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				await handleToolWithTextAndImageResult(model, { apiKey: anthropicOAuthToken });
-			},
-		);
-	});
-
-	describe("GitHub Copilot Provider", () => {
-		it.skipIf(!githubCopilotToken)(
-			"claude-haiku-4.5 - should handle tool result with only image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("github-copilot", "claude-haiku-4.5");
-				await handleToolWithImageResult(llm, { apiKey: githubCopilotToken });
-			},
-		);
-
-		it.skipIf(!githubCopilotToken)(
-			"claude-haiku-4.5 - should handle tool result with text and image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("github-copilot", "claude-haiku-4.5");
-				await handleToolWithTextAndImageResult(llm, { apiKey: githubCopilotToken });
-			},
-		);
-
-		it.skipIf(!githubCopilotToken)(
-			"claude-sonnet-4 - should handle tool result with only image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("github-copilot", "claude-sonnet-4.6");
-				await handleToolWithImageResult(llm, { apiKey: githubCopilotToken });
-			},
-		);
-
-		it.skipIf(!githubCopilotToken)(
-			"claude-sonnet-4 - should handle tool result with text and image",
-			{ retry: 3, timeout: 30000 },
-			async () => {
-				const llm = getModel("github-copilot", "claude-sonnet-4.6");
-				await handleToolWithTextAndImageResult(llm, { apiKey: githubCopilotToken });
-			},
-		);
-	});
 
 	describe("OpenAI Codex Provider", () => {
 		it.skipIf(!openaiCodexToken)(

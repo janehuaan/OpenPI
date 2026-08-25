@@ -4,6 +4,7 @@
 
 ### Added
 
+- 账号体系：设置 → 能力与扩展 → 账号 面板。邮箱/密码注册登录 + 微信扫码绑定/扫码登录（走 iLink 个人微信通道）+ 配置同步（模型服务商合并、API Key 服务端加密）。后端为自托管 `@earendil-works/openpi-account`（`openpi-account serve`），默认 `http://127.0.0.1:8787`（可用 `OPENPI_ACCOUNT_URL` 覆盖）。
 - Model provider directory in the capabilities panel: lists all built-in pi.dev providers with per-model context window and input/output pricing, inline API-key entry (saved to models.json), OAuth login/logout, and a searchable custom-provider list.
 - MCP panel shows per-server status (name, status, tool count, error) from RPC capabilities `mcp.servers`.
 - Security mode UI writes `settings.json` `securityMode` (builtin gate authority) and keeps `security.json` as a legacy mirror for the openpi-security extension; reads prefer `settings.json`.

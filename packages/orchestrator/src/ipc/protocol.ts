@@ -167,6 +167,8 @@ export interface InstanceSummary {
 	sessionId?: string;
 	sessionFile?: string;
 	radiusPiId?: string;
+	createdAt?: string;
+	lastSeenAt?: string;
 }
 
 export interface ResponseBase {

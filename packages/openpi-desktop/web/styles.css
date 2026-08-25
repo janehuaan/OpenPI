@@ -1190,6 +1190,24 @@ input.ui-command-input:focus-visible {
 	font-variant-numeric: tabular-nums;
 	letter-spacing: 0.01em;
 }
+.turn-progress {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 8px 0 4px 42px;
+	color: var(--text-tertiary);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+.turn-progress-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: turn-progress-pulse 1.15s ease-in-out infinite;
+}
+.turn-progress-elapsed { opacity: 0.7; }
+@keyframes turn-progress-pulse { 50% { opacity: 0.35; transform: scale(0.76); } }
 .agent-avatar {
 	width: 30px;
 	height: 30px;
@@ -3214,7 +3232,8 @@ input.ui-command-input:focus-visible {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.vision-fallback-toggle {
+.vision-fallback-toggle,
+.milvus-auto-toggle {
 	width: 34px;
 	height: 20px;
 	position: relative;
@@ -3227,7 +3246,8 @@ input.ui-command-input:focus-visible {
 	cursor: pointer;
 	transition: background 150ms ease;
 }
-.vision-fallback-toggle i {
+.vision-fallback-toggle i,
+.milvus-auto-toggle i {
 	position: absolute;
 	top: 3px;
 	left: 3px;
@@ -3238,9 +3258,28 @@ input.ui-command-input:focus-visible {
 	box-shadow: 0 1px 2px rgba(18, 30, 52, 0.2);
 	transition: transform 150ms ease;
 }
-.vision-fallback-toggle.active { background: var(--accent); }
-.vision-fallback-toggle.active i { transform: translateX(14px); }
-.vision-fallback-toggle:disabled { cursor: default; opacity: 0.45; }
+.vision-fallback-toggle.active,
+.milvus-auto-toggle.active { background: var(--accent); }
+.vision-fallback-toggle.active i,
+.milvus-auto-toggle.active i { transform: translateX(14px); }
+.vision-fallback-toggle:disabled,
+.milvus-auto-toggle:disabled { cursor: default; opacity: 0.45; }
+.daemon-milvus-band {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	gap: 16px;
+	align-items: center;
+	padding: 18px 6px;
+	border-bottom: 1px solid var(--border);
+}
+.daemon-milvus-band strong { display: block; }
+.daemon-milvus-band small {
+	display: block;
+	margin: 4px 0 0;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.45;
+}
 .vision-fallback-body {
 	display: grid;
 	grid-column: 1 / -1;

@@ -56,6 +56,10 @@ export function queryTerms(query: string): string[] {
 	);
 }
 
+export function containsSecret(text: string): boolean {
+	return /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[^\s"']+/i.test(text);
+}
+
 export function isExcluded(uri: string, patterns: string[]): boolean {
 	const normalized = uri.split(path.sep).join("/");
 	return patterns.some((pattern) => {

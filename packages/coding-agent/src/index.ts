@@ -124,6 +124,9 @@ export type {
 	SlashCommandInfo,
 	SlashCommandSource,
 	SourceInfo,
+	StatusSegmentProvider,
+	StatusSegmentTone,
+	StatusSegmentValue,
 	TerminalInputHandler,
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -258,6 +261,20 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
+export type {
+	ParallelSubAgentTask,
+	ParallelSubAgentTaskResult,
+	RunSubAgentDependencies,
+	RunSubAgentTaskOptions,
+	SubAgentResult,
+} from "./core/sub-agent.ts";
+export {
+	findWritePathConflicts,
+	runSubAgentTask,
+	runSubAgentTasks,
+	SUB_AGENT_SYSTEM_PROMPT,
+	SUB_AGENT_TOOL_NAME,
+} from "./core/sub-agent.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

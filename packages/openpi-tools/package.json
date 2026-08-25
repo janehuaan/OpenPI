@@ -16,7 +16,11 @@
 			"./src/code-search.ts",
 			"./src/knowledge-base.ts",
 			"./src/tasks.ts",
-			"./src/task-command.ts"
+			"./src/task-command.ts",
+			"./src/ai-news.ts",
+			"./src/monitor.ts",
+			"./src/browser.ts",
+			"./src/github.ts"
 		],
 		"skills": [
 			"./skills"

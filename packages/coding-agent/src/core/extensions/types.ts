@@ -1250,6 +1250,20 @@ export interface ExtensionAPI {
 	getFlag(name: string): boolean | string | undefined;
 
 	// =========================================================================
+	// Status Bar Segments
+	// =========================================================================
+
+	/**
+	 * Register a status-bar segment shown by the desktop status bar / usage card.
+	 *
+	 * The desktop polls `get_status_segments`; each provider's `getValue()` is
+	 * awaited and merged into a single ordered list. Return `undefined` (or throw)
+	 * from `getValue` to hide the segment for that poll. Re-registering the same
+	 * `id` replaces the previous provider.
+	 */
+	registerStatusSegment(provider: StatusSegmentProvider): void;
+
+	// =========================================================================
 	// Message Rendering
 	// =========================================================================
 
@@ -1499,6 +1513,36 @@ export interface ExtensionFlag {
 	extensionPath: string;
 }
 
+export type StatusSegmentTone = "normal" | "warn" | "error";
+
+/** Computed value for one status-bar segment. */
+export interface StatusSegmentValue {
+	/** Display value, e.g. "7%·74%·73%". */
+	value: string;
+	/** Tooltip text. */
+	hint?: string;
+	/** Optional normalized progress (0–1) for visual status-bar slots. */
+	progress?: number;
+	/** Optional emphasis tone. */
+	tone?: StatusSegmentTone;
+}
+
+/**
+ * A status-bar segment registered by an extension (or provided by the built-in
+ * status provider). The desktop polls all registered providers via the
+ * `get_status_segments` RPC command and renders them in a single ordered list.
+ */
+export interface StatusSegmentProvider {
+	/** Unique id, e.g. "opencode-usage". Re-registering the same id replaces it. */
+	id: string;
+	/** Short display label, e.g. "Go". */
+	label: string;
+	/** Sort order; lower values appear first. Default 0. */
+	order?: number;
+	/** Compute the current value. Return undefined to hide the segment. */
+	getValue(signal?: AbortSignal): Promise<StatusSegmentValue | undefined>;
+}
+
 export interface ExtensionShortcut {
 	shortcut: KeyId;
 	description?: string;
@@ -1652,6 +1696,7 @@ export interface Extension {
 	commands: Map<string, RegisteredCommand>;
 	flags: Map<string, ExtensionFlag>;
 	shortcuts: Map<KeyId, ExtensionShortcut>;
+	statusSegments: Map<string, StatusSegmentProvider>;
 }
 
 /** Result of loading extensions. */

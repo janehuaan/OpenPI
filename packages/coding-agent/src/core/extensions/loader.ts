@@ -40,6 +40,7 @@ import type {
 	MessageRenderer,
 	ProviderConfig,
 	RegisteredCommand,
+	StatusSegmentProvider,
 	ToolDefinition,
 } from "./types.ts";
 
@@ -252,6 +253,11 @@ function createExtensionAPI(
 			});
 		},
 
+		registerStatusSegment(provider: StatusSegmentProvider): void {
+			runtime.assertActive();
+			extension.statusSegments.set(provider.id, provider);
+		},
+
 		registerShortcut(
 			shortcut: KeyId,
 			options: {
@@ -435,6 +441,7 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
+		statusSegments: new Map(),
 	};
 }
 

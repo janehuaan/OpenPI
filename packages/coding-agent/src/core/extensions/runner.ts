@@ -56,6 +56,7 @@ import type {
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
 	SessionShutdownEvent,
+	StatusSegmentProvider,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
@@ -610,6 +611,16 @@ export class ExtensionRunner {
 	getRegisteredCommands(): ResolvedCommand[] {
 		this.commandDiagnostics = [];
 		return this.resolveRegisteredCommands();
+	}
+
+	getStatusSegments(): StatusSegmentProvider[] {
+		const providers: StatusSegmentProvider[] = [];
+		for (const ext of this.extensions) {
+			for (const provider of ext.statusSegments.values()) {
+				providers.push(provider);
+			}
+		}
+		return providers;
 	}
 
 	getCommandDiagnostics(): ResourceDiagnostic[] {

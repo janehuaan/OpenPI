@@ -236,6 +236,27 @@ function normalizeModelPlan(
 	};
 }
 
+export async function createStartupPlan(options: {
+	planning: "auto" | "always" | "never";
+	ctx: ExtensionContext;
+	intent: TaskIntent;
+	capabilities: CapabilityDescriptor[];
+	contextItemIds: string[];
+	budget: ContextBudget;
+	signal?: AbortSignal;
+}): Promise<{ plan: TaskPlan; source: "model" | "fallback"; error?: string }> {
+	const fallback = createIntentPlan(options.intent, options.capabilities, options.contextItemIds, options.budget);
+	if (options.planning !== "always") return { plan: fallback, source: "fallback" };
+	return createModelDrivenPlan(
+		options.ctx,
+		options.intent,
+		options.capabilities,
+		options.contextItemIds,
+		options.budget,
+		options.signal,
+	);
+}
+
 export async function createModelDrivenPlan(
 	ctx: ExtensionContext,
 	intent: TaskIntent,

@@ -12,6 +12,10 @@ Personal agent tools + skills for OpenPI.
 | `src/knowledge-base.ts` | local keyword KB |
 | `src/tasks.ts` | in-session todo tracker |
 | `src/task-command.ts` | `/task` orchestrator UI |
+| `src/ai-news.ts` | `ai_news` AI 早报: fetch RSS sources, render digest, email via Gmail SMTP |
+| `src/monitor.ts` | `monitor` 订阅监控: watch feeds/pages, report new items / changes, daily digest |
+| `src/browser.ts` | `browser` CDP browser automation: open/click/type/snapshot (zero deps) |
+| `src/github.ts` | `github` automation: PRs/issues/CI, comments, weekly summary |
 
 ## Skills
 
@@ -32,6 +36,17 @@ pi -e packages/openpi-tools/src/web-fetch.ts
 ```
 
 Scheduled automation uses `pi task` / orchestrator (not the deprecated `scheduled-tasks` example).
+
+## New plugins
+
+- **AI 早报** — `ai_news fetch|digest|send|status`. Sources: OpenAI/DeepMind/Google/HF/Mistral + AI tech media RSS.
+  Send requires `GMAIL_SMTP_USER` / `GMAIL_SMTP_PASSWORD` / `GMAIL_NEWS_TO` in `~/.pi/agent/secrets.env`.
+  Daily push example: `scheduled_task create --title "AI 早报" --cron "0 22 * * *" --timezone Asia/Shanghai --prompt "调用 ai_news 生成今日 AI 早报并发送到邮箱"`.
+- **订阅监控** — `monitor add <name> <url> [kind=rss|page]` then `monitor check|summary`. State in `~/.pi/agent/monitor.json`.
+- **浏览器自动化** — `browser open <url>`, then `browser click|type|snapshot|eval`. Uses Chrome over CDP (headless by default);
+  set `OPENPI_CHROME_PATH` if Chrome is not on a default path.
+- **GitHub** — `github prs|issues|ci|comment|weekly|watch`. Read actions work without a token;
+  `comment` needs `GITHUB_TOKEN` / `OPENPI_GITHUB_TOKEN`. Watched repos in `~/.pi/agent/github-watch.json`.
 
 ## Web search API keys
 

@@ -16,6 +16,7 @@ import {
 	restartDaemon,
 	rpc,
 	sendIpcRequest,
+	setRestartDeferredNotice,
 	stopDaemon,
 } from "./orch.mjs";
 import {
@@ -105,10 +106,6 @@ async function saveGeneratedMedia(getMainWindow, { url, data, mimeType, filename
 
 function memoryOpsPath() {
 	return openpiPackageFile("openpi-memory", "src", "desktop-ops.ts");
-}
-
-function bootstrapCliPath() {
-	return openpiPackageFile("openpi-bootstrap", "src", "cli.ts");
 }
 
 function runMemoryOp(args) {
@@ -353,10 +350,6 @@ async function extractDocumentText({ name, mimeType, data } = {}) {
 }
 
 
-function securityConfigPath() {
-	return join(agentDir(), "security.json");
-}
-
 function settingsPath() {
 	return join(agentDir(), "settings.json");
 }
@@ -559,64 +552,6 @@ function mergeVisionModels(models, modelId) {
 	return [...byId.values()].filter((model) => model && typeof model.id === "string");
 }
 
-/**
- * Security mode authority: the builtin gate reads settings.json `securityMode`.
- * `security.json` (openpi-security extension) is kept as a legacy mirror.
- */
-function readSecurityMode() {
-	const fromSettings = readSettingsJson().securityMode;
-	if (["strict", "confirm", "permissive", "bypass"].includes(fromSettings)) return fromSettings;
-	const path = securityConfigPath();
-	if (!existsSync(path)) return "confirm";
-	try {
-		const value = JSON.parse(readFileSync(path, "utf8"));
-		return ["strict", "confirm", "permissive", "bypass"].includes(value?.mode) ? value.mode : "confirm";
-	} catch {
-		return "confirm";
-	}
-}
-
-function listSecurityAudit(cwd) {
-	if (!cwd) return [];
-	const path = join(cwd, ".pi", "security", "audit.jsonl");
-	if (!existsSync(path)) return [];
-	return readFileSync(path, "utf8")
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean)
-		.reverse()
-		.slice(0, 100);
-}
-
-async function writeSecurityMode(mode) {
-	if (!["strict", "confirm", "permissive", "bypass"].includes(mode)) throw new Error("Invalid mode");
-	// The builtin gate reads settings.json; keep security.json as a legacy
-	// mirror for the openpi-security extension.
-	const settings = readSettingsJson();
-	settings.securityMode = mode;
-	writeSettingsJson(settings);
-	mkdirSync(agentDir(), { recursive: true });
-	writeFileSync(join(agentDir(), "security.json"), `${JSON.stringify({ mode, auditToDisk: true }, null, 2)}\n`, "utf8");
-	try {
-		await ensureDaemon();
-		const instances = await listInstancesLive();
-		await Promise.all(
-			instances
-				.filter((instance) => instance.status === "online" || instance.status === "starting")
-				.map(async (instance) => {
-					try {
-						await rpc(instance.id, { type: "reload_resources" });
-					} catch {
-						// A session may settle or exit while the policy is changing.
-					}
-				}),
-		);
-	} catch {
-		// Persistence succeeded. Sessions that could not reload pick up the mode on restart.
-	}
-	return true;
-}
-
 function listIntelligenceRuns(cwd) {
 	const dir = join(cwd, ".pi", "intelligence", "runs");
 	if (!existsSync(dir)) return [];
@@ -641,6 +576,15 @@ export function registerBridge(ipcMain, getMainWindow) {
 	const streams = new Map();
 	const visionRequests = new Map();
 
+	// Notify the renderer when a code update would restart the daemon but live
+	// sessions prevent it — so the new build is not silently skipped.
+	setRestartDeferredNotice(() => {
+		const window = getMainWindow();
+		if (window && !window.isDestroyed()) {
+			window.webContents.send("openpi:daemon-restart-deferred");
+		}
+	});
+
 	ipcMain.handle("openpi:get_snapshot", async (_e, args = {}) => {
 		const includeStopped = Boolean(args?.includeStopped);
 		let daemonRunning = false;
@@ -650,11 +594,10 @@ export function registerBridge(ipcMain, getMainWindow) {
 		try {
 			// First paint must not wait for a cold daemon or a stale socket.
 			// The main process signals a refresh as soon as the daemon is ready.
-			const probe = await probeDaemon(250);
+			const [probe, h] = await Promise.all([probeDaemon(250), getHealthSafe(250)]);
 			if (probe.alive) {
 				daemonRunning = true;
 				liveInstances = probe.list?.instances ?? (await listInstancesLive());
-				const h = await getHealthSafe(250);
 				if (h) {
 					health = h;
 					if (!Object.hasOwn(h, "sessionsIndexed") && !legacyDaemonRestartPromise) {
@@ -690,11 +633,13 @@ export function registerBridge(ipcMain, getMainWindow) {
 		const instances = selected.slice(0, 80).map((instance) => ({
 			id: instance.id,
 			status: instance.status,
-			mode: instance.mode === "code" ? "code" : "work",
+			mode: instance.mode === "code" || instance.mode === "personal" ? instance.mode : "work",
 			cwd: instance.cwd,
 			label: instance.label,
 			sessionId: instance.sessionId,
 			sessionFile: instance.sessionFile,
+			createdAt: instance.createdAt,
+			lastSeenAt: instance.lastSeenAt,
 		}));
 		return {
 			daemonRunning,
@@ -838,16 +783,9 @@ export function registerBridge(ipcMain, getMainWindow) {
 		}
 	});
 
-	ipcMain.handle("openpi:get_session_todo", async (_e, { instanceId }) => {
-		try {
-			return rpcData(await rpc(instanceId, { type: "get_session_todo" }));
-		} catch {
-			return null;
-		}
-	});
-
 	ipcMain.handle("openpi:get_provider_balance", async (_e, { provider }) => {
 		try {
+			if (!provider || typeof provider !== "string") return null;
 			const modelsPath = join(agentDir(), "models.json");
 			if (!existsSync(modelsPath)) return null;
 			const providers = JSON.parse(readFileSync(modelsPath, "utf8"))?.providers ?? {};
@@ -856,8 +794,7 @@ export function registerBridge(ipcMain, getMainWindow) {
 			const baseUrl = config.baseUrl;
 			const apiKey = config.apiKey;
 			if (typeof baseUrl !== "string" || typeof apiKey !== "string") return null;
-			const url = `${baseUrl.replace(/\/+$/, "")}/user/balance`;
-			const response = await fetch(url, {
+			const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/user/balance`, {
 				headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" },
 				signal: AbortSignal.timeout(10_000),
 			});
@@ -865,10 +802,28 @@ export function registerBridge(ipcMain, getMainWindow) {
 			const data = await response.json();
 			if (!data || typeof data !== "object") return null;
 			const infos = Array.isArray(data.balance_infos) ? data.balance_infos : [];
-			const usd = infos.find((i) => i?.currency === "USD") ?? infos[0];
-			return usd ? { currency: usd.currency ?? "USD", totalBalance: usd.total_balance ?? 0 } : null;
+			const balance = infos.find((item) => item?.currency === "USD") ?? infos[0];
+			return balance ? { currency: balance.currency ?? "USD", totalBalance: balance.total_balance ?? 0 } : null;
 		} catch {
 			return null;
+		}
+	});
+
+	ipcMain.handle("openpi:get_session_todo", async (_e, { instanceId }) => {
+		try {
+			return rpcData(await rpc(instanceId, { type: "get_session_todo" }));
+		} catch {
+			return null;
+		}
+	});
+
+	ipcMain.handle("openpi:get_status_segments", async (_e, { instanceId }) => {
+		try {
+			if (!instanceId || typeof instanceId !== "string") return [];
+			const data = rpcData(await rpc(instanceId, { type: "get_status_segments" }));
+			return Array.isArray(data?.segments) ? data.segments : [];
+		} catch {
+			return [];
 		}
 	});
 
@@ -989,6 +944,12 @@ export function registerBridge(ipcMain, getMainWindow) {
 
 	ipcMain.handle("openpi:get_available_models", async (_e, { instanceId }) => {
 		const data = rpcData(await rpc(instanceId, { type: "get_available_models" }));
+		const models = Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : [];
+		return models;
+	});
+
+	ipcMain.handle("openpi:get_model_catalog", async (_e, { instanceId }) => {
+		const data = rpcData(await rpc(instanceId, { type: "get_model_catalog" }));
 		const models = Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : [];
 		return models;
 	});
@@ -1191,11 +1152,6 @@ export function registerBridge(ipcMain, getMainWindow) {
 	);
 	ipcMain.handle("openpi:memory_meta", async (_e, { cwd }) => await memoryMeta(cwd || defaultWorkspace()));
 	ipcMain.handle("openpi:maintain_memory", async (_e, { cwd }) => await maintainMemory(cwd || defaultWorkspace()));
-	ipcMain.handle("openpi:list_security_audit", async (_e, { cwd }) => listSecurityAudit(cwd || defaultWorkspace()));
-	ipcMain.handle("openpi:get_security_mode", async () => readSecurityMode());
-	ipcMain.handle("openpi:write_security_mode", async (_e, { mode }) =>
-		writeSecurityMode(mode),
-	);
 	ipcMain.handle("openpi:list_intelligence_runs", async (_e, { cwd }) =>
 		listIntelligenceRuns(cwd || defaultWorkspace()),
 	);
@@ -1223,43 +1179,6 @@ export function registerBridge(ipcMain, getMainWindow) {
 			workspace: defaultWorkspace(),
 			repoRoot: openpiPackagesRoot() || repoRoot(),
 		};
-	});
-
-	ipcMain.handle("openpi:run_setup", async () => {
-		// Prefer packaged openpi-packages root so extensions resolve without a monorepo checkout.
-		const packagesRoot = openpiPackagesRoot() || repoRoot();
-		await new Promise((resolve, reject) => {
-			const child = spawn(
-				nodeBinary(),
-				["--experimental-strip-types", bootstrapCliPath(), "--repo", packagesRoot, "--no-autostart"],
-				{ stdio: "inherit", env: nodeSpawnEnv() },
-			);
-			child.on("error", reject);
-			child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`setup exit ${code}`))));
-		});
-		await ensureDaemon();
-		return { ok: true };
-	});
-
-	ipcMain.handle("openpi:doctor", async () => {
-		return await new Promise((resolve, reject) => {
-			const child = spawn(
-				nodeBinary(),
-				["--experimental-strip-types", bootstrapCliPath(), "doctor"],
-				{ stdio: ["ignore", "pipe", "pipe"], env: nodeSpawnEnv() },
-			);
-			const out = [];
-			const err = [];
-			child.stdout.on("data", (c) => out.push(c));
-			child.stderr.on("data", (c) => err.push(c));
-			child.on("error", reject);
-			child.on("close", (code) => {
-				resolve({
-					ok: code === 0,
-					output: Buffer.concat(out).toString("utf8") + Buffer.concat(err).toString("utf8"),
-				});
-			});
-		});
 	});
 
 	ipcMain.handle("openpi:default_workspace", async () => defaultWorkspace());
@@ -1296,6 +1215,18 @@ export function registerBridge(ipcMain, getMainWindow) {
 		settings.visionFallback = { enabled: enabled !== false, provider: ZHIPU_PROVIDER_ID, model: selectedModel };
 		writeSettingsJson(settings);
 		return zhipuVisionConfig();
+	});
+
+	// Auto-start local Milvus (best-effort, see orch.mjs ensureMilvus). Default on.
+	ipcMain.handle("openpi:get_auto_start_milvus", async () => {
+		const settings = readSettingsJson();
+		return settings.autoStartMilvus !== false;
+	});
+	ipcMain.handle("openpi:set_auto_start_milvus", async (_e, { enabled } = {}) => {
+		const settings = readSettingsJson();
+		settings.autoStartMilvus = enabled !== false;
+		writeSettingsJson(settings);
+		return settings.autoStartMilvus;
 	});
 
 	ipcMain.handle("openpi:save_model_provider", async (_e, { providerId, config }) => {
@@ -1361,7 +1292,9 @@ export function registerBridge(ipcMain, getMainWindow) {
 		return true;
 	});
 
-	ipcMain.handle("openpi:get_user_profile", async () => readUserProfile());
+	ipcMain.handle("openpi:get_user_profile", async () => {
+		return { ...readUserProfile(), synced: false };
+	});
 
 	ipcMain.handle("openpi:save_user_profile", async (_e, profile) => {
 		if (!profile || typeof profile !== "object") {
@@ -1369,6 +1302,7 @@ export function registerBridge(ipcMain, getMainWindow) {
 		}
 		const next = {
 			nickname: typeof profile.nickname === "string" ? profile.nickname.slice(0, 40) : undefined,
+			avatar: typeof profile.avatar === "string" && profile.avatar ? profile.avatar : undefined,
 			avatarEmoji: typeof profile.avatarEmoji === "string" ? profile.avatarEmoji.slice(0, 8) : undefined,
 			updatedAt: new Date().toISOString(),
 		};

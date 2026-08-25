@@ -28,6 +28,7 @@ import {
 	writeRawStdout,
 } from "../../core/output-guard.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
+import { getStatusSegments } from "../../core/status-segments.ts";
 import { loadTodoState } from "../../core/tools/todo.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
@@ -492,9 +493,28 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 						},
 					})
 					.catch((e) => {
+						const message = e instanceof Error ? e.message : String(e);
 						if (!preflightSucceeded) {
-							output(error(id, "prompt", e.message));
+							output(error(id, "prompt", message));
+							return;
 						}
+						// Preflight succeeded and the host already received the success
+						// response, so this failure happened while the agent was running.
+						// It used to be dropped silently here — the message stayed in the
+						// session but no reply was produced and no error surfaced, which
+						// read as a dropped connection. Report it so the failure is visible.
+						output({
+							type: "extension_ui_request",
+							id: crypto.randomUUID(),
+							method: "notify",
+							message: `本轮执行失败：${message}`,
+							notifyType: "error",
+						});
+						output({
+							type: "agent_error",
+							error: message,
+							stack: e instanceof Error ? (e.stack ?? undefined) : undefined,
+						});
 					});
 				return undefined;
 			}
@@ -565,6 +585,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 					return success(id, "cycle_model", null);
 				}
 				return success(id, "cycle_model", result);
+			}
+
+			case "get_model_catalog": {
+				await session.modelRuntime.reloadConfig();
+				const models = session.modelRuntime.getModels();
+				return success(id, "get_model_catalog", { models });
 			}
 
 			case "get_available_models": {
@@ -741,6 +767,11 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "get_session_stats": {
 				const stats = session.getSessionStats();
 				return success(id, "get_session_stats", stats);
+			}
+
+			case "get_status_segments": {
+				const segments = await getStatusSegments(session);
+				return success(id, "get_status_segments", { segments });
 			}
 
 			case "get_session_todo": {

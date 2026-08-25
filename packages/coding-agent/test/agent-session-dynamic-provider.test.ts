@@ -31,7 +31,7 @@ describe("AgentSession dynamic provider registration", () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
 		const sessionManager = SessionManager.inMemory();
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+		await authStorage.modify("openai", async () => ({ type: "api_key", key: "test-key" }));
 		const modelRuntime = await ModelRuntime.create({
 			credentials: authStorage,
 			modelsPath: join(agentDir, "models.json"),
@@ -47,7 +47,7 @@ describe("AgentSession dynamic provider registration", () => {
 		const { session } = await createAgentSession({
 			cwd: tempDir,
 			agentDir,
-			model: getModel("anthropic", "claude-sonnet-4-5")!,
+			model: getModel("openai", "gpt-5.6-luna")!,
 			settingsManager,
 			sessionManager,
 			modelRuntime,
@@ -72,7 +72,7 @@ describe("AgentSession dynamic provider registration", () => {
 	it("applies top-level registerProvider overrides to the active model", async () => {
 		const session = await createSession([
 			(pi) => {
-				pi.registerProvider("anthropic", { baseUrl: "http://localhost:8080/top-level" });
+				pi.registerProvider("openai", { baseUrl: "http://localhost:8080/top-level" });
 			},
 		]);
 
@@ -86,7 +86,7 @@ describe("AgentSession dynamic provider registration", () => {
 		const session = await createSession([
 			(pi) => {
 				pi.on("session_start", () => {
-					pi.registerProvider("anthropic", { baseUrl: "http://localhost:8080/session-start" });
+					pi.registerProvider("openai", { baseUrl: "http://localhost:8080/session-start" });
 				});
 			},
 		]);
@@ -105,7 +105,7 @@ describe("AgentSession dynamic provider registration", () => {
 				pi.registerCommand("use-proxy", {
 					description: "Use proxy",
 					handler: async () => {
-						pi.registerProvider("anthropic", { baseUrl: "http://localhost:8080/command" });
+						pi.registerProvider("openai", { baseUrl: "http://localhost:8080/command" });
 					},
 				});
 			},

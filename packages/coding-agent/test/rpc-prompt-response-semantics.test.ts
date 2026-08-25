@@ -102,7 +102,7 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 	const tempDir = join(tmpdir(), `pi-rpc-prompt-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(tempDir, { recursive: true });
 
-	const model = options.model ?? getModel("anthropic", "claude-sonnet-4-5");
+	const model = options.model ?? getModel("openai", "gpt-5.6-luna");
 	if (!model) {
 		throw new Error("Test model not found");
 	}
@@ -131,7 +131,7 @@ async function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: 
 	const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 	const modelRegistry = await createModelRegistry(authStorage, tempDir);
 	if (options.withAuth) {
-		await authStorage.modify("anthropic", async () => ({ type: "api_key", key: "test-key" }));
+		await authStorage.modify("openai", async () => ({ type: "api_key", key: "test-key" }));
 	}
 
 	const session = new AgentSession({
@@ -222,6 +222,7 @@ describe("RPC prompt response semantics", () => {
 							extensionPaths: [],
 							commands: [],
 							tools: [],
+							servers: [],
 						},
 					},
 				});

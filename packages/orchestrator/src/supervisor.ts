@@ -463,7 +463,13 @@ export class OrchestratorSupervisor {
 				status: "stopped",
 				radiusPiId: undefined,
 				autoResume: false,
-				lastSeenAt: recoveredAt,
+				lastSeenAt: (() => {
+					try {
+						return statSync(instance.sessionFile).mtime.toISOString();
+					} catch {
+						return instance.lastSeenAt ?? recoveredAt;
+					}
+				})(),
 			});
 		}
 

@@ -8,7 +8,8 @@
 		"packages/coding-agent/examples/extensions/custom-provider-anthropic",
 		"packages/coding-agent/examples/extensions/custom-provider-gitlab-duo",
 		"packages/coding-agent/examples/extensions/sandbox",
-		"packages/coding-agent/examples/extensions/gondolin"
+		"packages/coding-agent/examples/extensions/gondolin",
+		"packages/desktop"
 	],
 	"scripts": {
 		"clean": "npm run clean --workspaces",
@@ -50,7 +51,8 @@
 		"jiti": "2.7.0",
 		"shx": "0.4.0",
 		"tsx": "4.22.1",
-		"typescript": "5.9.3"
+		"typescript": "5.9.3",
+		"@vitejs/plugin-react": "4.7.0"
 	},
 	"engines": {
 		"node": ">=22.19.0"
@@ -61,5 +63,8 @@
 		"gaxios": {
 			"rimraf": "6.1.2"
 		}
+	},
+	"dependencies": {
+		"onnxruntime-node": "1.22.0"
 	}
 }

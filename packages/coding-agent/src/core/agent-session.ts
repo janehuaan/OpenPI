@@ -62,7 +62,6 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
-import { isDirectResponsePrompt } from "./direct-prompt.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -102,6 +101,7 @@ import { BuiltinSecurity, type SecurityMode } from "./security/builtin-security.
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.ts";
 import type { SettingsManager } from "./settings-manager.ts";
+import { sanitizeSkillContent } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import {
@@ -193,7 +193,31 @@ export type AgentSessionEvent =
 			errorMessage?: string;
 	  }
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
-	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string };
+	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+	/**
+	 * Non-content timing signals for RPC clients and inspectors. A provider request
+	 * is identified only by an in-memory sequence number and carries no prompt or
+	 * response data.
+	 */
+	| {
+			type: "latency_diagnostic";
+			phase: "before_agent_start";
+			timestamp: number;
+			durationMs: number;
+	  }
+	| {
+			type: "latency_diagnostic";
+			phase: "provider_start";
+			requestId: number;
+			timestamp: number;
+	  }
+	| {
+			type: "latency_diagnostic";
+			phase: "first_message_update";
+			requestId: number;
+			timestamp: number;
+			elapsedMs: number;
+	  };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -764,9 +788,34 @@ export class AgentSession {
 
 	// Track last assistant message for auto-compaction check
 	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
+	private _providerRequestSequence = 0;
+	private _activeProviderRequest: { id: number; startedAt: number; receivedUpdate: boolean } | undefined;
 
 	/** Internal handler for agent events - shared by subscribe and reconnect */
 	private _handleAgentEvent = async (event: AgentEvent): Promise<void> => {
+		if (
+			event.type === "message_update" &&
+			this._activeProviderRequest &&
+			!this._activeProviderRequest.receivedUpdate
+		) {
+			const request = this._activeProviderRequest;
+			request.receivedUpdate = true;
+			const timestamp = Date.now();
+			this._emit({
+				type: "latency_diagnostic",
+				phase: "first_message_update",
+				requestId: request.id,
+				timestamp,
+				elapsedMs: timestamp - request.startedAt,
+			});
+		}
+		if (event.type === "turn_start") {
+			const timestamp = Date.now();
+			const requestId = ++this._providerRequestSequence;
+			this._activeProviderRequest = { id: requestId, startedAt: timestamp, receivedUpdate: false };
+			this._emit({ type: "latency_diagnostic", phase: "provider_start", requestId, timestamp });
+		}
+
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -1392,9 +1441,6 @@ export class AgentSession {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
-		let currentImages = options?.images;
-		let expandedText = text;
-		let directOneShotPrompt = false;
 
 		try {
 			// Handle extension commands first (execute immediately, even during streaming)
@@ -1410,6 +1456,7 @@ export class AgentSession {
 
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
+			let currentImages = options?.images;
 			if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
@@ -1428,7 +1475,7 @@ export class AgentSession {
 			}
 
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
-			expandedText = currentText;
+			let expandedText = currentText;
 			if (expandPromptTemplates) {
 				expandedText = this._expandSkillCommand(expandedText);
 				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
@@ -1458,7 +1505,10 @@ export class AgentSession {
 				throw new Error(formatNoModelSelectedMessage());
 			}
 
-			if (!this._modelRuntime.hasConfiguredAuth(this.model.provider)) {
+			const hasConfiguredAuth =
+				this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
+				(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
+			if (!hasConfiguredAuth) {
 				const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
 				if (isOAuth) {
 					throw new Error(
@@ -1470,19 +1520,15 @@ export class AgentSession {
 				throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
 			}
 
-			// Only overflow recovery may block a new prompt. Threshold compaction is
-			// handled after agent runs so a summarization request does not delay first token.
+			// Check if we need to compact before sending (catches aborted responses).
+			// The user's new prompt is sent below, so do not call agent.continue() here.
 			const lastAssistant = this._findLastAssistantMessage();
-			if (lastAssistant && isContextOverflow(lastAssistant, this.model.contextWindow ?? 0)) {
+			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
-			directOneShotPrompt =
-				(this._extensionMode === "print" || this._extensionMode === "json" || this._extensionMode === "rpc") &&
-				!currentImages &&
-				isDirectResponsePrompt(expandedText);
 
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -1496,29 +1542,33 @@ export class AgentSession {
 			});
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
-			if (!directOneShotPrompt) {
-				for (const msg of this._pendingNextTurnMessages) {
-					// Dedupe: if the same customType + content is already in the
-					// history (injected on a previous turn), skip re-injecting —
-					// the model still sees it via the cached prefix, and we avoid
-					// a per-turn cache write that would drag the hit rate down.
-					const seen = this._lastInjectedCustomContent.get(msg.customType);
-					if (seen !== undefined && seen === stringifyContent(msg.content)) continue;
-					this._lastInjectedCustomContent.set(msg.customType, stringifyContent(msg.content));
-					messages.push(msg);
-				}
-				this._pendingNextTurnMessages = [];
+			for (const msg of this._pendingNextTurnMessages) {
+				// Dedupe: if the same customType + content is already in the
+				// history (injected on a previous turn), skip re-injecting —
+				// the model still sees it via the cached prefix, and we avoid
+				// a per-turn cache write that would drag the hit rate down.
+				const seen = this._lastInjectedCustomContent.get(msg.customType);
+				if (seen !== undefined && seen === stringifyContent(msg.content)) continue;
+				this._lastInjectedCustomContent.set(msg.customType, stringifyContent(msg.content));
+				messages.push(msg);
 			}
+			this._pendingNextTurnMessages = [];
 
-			// Direct one-shot answers should not wait for heavy proactive context hooks.
-			const result = directOneShotPrompt
-				? undefined
-				: await this._extensionRunner.emitBeforeAgentStart(
-						expandedText,
-						currentImages,
-						this._baseSystemPrompt,
-						this._baseSystemPromptOptions,
-					);
+			// Emit before_agent_start extension event
+			const beforeAgentStartAt = Date.now();
+			const result = await this._extensionRunner.emitBeforeAgentStart(
+				expandedText,
+				currentImages,
+				this._baseSystemPrompt,
+				this._baseSystemPromptOptions,
+			);
+			const beforeAgentStartEndedAt = Date.now();
+			this._emit({
+				type: "latency_diagnostic",
+				phase: "before_agent_start",
+				timestamp: beforeAgentStartEndedAt,
+				durationMs: beforeAgentStartEndedAt - beforeAgentStartAt,
+			});
 			// Add all custom messages from extensions
 			if (result?.messages) {
 				for (const msg of result.messages) {
@@ -1552,28 +1602,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
-		if (!directOneShotPrompt) {
-			await this._runAgentPrompt(messages);
-			return;
-		}
-		const previousTools = this.agent.state.tools;
-		const previousSystemPrompt = this.agent.state.systemPrompt;
-		const directSystemPrompt = buildSystemPrompt({
-			...this._baseSystemPromptOptions,
-			skills: [],
-			contextFiles: [],
-			selectedTools: [],
-			toolSnippets: {},
-			promptGuidelines: [],
-		});
-		this.agent.state.tools = [];
-		this.agent.state.systemPrompt = directSystemPrompt;
-		try {
-			await this._runAgentPrompt(messages);
-		} finally {
-			this.agent.state.tools = previousTools;
-			this.agent.state.systemPrompt = previousSystemPrompt;
-		}
+		await this._runAgentPrompt(messages);
 	}
 
 	/**
@@ -1622,7 +1651,10 @@ export class AgentSession {
 
 		try {
 			const content = readFileSync(skill.filePath, "utf-8");
-			const body = stripFrontmatter(content).trim();
+			// Sanitize before injecting into the prompt: strip lines that instruct
+			// state mutation (cd, export, source, eval, pip install, etc.) so that
+			// a skill cannot silently reconfigure the shell environment.
+			const body = sanitizeSkillContent(stripFrontmatter(content).trim());
 			const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
 			return args ? `${skillBlock}\n\n${args}` : skillBlock;
 		} catch (err) {

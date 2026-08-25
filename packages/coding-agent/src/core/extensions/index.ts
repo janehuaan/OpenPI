@@ -142,6 +142,9 @@ export type {
 	SetLabelHandler,
 	SetModelHandler,
 	SetThinkingLevelHandler,
+	StatusSegmentProvider,
+	StatusSegmentTone,
+	StatusSegmentValue,
 	TerminalInputHandler,
 	// Events - Tool
 	ToolCallEvent,

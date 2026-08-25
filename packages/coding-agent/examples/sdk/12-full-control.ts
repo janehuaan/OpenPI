@@ -18,11 +18,7 @@ const modelRuntime = await ModelRuntime.create({
 	authPath: "/tmp/my-agent/auth.json",
 	modelsPath: "/tmp/my-agent/models.json",
 });
-if (process.env.MY_ANTHROPIC_KEY) {
-	modelRuntime.setRuntimeApiKey("anthropic", process.env.MY_ANTHROPIC_KEY);
-}
-
-const model = getModel("anthropic", "claude-sonnet-4-5");
+const model = getModel("openai-codex", "gpt-5.4");
 if (!model) throw new Error("Model not found");
 
 // In-memory settings with overrides

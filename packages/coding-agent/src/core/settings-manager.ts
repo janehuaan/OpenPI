@@ -9,6 +9,7 @@ import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 import type { McpServersConfig } from "./mcp/mcp-types.ts";
 import type { SecurityMode } from "./security/builtin-security.ts";
+import type { SkillsPromptMode } from "./skills.ts";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
@@ -112,6 +113,7 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
+	skillsPromptMode?: SkillsPromptMode; // default: "full" - inject full skill catalog; "compact" injects a short index; "none" injects a pointer + per-turn relevant skills
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -976,6 +978,11 @@ export class SettingsManager {
 			this.markModified("trackingId");
 		}
 		this.save();
+	}
+
+	getSkillsPromptMode(): SkillsPromptMode {
+		const mode = this.settings.skillsPromptMode;
+		return mode === "compact" || mode === "none" || mode === "full" ? mode : "full";
 	}
 
 	getPackages(): PackageSource[] {

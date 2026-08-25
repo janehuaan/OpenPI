@@ -1,4 +1,5 @@
 import type { CapabilityDescriptor, ReadinessAssessment, SelectedContext, TaskIntent, TaskPlan } from "./contract.ts";
+import { shouldPlan } from "./planner.ts";
 import { validateTaskPlan } from "./validate.ts";
 
 const highRiskPattern = /\b(?:delete|remove|deploy|publish|production|reset|force|sudo|drop database)\b/i;
@@ -7,12 +8,6 @@ const workPattern = /\b(?:fix|implement|add|change|modify|edit|write|refactor|mi
 const workPatternZh = /(?:修复|实现|增加|添加|修改|重构|迁移|构建|创建|安装|升级|开发)/;
 const ambiguityPattern = /\b(?:something|whatever|somehow|make it better|improve it)\b/i;
 const ambiguityPatternZh = /(?:随便|都行|优化一下|改好一点|做一下|弄一下)/;
-const explicitDirectResponsePattern =
-	/^(?:please\s+)?(?:say|reply|respond|answer|output|print|return)\s+(?:exactly\s+)?["'`]?[\s\S]{1,200}$/i;
-const explicitDirectResponsePatternZh = /^(?:请)?(?:直接)?(?:说|回复|回答|输出|返回)[：:\s]?[\s\S]{1,200}$/;
-const workspaceContextPattern =
-	/\b(?:repo|repository|project|workspace|codebase|package|file|folder|directory|function|class|type|test|error|exception|stack trace|diff|commit|pr|issue)\b/i;
-const workspaceContextPatternZh = /(?:仓库|项目|代码|文件|目录|函数|类型|测试|报错|错误|异常|堆栈|提交|合并请求|问题)/;
 
 export const INVESTIGATION_TOOL_NAMES = new Set([
 	"read",
@@ -71,6 +66,44 @@ const executionToolNames = new Set([
 	"intelligence_memory_store",
 ]);
 
+export type StartupPlanningDecision = {
+	mode: "direct" | "internal-plan";
+	reason: string;
+};
+
+const workspaceReferencePattern =
+	/(?:\b(?:workspace|repo(?:sitory)?|project|file|files|folder|directory|package|test|tests|spec|error|exception|stack trace|fails? when|reproduce)\b|[\w./-]+\.[A-Za-z0-9]+(?::\d+)?)/i;
+const workspaceReferencePatternZh = /(?:工作区|仓库|项目|文件|目录|测试|错误|异常|堆栈|复现|失败)/;
+
+/**
+ * Pure startup gate for avoiding intelligence overhead on conversational turns.
+ * It deliberately uses no capability count: the full registry is always large,
+ * which would turn every prompt into a plan through shouldPlan's count signal.
+ */
+export function decideStartupPlanning(
+	prompt: string,
+	planning: "auto" | "always" | "never" = "auto",
+): StartupPlanningDecision {
+	const intent = inferTaskIntent(prompt);
+	if (planning === "always") return { mode: "internal-plan", reason: "Planning is explicitly required." };
+	if (planning === "never") return { mode: "direct", reason: "Planning is disabled." };
+	const referencesWorkspace = workspaceReferencePattern.test(prompt) || workspaceReferencePatternZh.test(prompt);
+	const complex = shouldPlan(prompt, 0);
+	const readinessRequiresPlanning =
+		intent.kind !== "read-only" || intent.risk !== "low" || intent.ambiguities.length > 0;
+	if (complex || referencesWorkspace || readinessRequiresPlanning) {
+		return {
+			mode: "internal-plan",
+			reason: complex
+				? "The prompt has multi-step or complex planning signals."
+				: referencesWorkspace
+					? "The prompt references workspace state, files, tests, or an error."
+					: "The inferred task intent requires readiness assessment.",
+		};
+	}
+	return { mode: "direct", reason: "Simple non-work conversational request." };
+}
+
 export function inferTaskIntent(prompt: string): TaskIntent {
 	const normalized = prompt.trim();
 	const highRisk = highRiskPattern.test(normalized) || highRiskPatternZh.test(normalized);
@@ -116,15 +149,6 @@ export function inferTaskIntent(prompt: string): TaskIntent {
 		risk: highRisk ? "critical" : work ? "high" : "low",
 		createdAt: new Date().toISOString(),
 	};
-}
-
-export function isDirectResponsePrompt(prompt: string): boolean {
-	const normalized = prompt.trim();
-	if (!normalized) return false;
-	if (highRiskPattern.test(normalized) || highRiskPatternZh.test(normalized)) return false;
-	if (workPattern.test(normalized) || workPatternZh.test(normalized)) return false;
-	if (workspaceContextPattern.test(normalized) || workspaceContextPatternZh.test(normalized)) return false;
-	return explicitDirectResponsePattern.test(normalized) || explicitDirectResponsePatternZh.test(normalized);
 }
 
 export function assessReadiness(

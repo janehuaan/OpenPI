@@ -105,71 +105,65 @@ export function extractSessionDigest(turns: TranscriptTurn[]): ExtractCandidate 
 	const recent = turns.slice(-30);
 	const users = recent
 		.filter((t) => t.role === "user")
-		.map((t) => t.text.trim())
-		.filter((t) => t.length >= 8 && t.length <= 2000);
+		.map((t) => cleanSummary(t.text))
+		.filter((t) => t.length >= 8);
 	const assistants = recent
 		.filter((t) => t.role === "assistant")
-		.map((t) => t.text.trim())
-		.filter((t) => t.length >= 40);
-
-	if (users.length === 0 && assistants.length === 0) return undefined;
-
-	const userPick = users.slice(-5);
-	const assistantPick = assistants.slice(-2);
-	const lastUser = userPick[userPick.length - 1] ?? "";
-	const headline = cleanSummary(lastUser.split("\n")[0] ?? lastUser);
-	if (headline.length < 4 && assistantPick.length === 0) return undefined;
-	if (/^(hi|hello|hey|ok|okay|thanks|thank you|你好|谢谢|好的|嗯)$/i.test(headline) && assistantPick.length === 0) {
-		return undefined;
-	}
-
-	const combined = [...userPick, ...assistantPick].join("\n");
-	const entities = extractSalientEntities(combined);
-	const tableLines = extractTableishLines(combined);
-
-	const summaryBits: string[] = [];
-	if (entities.length > 0) summaryBits.push(entities.slice(0, 8).join(", "));
-	if (headline.length >= 8 && !/^(ok|okay|好的|嗯|继续)/i.test(headline)) {
-		summaryBits.push(headline.slice(0, 80));
-	} else if (assistantPick[0]) {
-		const firstAssist = cleanSummary(assistantPick[0]!.split("\n").find((l) => l.trim().length > 12) ?? "");
-		if (firstAssist) summaryBits.push(firstAssist.slice(0, 80));
-	}
-	const summary = `Last session: ${summaryBits.join(" — ").slice(0, 140) || "work in progress"}`;
-
-	const bodyParts: string[] = [
-		"## Continuity digest (auto — use when user asks where we left off)",
-		"",
-		`### Focus`,
-		headline || "(see assistant notes below)",
-	];
-	if (entities.length > 0) {
-		bodyParts.push("", "### Named topics / projects", entities.map((e) => `- ${e}`).join("\n"));
-	}
-	if (tableLines.length > 0) {
-		bodyParts.push("", "### Structured notes from last replies", ...tableLines.slice(0, 40));
-	}
-	if (userPick.length > 0) {
-		bodyParts.push("", "### Recent user turns");
-		for (let i = 0; i < userPick.length; i++) {
-			bodyParts.push(`${i + 1}. ${userPick[i]!.slice(0, 400).replace(/\n/g, " ")}`);
+		.map((t) => pickAssistantExcerpt(t.text, 900))
+		.filter((t) => t.length >= 20);
+	if (!users.length && !assistants.length) return undefined;
+	const focus = users.at(-1) ?? assistants.at(-1)?.split("\n")[0] ?? "work in progress";
+	const classify = (line: string): "Decisions" | "Completed" | "Next steps" | "Blockers" | undefined =>
+		/\b(decid|choose|will use|approved)\b|决定|采用|选择/.test(line)
+			? "Decisions"
+			: /\b(done|complete|finished|implemented|fixed)\b|完成|已修复|已实现/.test(line)
+				? "Completed"
+				: /\b(next|todo|follow.?up|will)\b|下一步|接下来|待办/.test(line)
+					? "Next steps"
+					: /\b(block|fail|error|risk|waiting)\b|阻塞|失败|错误|风险/.test(line)
+						? "Blockers"
+						: undefined;
+	const buckets: Record<string, string[]> = {
+		Focus: [focus],
+		Decisions: [],
+		Completed: [],
+		"Next steps": [],
+		Blockers: [],
+	};
+	for (const text of assistants.slice(-4))
+		for (const raw of text.split("\n")) {
+			const line = raw
+				.replace(/^\s*(?:[-*•]|\d+\.)\s*/, "")
+				.replace(/\s+/g, " ")
+				.trim()
+				.slice(0, 260);
+			if (!line || /^#{1,3}\s/.test(line)) continue;
+			const bucket = classify(line) ?? "Decisions";
+			buckets[bucket].push(line);
 		}
-	}
-	if (assistantPick.length > 0) {
-		bodyParts.push("", "### Assistant conclusions (excerpt)");
-		for (const a of assistantPick) {
-			// Prefer conclusion / table / bullet lines; fall back to head of reply
-			const excerpt = pickAssistantExcerpt(a, 1800);
-			bodyParts.push(excerpt, "");
-		}
-	}
-
+	const seen = new Set<string>();
+	for (const name of Object.keys(buckets))
+		buckets[name] = buckets[name]
+			.filter((line) => {
+				const n = line
+					.toLocaleLowerCase()
+					.replace(/[^\p{L}\p{N}]+/gu, " ")
+					.trim();
+				if (!n || seen.has(n)) return false;
+				seen.add(n);
+				return true;
+			})
+			.slice(0, 6);
+	const lines = ["## Continuity digest (auto)"];
+	for (const name of ["Focus", "Decisions", "Completed", "Next steps", "Blockers"])
+		if (buckets[name].length) lines.push("", `### ${name}`, ...buckets[name].map((x) => `- ${x}`));
+	const body = lines.join("\n").slice(0, 2000).trim();
 	const day = new Date().toISOString().slice(0, 10);
 	return {
 		type: "project",
 		key: `session-${day}`,
-		summary,
-		body: bodyParts.join("\n").slice(0, 8000),
+		summary: `Last session: ${focus}`.slice(0, 140),
+		body,
 		source: "digest",
 		global: false,
 	};
@@ -205,7 +199,7 @@ export function extractSalientEntities(text: string): string[] {
 	return found.slice(0, 24);
 }
 
-function extractTableishLines(text: string): string[] {
+function _extractTableishLines(text: string): string[] {
 	const lines = text.split("\n");
 	const out: string[] = [];
 	for (const line of lines) {
@@ -252,9 +246,10 @@ export function applyCandidates(cwd: string, candidates: ExtractCandidate[], con
 	let globalSaved = 0;
 
 	for (const item of candidates) {
-		const key = sanitizeKey(item.key);
+		const rawKey = sanitizeKey(item.key);
+		const summary = item.summary.trim().slice(0, 140);
+		const key = rawKey || deterministicFallbackKey(item.type, summary || item.body);
 		if (!key) continue;
-		const summary = item.summary.trim().slice(0, 160);
 		if (!summary) continue;
 		const body = item.body.trim() || summary;
 		// Session digests always overwrite same-day key (body must grow during the session)
@@ -266,9 +261,10 @@ export function applyCandidates(cwd: string, candidates: ExtractCandidate[], con
 		const exact = entries.some((e) => e.type === item.type && e.key === key && e.value === summary);
 		const nearDup = !force && entries.some((e) => e.key !== key && similarText(e.value, summary));
 		if (force || (!exact && !nearDup)) {
+			const prev = force && key.startsWith("session-") ? (readTopic(cwd, item.type, key) ?? "") : "";
+			if (force && prev && normalizeDigestBody(prev) === normalizeDigestBody(body)) continue;
 			// For digests, skip downgrade if existing body is substantially richer
 			if (force && key.startsWith("session-")) {
-				const prev = readTopic(cwd, item.type, key) ?? "";
 				if (prev.length > body.length + 200 && prev.includes("### Assistant conclusions")) {
 					// keep richer previous unless new also has assistant section and more entities
 					const prevScore = (prev.match(/### /g) ?? []).length + prev.length / 500;
@@ -506,6 +502,28 @@ function cleanSummary(text: string): string {
 		.replace(/\s+/g, " ")
 		.trim()
 		.slice(0, 140);
+}
+
+export function deterministicFallbackKey(type: MemoryType, summary: string): string {
+	const normalized = summary
+		.normalize("NFKC")
+		.toLocaleLowerCase()
+		.replace(/[^\p{L}\p{N}]+/gu, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 48);
+	if (!normalized) return "";
+	let hash = 2166136261;
+	for (const ch of `${type}:${summary}`) hash = Math.imul(hash ^ ch.charCodeAt(0), 16777619);
+	return sanitizeKey(`${normalized}-${(hash >>> 0).toString(36)}`);
+}
+
+function normalizeDigestBody(body: string): string {
+	return body
+		.replace(/^#.*\n+/m, "")
+		.replace(/\n+Last updated:.*$/im, "")
+		.toLocaleLowerCase()
+		.replace(/\s+/g, " ")
+		.trim();
 }
 
 function keyFromText(text: string, prefix: string): string {

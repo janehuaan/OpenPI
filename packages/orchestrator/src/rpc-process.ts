@@ -12,7 +12,24 @@ import type {
 import { isBunBinary } from "./config.ts";
 import type { AgentMode } from "./types.ts";
 
-const CODE_MODE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "code_search", "tasks", "memory"];
+const CODE_MODE_TOOLS = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"code_search",
+	"tasks",
+	"memory",
+	"web_search",
+	"web_fetch",
+	"github",
+	"browser",
+	"ai_news",
+	"monitor",
+];
 const CODE_MODE_PROMPT =
 	"Code mode is active. Work as a repository coding agent: inspect the current worktree before editing, follow project instructions, keep changes scoped, preserve unrelated work, and run the narrowest relevant validation before reporting completion.";
 

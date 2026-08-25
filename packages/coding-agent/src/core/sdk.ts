@@ -16,6 +16,7 @@ import { DefaultResourceLoader } from "./resource-loader.ts";
 import type { SecurityMode } from "./security/builtin-security.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
+import { buildRelevantSkillsMessage, type Skill } from "./skills.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -258,9 +259,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
-	const initialActiveToolNames: string[] = (
-		options.tools ? [...options.tools] : options.noTools ? [] : [...defaultActiveToolNames, ...runtimeToolNames]
-	).filter((name) => !excludedToolNameSet?.has(name));
+	const isEmptyAllowlist = allowedToolNames !== undefined && allowedToolNames.length === 0;
+	const initialActiveToolNames: string[] = [
+		...(options.tools ? [...options.tools] : options.noTools ? [] : [...defaultActiveToolNames]),
+		...(isEmptyAllowlist ? [] : [...runtimeToolNames]),
+	].filter((name) => !excludedToolNameSet?.has(name));
 
 	let agent: Agent;
 
@@ -361,8 +364,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
 			const runner = extensionRunnerRef.current;
-			if (!runner) return messages;
-			return runner.emitContext(messages);
+			let current = runner ? await runner.emitContext(messages) : messages;
+			// Dynamic context: with skillsPromptMode "compact"/"none", the startup
+			// prompt only carries a pointer; inject the skills relevant to the
+			// current conversation per turn instead of dumping the whole catalog.
+			if (settingsManager.getSkillsPromptMode() !== "full") {
+				current = injectRelevantSkills(current, resourceLoader.getSkills().skills);
+			}
+			return current;
 		},
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
@@ -409,4 +418,48 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionsResult,
 		modelFallbackMessage,
 	};
+}
+
+/**
+ * Extract recent conversation text (last few messages) for relevance scoring.
+ */
+function latestConversationText(messages: AgentMessage[]): string {
+	const parts: string[] = [];
+	for (const message of messages.slice(-6)) {
+		if (!("content" in message)) continue;
+		const content = (message as { content?: unknown }).content;
+		if (typeof content === "string") {
+			parts.push(content);
+			continue;
+		}
+		if (Array.isArray(content)) {
+			for (const part of content) {
+				if (part && typeof part === "object" && "type" in part && part.type === "text") {
+					const text = (part as { text?: unknown }).text;
+					if (typeof text === "string") parts.push(text);
+				}
+			}
+		}
+	}
+	return parts.join("\n");
+}
+
+let lastSkillInjectionKey = "";
+
+/**
+ * Append a compact "relevant skills" message for the current task. Deduplicates
+ * so unchanged turns do not keep appending the same block.
+ */
+function injectRelevantSkills(messages: AgentMessage[], skills: Skill[]): AgentMessage[] {
+	const body = buildRelevantSkillsMessage(skills, latestConversationText(messages), 5);
+	if (!body || body === lastSkillInjectionKey) return messages;
+	lastSkillInjectionKey = body;
+	// The runtime message union has no "system" role; inject as a user-role
+	// context block (same pattern plan-mode uses for injected context).
+	const contextMessage = {
+		role: "user" as const,
+		content: `[injected context] ${body}`,
+		timestamp: Date.now(),
+	};
+	return [...messages, contextMessage as unknown as AgentMessage];
 }

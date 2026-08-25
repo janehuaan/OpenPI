@@ -27,7 +27,14 @@ export interface ContextCandidate {
 	contentHash: string;
 	estimatedTokens: number;
 	metadata: Record<string, string | number | boolean>;
-	provenance: { adapter: string; observedAt: string; revision?: string };
+	provenance: {
+		adapter: string;
+		observedAt: string;
+		revision?: string;
+		sourceId?: string;
+		sourceRevision?: string;
+		updatedAt?: string;
+	};
 }
 
 export interface ContextScore {

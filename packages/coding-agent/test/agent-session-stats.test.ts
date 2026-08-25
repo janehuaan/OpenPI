@@ -8,7 +8,7 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 import { createInMemoryModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
-const model = getModel("anthropic", "claude-sonnet-4-5")!;
+const model = getModel("openai", "gpt-5.6-luna")!;
 
 function createUsage(totalTokens: number): Usage {
 	return {

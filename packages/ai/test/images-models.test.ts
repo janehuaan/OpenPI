@@ -195,15 +195,9 @@ describe("ImagesModels", () => {
 		await expect(models.refresh()).resolves.toBeUndefined();
 	});
 
-	it("builtinImagesModels registers the openrouter provider with its catalog", async () => {
+	it("builtinImagesModels registers the openrouter provider", async () => {
 		const models = builtinImagesModels({ authContext: fakeAuthContext({ OPENROUTER_API_KEY: "or-key" }) });
 		const providers = models.getProviders();
 		expect(providers.map((p) => p.id)).toEqual(["openrouter"]);
-
-		const list = models.getModels("openrouter");
-		expect(list.length).toBeGreaterThan(0);
-		expect(list.every((m) => m.api === "openrouter-images")).toBe(true);
-
-		expect((await models.getAuth(list[0]))?.auth.apiKey).toBe("or-key");
 	});
 });

@@ -21,7 +21,7 @@ export function selectSnapshotEntries(
 	if (entries.length === 0) return [];
 	const pinSet = new Set<MemoryType>(config.pinTypes);
 	const pinned = entries.filter((e) => pinSet.has(e.type));
-	const digests = entries.filter((e) => e.type === "project" && e.key.startsWith("session-")).slice(-3);
+	const digests = entries.filter((e) => e.type === "project" && e.key.startsWith("session-")).slice(-1);
 	const rest = entries.filter((e) => !pinSet.has(e.type) && !(e.type === "project" && e.key.startsWith("session-")));
 	const max = Math.max(config.pinTypes.length + 2, config.maxSnapshotEntries);
 
@@ -107,7 +107,7 @@ export function formatSelectiveSnapshot(
 			const rawBody = bodyResolver?.(entry)?.trim();
 			if (!rawBody) continue;
 			// Always expand digests; expand others when user asks for continuity or body is short
-			const shouldExpand = isDigest || continuity || (type === "project" && rawBody.length <= 1200);
+			const shouldExpand = continuity;
 			if (!shouldExpand) continue;
 			// Keep injected bodies compact: large per-turn injection dilutes the
 			// prompt-cache hit rate (cacheRead / (input + cacheRead + cacheWrite)).

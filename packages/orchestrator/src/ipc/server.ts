@@ -183,7 +183,7 @@ async function removeStaleSocketIfNeeded(socketPath: string): Promise<void> {
 	unlinkSync(socketPath);
 }
 
-async function isSocketLive(socketPath: string): Promise<boolean> {
+export async function isSocketLive(socketPath: string): Promise<boolean> {
 	return new Promise<boolean>((resolve, reject) => {
 		const socket = createConnection(socketPath);
 		let settled = false;

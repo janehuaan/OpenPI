@@ -13,8 +13,8 @@ import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
-import { selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
+
 import { ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
 import {
@@ -266,7 +266,7 @@ async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	sessionDir: string | undefined,
-	settingsManager: SettingsManager,
+	_settingsManager: SettingsManager,
 ): Promise<SessionManager> {
 	if (parsed.noSession || parsed.help || parsed.listModels !== undefined) {
 		return SessionManager.inMemory(cwd, parsed.sessionId !== undefined ? { id: parsed.sessionId } : undefined);
@@ -320,20 +320,18 @@ async function createSessionManager(
 	}
 
 	if (parsed.resume) {
-		try {
-			const selectedPath = await selectSession(
-				(onProgress) => SessionManager.list(cwd, sessionDir, onProgress),
-				(onProgress) => SessionManager.listAll(sessionDir, onProgress),
-				settingsManager,
-			);
-			if (!selectedPath) {
-				console.log(chalk.dim("No session selected"));
-				process.exit(0);
-			}
-			return SessionManager.open(selectedPath, sessionDir);
-		} finally {
-			stopThemeWatcher();
+		const sessions = await SessionManager.list(cwd, sessionDir);
+		if (sessions.length === 0) {
+			console.log(chalk.dim("No sessions found"));
+			process.exit(0);
 		}
+		// Use the most recent session
+		const latest = sessions.sort((a, b) => b.modified.getTime() - a.modified.getTime())[0];
+		if (!latest) {
+			console.log(chalk.dim("No sessions found"));
+			process.exit(0);
+		}
+		return SessionManager.open(latest.path, sessionDir);
 	}
 
 	if (parsed.continue) {
@@ -876,7 +874,6 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessage,
 			initialImages,
 		});
-		stopThemeWatcher();
 		restoreStdout();
 		if (exitCode !== 0) {
 			process.exitCode = exitCode;
