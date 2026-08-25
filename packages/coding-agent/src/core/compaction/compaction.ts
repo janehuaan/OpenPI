@@ -101,12 +101,15 @@ export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
 	keepRecentTokens: number;
+	/** Fraction of contextWindow at which to trigger compaction (0-1). Default 0.8. */
+	compactionPercent: number;
 }
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
 	keepRecentTokens: 30000,
+	compactionPercent: 0.8,
 };
 
 // ============================================================================
@@ -208,7 +211,8 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
  */
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
-	return contextTokens > contextWindow - settings.reserveTokens;
+	const percent = settings.compactionPercent ?? 0.8;
+	return contextTokens >= contextWindow * percent;
 }
 
 // ============================================================================

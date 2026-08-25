@@ -274,6 +274,7 @@ describe("shouldCompact", () => {
 		const settings: CompactionSettings = {
 			enabled: true,
 			reserveTokens: 10000,
+			compactionPercent: 0.95,
 			keepRecentTokens: 20000,
 		};
 
@@ -285,6 +286,7 @@ describe("shouldCompact", () => {
 		const settings: CompactionSettings = {
 			enabled: false,
 			reserveTokens: 10000,
+			compactionPercent: 0.95,
 			keepRecentTokens: 20000,
 		};
 

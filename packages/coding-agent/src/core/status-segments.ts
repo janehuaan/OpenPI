@@ -103,18 +103,19 @@ function fmtCost(n: number): string {
 	return n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
 }
 
-function readCompactionSettings(): { reserveTokens: number; keepRecentTokens: number } {
+function readCompactionSettings(): { reserveTokens: number; keepRecentTokens: number; compactionPercent: number } {
 	try {
 		const path = join(getAgentDir(), "settings.json");
-		if (!existsSync(path)) return { reserveTokens: 16384, keepRecentTokens: 30000 };
+		if (!existsSync(path)) return { reserveTokens: 16384, keepRecentTokens: 30000, compactionPercent: 0.8 };
 		const settings = JSON.parse(readFileSync(path, "utf8"));
 		const compaction = settings?.compaction;
 		return {
 			reserveTokens: typeof compaction?.reserveTokens === "number" ? compaction.reserveTokens : 16384,
 			keepRecentTokens: typeof compaction?.keepRecentTokens === "number" ? compaction.keepRecentTokens : 30000,
+			compactionPercent: typeof compaction?.compactionPercent === "number" ? compaction.compactionPercent : 0.8,
 		};
 	} catch {
-		return { reserveTokens: 16384, keepRecentTokens: 30000 };
+		return { reserveTokens: 16384, keepRecentTokens: 30000, compactionPercent: 0.8 };
 	}
 }
 
@@ -143,7 +144,7 @@ async function computeSessionStats(session: AgentSession): Promise<SessionSegmen
 			? Math.round(stats.contextUsage.percent)
 			: undefined;
 	const compaction = readCompactionSettings();
-	const compactThreshold = compaction ? compaction.reserveTokens + compaction.keepRecentTokens : undefined;
+	const compactThreshold = compaction ? `${Math.round(compaction.compactionPercent * 100)}%` : undefined;
 	return {
 		lastHit: lastHit === undefined ? undefined : { value: `${lastHit}%`, hint: "本次命中率" },
 		avgHit: avgHit === undefined ? undefined : { value: `${avgHit}%`, hint: "平均命中率" },
@@ -156,8 +157,7 @@ async function computeSessionStats(session: AgentSession): Promise<SessionSegmen
 			ctxPercent === undefined
 				? undefined
 				: { value: `${ctxPercent}%`, hint: "上下文占用", progress: ctxPercent / 100 },
-		compactThreshold:
-			compactThreshold === undefined ? undefined : { value: fmtTokens(compactThreshold), hint: "压缩阈值" },
+		compactThreshold: compactThreshold === undefined ? undefined : { value: compactThreshold, hint: "压缩阈值" },
 	};
 }
 

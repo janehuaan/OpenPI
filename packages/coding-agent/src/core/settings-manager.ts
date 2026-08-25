@@ -15,6 +15,7 @@ export interface CompactionSettings {
 	enabled?: boolean; // default: true
 	reserveTokens?: number; // default: 16384
 	keepRecentTokens?: number; // default: 30000
+	compactionPercent?: number; // default: 0.8 (fraction of contextWindow)
 }
 
 export interface BranchSummarySettings {
@@ -792,11 +793,21 @@ export class SettingsManager {
 		return this.settings.compaction?.keepRecentTokens ?? 30000;
 	}
 
-	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+	getCompactionPercent(): number {
+		return this.settings.compaction?.compactionPercent ?? 0.8;
+	}
+
+	getCompactionSettings(): {
+		enabled: boolean;
+		reserveTokens: number;
+		keepRecentTokens: number;
+		compactionPercent: number;
+	} {
 		return {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
+			compactionPercent: this.getCompactionPercent(),
 		};
 	}
 
