@@ -95,3 +95,7 @@ packages/openpi-desktop/build/embedding/*.dylib
 packages/openpi-desktop/build/ggml-*.bin
 packages/openpi-desktop/build/*.bak
 packages/openpi-desktop/build/icon.iconset/*@2x.png
+
+# macOS + temp artifacts
+.DS_Store
+*.tmp
