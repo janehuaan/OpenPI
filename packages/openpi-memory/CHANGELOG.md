@@ -2,11 +2,22 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Milvus vector database integration: removed `@zilliz/milvus2-sdk-node` dependency, `milvus-repository.ts`, `memory-retrieval.ts`, `qwen-embeddings.ts`, `retrieval.ts`, and all Milvus-related config (`milvusAddress`, `milvusCollection`, `milvusTimeoutMs`, `embeddingBaseUrl`, `embeddingModel`, `embeddingTimeoutMs`, `strictDependency`, `namespaceSalt`). Deploy directory `deploy/milvus/` removed.
+- Qwen3 embedding model: local embedding server reverted to `bge-small-zh` (512-dim, 25 MB GGUF) as the default bundled model. Desktop UI Milvus auto-start toggle removed.
+- `semanticSearch` config option and `OPENPI_EMBEDDING_API_KEY`-based semantic reranking path in openpi-memory. Memory search is now purely local (hash-vector + BM25 hybrid).
+
+### Changed
+
+- Memory retrieval: back to the original local hybrid vector+BM25 stack (`vectors.ts` + `rank.ts`). `archiveSearchLimit` raised to 10000, `maxSnapshotEntries` to 64, `archiveSearchMinScore` lowered to 0.20 for higher recall.
+- Context injection: `agent-session` now loads structured task state (`.pi/tasks/current.json`) and context checkpoint (`.pi/context-checkpoint.json`) on startup, injecting them as messages before the current turn — preserving prompt cache for the prefix while giving the agent precise continuation state after restart or compaction.
+
 ### Added
 
-- `desktop-ops meta` reports `semanticSearch` feature state and whether an embedding key is configured (env or `secrets.env`).
-- Semantic embedding rerank for memory search: when `OPENPI_EMBEDDING_API_KEY` is set (base URL/model configurable), query results are blended with embedding similarity (`semanticSearch`, default true). Degrades silently to hash-vector + BM25 without a key or on API failure.
-- Proactive memory injection now picks the first-turn inject set via hybrid vector+BM25 relevance (`selectSnapshotEntries` gained a `rankedRest` input); the set is cached per session (invalidated when the frozen index changes) so the injected prefix stays byte-stable across turns — provider prompt-cache hits and long-session context are preserved while memories become relevance-ranked instead of alphabetically ordered.
+- Structured task state: `task-state.ts` defines `TaskState` (goal, steps with status/evidence/errors, checkpoints, nextSteps, contextNotes) persisted to `.pi/tasks/current.json`. Injected on session start so the agent resumes exactly where it left off.
+- Context checkpoint: `context-checkpoint.ts` defines `ContextCheckpoint` (goal, done, inProgress, nextSteps, decisions, issues, criticalContext, constraints) persisted to `.pi/context-checkpoint.json`. Written after compaction; loaded on restart for seamless continuation.
+- New tools: `task_state` / `task_checkpoint` for manual inspection (via the structured state files).
 
 ## [0.80.8] - 2026-07-24
 

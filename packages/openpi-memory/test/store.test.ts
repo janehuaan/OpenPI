@@ -13,6 +13,7 @@ import {
 } from "../src/extract.ts";
 import { buildLlmExtractPrompt, parseLlmExtractResponse } from "../src/llm-extract.ts";
 import { maintainMemoryIndex } from "../src/maintain.ts";
+import { buildBm25Corpus, expandQuery, LEXICON_BIN, rankBm25, rankBm25Corpus, tokenize } from "../src/rank.ts";
 import { formatSelectiveSnapshot, selectSnapshotEntries } from "../src/snapshot.ts";
 import {
 	dedupeEntries,
@@ -20,6 +21,7 @@ import {
 	loadIndex,
 	loadIndexFile,
 	parseIndex,
+	queryEntries,
 	saveIndex,
 	saveIndexAt,
 	saveTopic,
@@ -27,6 +29,18 @@ import {
 	upsertEntry,
 } from "../src/store.ts";
 import { DEFAULT_MEMORY_CONFIG } from "../src/types.ts";
+import {
+	clearVectorCache,
+	cosine,
+	decodeVectorsBin,
+	embedText,
+	encodeVectorsBin,
+	hybridSearch,
+	loadRuntimeVectors,
+	reindexVectors,
+	VECTORS_BIN,
+	VECTORS_FILE,
+} from "../src/vectors.ts";
 
 const tempDirs: string[] = [];
 
@@ -60,6 +74,26 @@ describe("memory store", () => {
 		saveTopic(cwd, "project", "deadline", "Ship the personal agent MVP by Friday.");
 		expect(loadIndex(cwd)).toEqual([{ type: "project", key: "deadline", value: "Ship by Friday" }]);
 		expect(fs.existsSync(path.join(cwd, ".pi/memory/project-deadline.md"))).toBe(true);
+	});
+
+	it("queries by keyword", () => {
+		const entries = [
+			{ type: "user" as const, key: "role", value: "backend engineer" },
+			{ type: "lesson" as const, key: "tests", value: "always run unit tests" },
+		];
+		expect(queryEntries(entries, "tests")).toHaveLength(1);
+		expect(queryEntries(entries, undefined, "user")).toHaveLength(1);
+	});
+
+	it("ranks multi-token queries with key matches first", () => {
+		const entries = [
+			{ type: "lesson" as const, key: "npm-check", value: "run check before commit" },
+			{ type: "lesson" as const, key: "other", value: "npm scripts overview" },
+			{ type: "project" as const, key: "deadline", value: "ship friday" },
+		];
+		const ranked = queryEntries(entries, "npm check");
+		expect(ranked.length).toBeGreaterThanOrEqual(1);
+		expect(ranked[0]?.key).toBe("npm-check");
 	});
 
 	it("saves global-style memory directory", () => {
@@ -241,6 +275,29 @@ describe("memory maintain", () => {
 	});
 });
 
+describe("rank bm25", () => {
+	it("tokenizes and ranks relevant docs first", () => {
+		expect(tokenize("TypeScript strict mode").length).toBeGreaterThan(0);
+		const ranked = rankBm25("typescript strict", [
+			{ id: "a", text: "prefer python loose typing" },
+			{ id: "b", text: "always use typescript strict mode in this repo" },
+			{ id: "c", text: "ship friday deadline" },
+		]);
+		expect(ranked[0]?.id).toBe("b");
+	});
+
+	it("queryEntries uses body resolver for ranking", () => {
+		const entries = [
+			{ type: "lesson" as const, key: "a", value: "general tip" },
+			{ type: "lesson" as const, key: "b", value: "workflow note" },
+		];
+		const matched = queryEntries(entries, "photon wasm resize", undefined, (entry) =>
+			entry.key === "b" ? "use photon wasm for image resize pipeline" : "unrelated body",
+		);
+		expect(matched[0]?.key).toBe("b");
+	});
+});
+
 describe("selective snapshot", () => {
 	it("pins user/feedback and ranks project/lesson by prompt", () => {
 		const entries = [
@@ -283,7 +340,121 @@ describe("selective snapshot", () => {
 	});
 });
 
-describe("durability", () => {
+describe("vectors + durability", () => {
+	it("embeds and cosine-matches related text", () => {
+		const a = embedText("typescript strict mode for this monorepo");
+		const b = embedText("use strict typescript in monorepo packages");
+		const c = embedText("buy milk and eggs tomorrow morning");
+		expect(cosine(a, b)).toBeGreaterThan(cosine(a, c));
+	});
+
+	it("tokenizes CJK into unigrams and bigrams", () => {
+		const toks = tokenize("本地向量检索不用远端");
+		expect(toks).toContain("本地");
+		expect(toks).toContain("向量");
+		expect(toks.some((t) => t.includes("检"))).toBe(true);
+	});
+
+	it("BM25 inverted corpus matches full rank for positive hits", () => {
+		const docs = [
+			{ id: "a", text: "typescript strict mode monorepo" },
+			{ id: "b", text: "buy milk and eggs" },
+			{ id: "c", text: "本地向量检索 hybrid search" },
+		];
+		const full = rankBm25("typescript monorepo", docs);
+		const corpus = buildBm25Corpus(docs);
+		const inv = rankBm25Corpus("typescript monorepo", corpus);
+		expect(inv.map((r) => r.id)).toEqual(full.map((r) => r.id));
+		expect(inv[0]?.id).toBe("a");
+		const zh = rankBm25Corpus("向量检索", corpus);
+		expect(zh[0]?.id).toBe("c");
+	});
+
+	it("writes vectors.bin + lexicon.bin and round-trips", () => {
+		const cwd = tempCwd();
+		const dir = path.join(cwd, ".pi/memory");
+		fs.mkdirSync(dir, { recursive: true });
+		const entries = [
+			{ type: "lesson" as const, key: "ts", value: "typescript strict" },
+			{ type: "user" as const, key: "tone", value: "concise answers" },
+		];
+		clearVectorCache();
+		reindexVectors(dir, entries);
+		expect(fs.existsSync(path.join(dir, VECTORS_BIN))).toBe(true);
+		expect(fs.existsSync(path.join(dir, LEXICON_BIN))).toBe(true);
+		expect(fs.existsSync(path.join(dir, VECTORS_FILE))).toBe(false);
+		clearVectorCache();
+		const runtime = loadRuntimeVectors(dir);
+		expect(runtime.ids).toHaveLength(2);
+		const again = decodeVectorsBin(encodeVectorsBin(runtime));
+		expect(again?.ids).toEqual(runtime.ids);
+		expect(again?.matrix.length).toBe(runtime.matrix.length);
+		// cold hybrid loads lexicon.bin without rebuild
+		const hits = hybridSearch(entries, "typescript strict", dir, { limit: 3 });
+		expect(hits[0]?.entry.key).toBe("ts");
+	});
+
+	it("expands bilingual queries", () => {
+		const expanded = expandQuery("简洁回答");
+		expect(expanded.toLowerCase()).toMatch(/concise|brief|short/);
+	});
+
+	it("finds archived memory when active index misses", () => {
+		const cwd = tempCwd();
+		const dir = path.join(cwd, ".pi/memory");
+		const active = [{ type: "project" as const, key: "noise", value: "unrelated grocery list milk" }];
+		saveIndex(cwd, active, 200);
+		// plant only in archive
+		archiveEntry(
+			dir,
+			"lesson",
+			"secret-codename",
+			"Azure Falcon release gate token 7f3a9c2e",
+			"Internal codename Azure Falcon.",
+			"capacity-overflow",
+		);
+		reindexVectors(dir, active);
+		const hits = queryEntries(active, "Azure Falcon 7f3a9c2e", undefined, undefined, {
+			memoryDirectory: dir,
+			hybrid: true,
+			searchArchive: true,
+			limit: 10,
+		});
+		expect(hits.some((h) => h.key === "secret-codename")).toBe(true);
+	});
+
+	it("hybrid search finds related memories", () => {
+		const cwd = tempCwd();
+		const dir = path.join(cwd, ".pi/memory");
+		const entries = [
+			{ type: "lesson" as const, key: "ts", value: "always enable typescript strict" },
+			{ type: "project" as const, key: "grocery", value: "buy milk" },
+		];
+		saveIndex(cwd, entries, 200);
+		saveTopic(cwd, "lesson", "ts", "strict null checks and no any");
+		saveTopic(cwd, "project", "grocery", "weekly shopping list");
+		reindexVectors(dir, entries, (e) => (e.key === "ts" ? "strict null checks and no any" : "weekly shopping list"));
+		const hits = hybridSearch(entries, "typescript strict null checks", dir, { limit: 5 });
+		expect(hits[0]?.entry.key).toBe("ts");
+	});
+
+	it("hybrid search finds Chinese-indexed memory from Chinese query", () => {
+		const cwd = tempCwd();
+		const dir = path.join(cwd, ".pi/memory");
+		const entries = [
+			{
+				type: "project" as const,
+				key: "local-mem",
+				value: "记忆全部本地存储，向量检索不用远端服务",
+			},
+			{ type: "project" as const, key: "grocery", value: "buy milk eggs bread" },
+		];
+		saveIndex(cwd, entries, 200);
+		reindexVectors(dir, entries);
+		const hits = hybridSearch(entries, "本地向量检索", dir, { limit: 5 });
+		expect(hits[0]?.entry.key).toBe("local-mem");
+	});
+
 	it("archives instead of losing data and recovers index from journal", () => {
 		const cwd = tempCwd();
 		const dir = path.join(cwd, ".pi/memory");
@@ -292,6 +463,7 @@ describe("durability", () => {
 		archiveEntry(dir, "user", "tone", "be concise and technical", "Prefer concise technical answers.", "test");
 		const backup = backupMemoryDirectory(dir, "test");
 		expect(fs.existsSync(backup)).toBe(true);
+		// wipe index and recover
 		fs.unlinkSync(path.join(dir, "MEMORY.md"));
 		const recovered = recoverIndex(dir, 200);
 		expect(recovered.recovered).toBeGreaterThanOrEqual(1);

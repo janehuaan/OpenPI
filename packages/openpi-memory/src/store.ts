@@ -1,11 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { appendJournal, archiveEntry, ensureDurabilityLayout } from "./durability.ts";
-import { MEMORY_TYPES, type MemoryIndexEntry, type MemoryType } from "./types.ts";
+import { appendJournal, archiveEntry, ensureDurabilityLayout, listArchivedEntries } from "./durability.ts";
+import { rankBm25 } from "./rank.ts";
+import { MEMORY_TYPES, type MemoryIndexEntry, type MemoryMetadata, type MemoryType } from "./types.ts";
+import { hybridSearch, removeVector, upsertVector } from "./vectors.ts";
 
 export const MEMORY_DIR = ".pi/memory";
 export const INDEX_FILE = "MEMORY.md";
-
 export const METADATA_FILE = "memory-metadata.json";
 
 /**
@@ -27,11 +28,11 @@ export function metadataPathAt(memoryDirectory: string): string {
 	return path.join(memoryDirectory, METADATA_FILE);
 }
 
-export function loadMetadataAt(memoryDirectory: string): import("./types.ts").MemoryMetadata {
+export function loadMetadataAt(memoryDirectory: string): MemoryMetadata {
 	const file = metadataPathAt(memoryDirectory);
 	if (!fs.existsSync(file)) return { entries: {} };
 	try {
-		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as import("./types.ts").MemoryMetadata;
+		const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as MemoryMetadata;
 		return parsed && typeof parsed === "object" && parsed.entries && typeof parsed.entries === "object"
 			? parsed
 			: { entries: {} };
@@ -40,7 +41,7 @@ export function loadMetadataAt(memoryDirectory: string): import("./types.ts").Me
 	}
 }
 
-export function saveMetadataAt(memoryDirectory: string, metadata: import("./types.ts").MemoryMetadata): void {
+export function saveMetadataAt(memoryDirectory: string, metadata: MemoryMetadata): void {
 	fs.mkdirSync(memoryDirectory, { recursive: true });
 	const file = metadataPathAt(memoryDirectory);
 	const tmp = `${file}.${process.pid}.tmp`;
@@ -213,6 +214,13 @@ export function saveIndexAt(
 			archiveEntry(memoryDirectory, entry.type, entry.key, entry.value, body, "capacity-overflow");
 			const topic = path.join(memoryDirectory, topicFileName(entry.type, entry.key));
 			if (fs.existsSync(topic)) fs.unlinkSync(topic);
+			removeVector(memoryDirectory, entry.type, entry.key);
+			// Also drop metadata
+			try {
+				const meta = loadMetadataAt(memoryDirectory);
+				delete meta.entries[metadataId(entry.type, entry.key)];
+				saveMetadataAt(memoryDirectory, meta);
+			} catch {}
 		}
 	}
 	const capped = deduped.length > maxEntries ? deduped.slice(-maxEntries) : deduped;
@@ -249,6 +257,7 @@ export function saveTopicAt(
 	const tmp = `${file}.${process.pid}.tmp`;
 	fs.writeFileSync(tmp, content, "utf8");
 	fs.renameSync(tmp, file);
+	upsertVector(memoryDirectory, type, key, `${type} ${key} ${body}`);
 	const allMetadata = loadMetadataAt(memoryDirectory);
 	const id = metadataId(type, key);
 	const previous = allMetadata.entries[id];
@@ -259,7 +268,7 @@ export function saveTopicAt(
 		createdAt: previous?.createdAt ?? now,
 		updatedAt: now,
 		expiresAt: metadata?.expiresAt ?? previous?.expiresAt,
-		source: metadata?.source ?? previous?.source ?? "manual",
+		source: metadata?.source ?? previous?.source,
 	};
 	saveMetadataAt(memoryDirectory, allMetadata);
 	appendJournal(memoryDirectory, {
@@ -290,6 +299,7 @@ export function deleteTopicAt(
 	} else {
 		appendJournal(memoryDirectory, { op: "delete", type, key, value, note: "hard-delete" });
 	}
+	removeVector(memoryDirectory, type, key);
 	if (fs.existsSync(file)) {
 		fs.unlinkSync(file);
 		return true;
@@ -304,9 +314,7 @@ export function readTopic(cwd: string, type: MemoryType, key: string): string | 
 }
 
 export function readTopicAt(memoryDirectory: string, type: MemoryType, key: string): string | undefined {
-	const canonical = path.join(memoryDirectory, topicFileName(type, key));
-	const legacy = path.join(memoryDirectory, `${type}-${key}.md`);
-	const file = fs.existsSync(canonical) ? canonical : legacy;
+	const file = path.join(memoryDirectory, topicFileName(type, key));
 	if (!fs.existsSync(file)) return undefined;
 	return fs.readFileSync(file, "utf8");
 }
@@ -328,21 +336,92 @@ export function formatSnapshot(entries: MemoryIndexEntry[]): string {
 	return lines.join("\n");
 }
 
+/**
+ * Ranked query: hybrid vector+BM25 when memoryDirectory provided, else BM25.
+ * Optional archive fallback when active hits are empty or weak.
+ */
 export function queryEntries(
 	entries: MemoryIndexEntry[],
 	keyword?: string,
 	type?: MemoryType,
 	bodyResolver?: (entry: MemoryIndexEntry) => string,
+	options?: {
+		memoryDirectory?: string;
+		hybrid?: boolean;
+		alpha?: number;
+		limit?: number;
+		searchArchive?: boolean;
+		archiveSearchLimit?: number;
+		archiveSearchMinScore?: number;
+	},
 ): MemoryIndexEntry[] {
 	const typed = type ? entries.filter((entry) => entry.type === type) : entries;
-	const needle = keyword?.trim().toLowerCase();
+	const needle = keyword?.trim();
 	if (!needle) return typed;
-	return typed.filter((entry) => {
+
+	const limit = options?.limit ?? 100;
+	const searchArchive = options?.searchArchive !== false;
+	const minScore = options?.archiveSearchMinScore ?? 0.25;
+
+	if (options?.hybrid !== false && options?.memoryDirectory) {
+		const hits = hybridSearch(typed, needle, options.memoryDirectory, {
+			bodyResolver,
+			type,
+			alpha: options.alpha,
+			limit,
+		});
+		const topScore = hits[0]?.score ?? 0;
+		// Only fall through when active is empty or top hit is weak — not on every short result list.
+		const needArchive = searchArchive && (hits.length === 0 || topScore < minScore);
+
+		if (!needArchive) {
+			return hits.map((h) => h.entry);
+		}
+
+		const archived = listArchivedEntries(options.memoryDirectory, {
+			limit: options.archiveSearchLimit ?? 5000,
+		});
+		const archiveTyped = type ? archived.filter((e) => e.type === type) : archived;
+		if (archiveTyped.length > 0) {
+			// Archive: BM25/hybrid without durable vectors (ephemeral score over value+body)
+			const archHits = hybridSearch(archiveTyped, needle, undefined, {
+				bodyResolver: (e) => {
+					const a = e as MemoryIndexEntry & { body?: string };
+					return a.body ?? "";
+				},
+				type,
+				alpha: options.alpha,
+				limit,
+			});
+			const seen = new Set(hits.map((h) => `${h.entry.type}:${h.entry.key}`));
+			const merged = [...hits];
+			for (const h of archHits) {
+				const id = `${h.entry.type}:${h.entry.key}`;
+				if (seen.has(id)) continue;
+				// slight penalty so active still wins ties
+				merged.push({ ...h, score: h.score * 0.92 });
+				seen.add(id);
+			}
+			merged.sort((a, b) => b.score - a.score || a.entry.key.localeCompare(b.entry.key));
+			return merged.slice(0, limit).map((h) => h.entry);
+		}
+		if (hits.length > 0) return hits.map((h) => h.entry);
+	}
+
+	const docs = typed.map((entry) => {
 		const body = bodyResolver?.(entry) ?? "";
-		return (
-			entry.key.toLowerCase().includes(needle) ||
-			entry.value.toLowerCase().includes(needle) ||
-			body.toLowerCase().includes(needle)
-		);
+		const text = `${entry.type} ${entry.key} ${entry.key.replace(/-/g, " ")} ${entry.value}\n${body}`;
+		return { id: `${entry.type}:${entry.key}`, text, entry };
 	});
+
+	const ranked = rankBm25(
+		needle,
+		docs.map((d) => ({ id: d.id, text: d.text })),
+	);
+	if (ranked.length === 0) {
+		const lower = needle.toLowerCase();
+		return typed.filter((e) => e.key.toLowerCase().includes(lower) || e.value.toLowerCase().includes(lower));
+	}
+	const byId = new Map(docs.map((d) => [d.id, d.entry]));
+	return ranked.map((r) => byId.get(r.id)!).filter(Boolean);
 }

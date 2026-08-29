@@ -1,7 +1,7 @@
 import { Command as CommandPrimitive } from "cmdk";
-import { Search } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ElementRef, forwardRef } from "react";
 import { cn } from "../../lib/utils";
+import { Search } from "../icons.tsx";
 
 const Command = forwardRef<ElementRef<typeof CommandPrimitive>, ComponentPropsWithoutRef<typeof CommandPrimitive>>(
 	({ className, ...props }, ref) => <CommandPrimitive ref={ref} className={cn("ui-command", className)} {...props} />,

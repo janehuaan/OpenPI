@@ -13,8 +13,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	ensureLocalEmbeddingServer,
+	LOCAL_EMBEDDING_BASE_URL,
 	localEmbeddingAvailable,
-	localEmbeddingBaseUrl,
 } from "../local-embedding-server.ts";
 
 export interface EmbeddingConfig {
@@ -30,8 +30,8 @@ export function loadEmbeddingConfig(env: NodeJS.ProcessEnv = process.env): Embed
 	if (localEmbeddingAvailable(env) || env.OPENPI_EMBEDDING_LOCAL !== undefined) {
 		return {
 			apiKey: "local",
-			baseUrl: localEmbeddingBaseUrl(env),
-			model: env.OPENPI_EMBEDDING_MODEL ?? "qwen3-embedding-0.6b",
+			baseUrl: LOCAL_EMBEDDING_BASE_URL,
+			model: env.OPENPI_EMBEDDING_MODEL ?? "local-bge",
 		};
 	}
 	const apiKey = env.OPENPI_EMBEDDING_API_KEY;

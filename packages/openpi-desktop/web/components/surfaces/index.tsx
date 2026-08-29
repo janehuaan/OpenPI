@@ -1,69 +1,4 @@
 import {
-	ArrowDown,
-	ArrowLeft,
-	AtSign,
-	Bell,
-	Blocks,
-	BookOpen,
-	Bot,
-	BrainCircuit,
-	Cable,
-	CalendarClock,
-	Check,
-	ChevronDown,
-	ChevronRight,
-	ChevronsUpDown,
-	CircleStop,
-	Clapperboard,
-	Clock3,
-	Copy,
-	Cpu,
-	Database,
-	Download,
-	ExternalLink,
-	FileJson,
-	FileText,
-	Folder,
-	FolderPlus,
-	GitBranch,
-	Github,
-	History,
-	Image as ImageIcon,
-	ListTodo,
-	LogIn,
-	Menu,
-	MessageSquare,
-	Mic,
-	MoreHorizontal,
-	Package,
-	PanelLeftClose,
-	PanelLeftOpen,
-	PanelRight,
-	Paperclip,
-	Pause,
-	Pencil,
-	Pin,
-	Play,
-	Plus,
-	RefreshCw,
-	Save,
-	Search,
-	Send,
-	Server,
-	Share2,
-	Slash,
-	Sparkles,
-	Square,
-	Store,
-	Terminal,
-	TerminalSquare,
-	Trash2,
-	UserRound,
-	WandSparkles,
-	Wrench,
-	X,
-} from "lucide-react";
-import {
 	type ClipboardEvent,
 	type DragEvent,
 	type ReactNode,
@@ -160,6 +95,70 @@ import type {
 	VisionFallbackModel,
 	WorkspaceSummary,
 } from "../../types";
+import {
+	ArrowDown,
+	ArrowLeft,
+	AtSign,
+	Bell,
+	Blocks,
+	BookOpen,
+	Bot,
+	BrainCircuit,
+	Cable,
+	CalendarClock,
+	Check,
+	ChevronDown,
+	ChevronRight,
+	ChevronsUpDown,
+	CircleStop,
+	Clapperboard,
+	Clock3,
+	Copy,
+	Cpu,
+	Download,
+	ExternalLink,
+	FileJson,
+	FileText,
+	Folder,
+	FolderPlus,
+	GitBranch,
+	Github,
+	History,
+	Image as ImageIcon,
+	ListTodo,
+	LogIn,
+	Menu,
+	MessageSquare,
+	Mic,
+	MoreHorizontal,
+	Package,
+	PanelLeftClose,
+	PanelLeftOpen,
+	PanelRight,
+	Paperclip,
+	Pause,
+	Pencil,
+	Pin,
+	Play,
+	Plus,
+	RefreshCw,
+	Save,
+	Search,
+	Send,
+	Server,
+	Share2,
+	Slash,
+	Sparkles,
+	Square,
+	Store,
+	Terminal,
+	TerminalSquare,
+	Trash2,
+	UserRound,
+	WandSparkles,
+	Wrench,
+	X,
+} from "../icons.tsx";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -2348,8 +2347,6 @@ export function IntelligenceSurface({
 export function DaemonSurface({
 	snapshot,
 	busy,
-	autoStartMilvus,
-	onAutoStartMilvusChange,
 	onOpenSidebar,
 	onStart,
 	onStop,
@@ -2359,8 +2356,6 @@ export function DaemonSurface({
 }: {
 	snapshot: DesktopSnapshot;
 	busy?: string;
-	autoStartMilvus?: boolean;
-	onAutoStartMilvusChange(enabled: boolean): void;
 	onOpenSidebar(): void;
 	onStart(): void;
 	onStop(): void;
@@ -2439,24 +2434,6 @@ export function DaemonSurface({
 								</button>
 							)}
 						</div>
-					</div>
-					<div className="daemon-milvus-band">
-						<span className="daemon-symbol">
-							<Database size={20} />
-						</span>
-						<div>
-							<strong>自动拉起 Milvus</strong>
-							<small>对话需要语义记忆检索时，自动启动本地的 Milvus 向量库（Docker）</small>
-						</div>
-						<button
-							type="button"
-							className={`milvus-auto-toggle ${autoStartMilvus ? "active" : ""}`}
-							aria-label={autoStartMilvus ? "关闭自动拉起 Milvus" : "开启自动拉起 Milvus"}
-							title={autoStartMilvus ? "关闭自动拉起 Milvus" : "开启自动拉起 Milvus"}
-							onClick={() => onAutoStartMilvusChange(!autoStartMilvus)}
-						>
-							<i />
-						</button>
 					</div>
 					<div className="operations-metrics four">
 						<div>
@@ -4779,12 +4756,90 @@ const API_TYPE_OPTIONS = [
 	{ value: "openai-responses", label: "OpenAI Responses" },
 ] as const;
 
-interface CatalogProviderEntry {
+interface ModelTableEntry {
 	id: string;
 	name: string;
-	models: AvailableModel[];
-	config?: ModelProviderConfig;
-	auth?: { type?: string; source?: string; configured: boolean };
+	contextWindow?: number;
+	maxTokens?: number;
+	cost?: {
+		input?: number;
+		output?: number;
+	};
+}
+
+/** Built-in provider IDs known to the agent runtime (pi-ai KnownProvider list). */
+const BUILTIN_PROVIDER_IDS: ReadonlySet<string> = new Set([
+	"amazon-bedrock",
+	"ant-ling",
+	"anthropic",
+	"google",
+	"google-vertex",
+	"openai",
+	"azure-openai-responses",
+	"openai-codex",
+	"radius",
+	"nvidia",
+	"deepseek",
+	"github-copilot",
+	"xai",
+	"groq",
+	"cerebras",
+	"openrouter",
+	"vercel-ai-gateway",
+	"zai",
+	"zai-coding-cn",
+	"mistral",
+	"minimax",
+	"minimax-cn",
+	"moonshotai",
+	"moonshotai-cn",
+	"huggingface",
+	"fireworks",
+	"together",
+	"opencode",
+	"opencode-go",
+	"kimi-coding",
+	"cloudflare-workers-ai",
+	"cloudflare-ai-gateway",
+	"xiaomi",
+	"xiaomi-token-plan-cn",
+	"xiaomi-token-plan-ams",
+	"xiaomi-token-plan-sgp",
+]);
+
+function formatTokenCount(value: number): string {
+	if (value >= 1_000_000) {
+		const millions = value / 1_000_000;
+		return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+	}
+	return `${Math.round(value / 1000)}K`;
+}
+
+function ModelCatalogTable({ models }: { models: ModelTableEntry[] }) {
+	return (
+		<table className="model-catalog-table">
+			<thead>
+				<tr>
+					<th>模型</th>
+					<th>上下文</th>
+					<th>最大输出</th>
+					<th>输入 $/M</th>
+					<th>输出 $/M</th>
+				</tr>
+			</thead>
+			<tbody>
+				{models.map((model) => (
+					<tr key={model.id}>
+						<td>{model.name || model.id}</td>
+						<td>{model.contextWindow ? formatTokenCount(model.contextWindow) : "—"}</td>
+						<td>{model.maxTokens ? formatTokenCount(model.maxTokens) : "—"}</td>
+						<td>{model.cost?.input != null ? `$${model.cost.input}` : "—"}</td>
+						<td>{model.cost?.output != null ? `$${model.cost.output}` : "—"}</td>
+					</tr>
+				))}
+			</tbody>
+		</table>
+	);
 }
 
 function providerDisplayName(providerId: string, models: AvailableModel[], config?: ModelProviderConfig): string {
@@ -4957,8 +5012,10 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 	const [error, setError] = useState<string | null>(null);
 	const [loginBusy, setLoginBusy] = useState<string | null>(null);
 	const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
+	const [modelCatalog, setModelCatalog] = useState<AvailableModel[]>([]);
 	const [loadingCatalog, setLoadingCatalog] = useState(true);
 	const [expandedId, setExpandedId] = useState<string | null>(null);
+	const [searchQuery, setSearchQuery] = useState("");
 
 	const loadProviders = useCallback(async () => {
 		setLoadingProviders(true);
@@ -4989,15 +5046,21 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 
 	const loadCatalog = useCallback(async () => {
 		if (!instanceId) {
+			setModelCatalog([]);
 			setAvailableModels([]);
 			setLoadingCatalog(false);
 			return;
 		}
 		setLoadingCatalog(true);
 		try {
-			const models = await desktopApi.getAvailableModels(instanceId);
-			setAvailableModels(models);
+			const [catalog, available] = await Promise.all([
+				desktopApi.getModelCatalog(instanceId),
+				desktopApi.getAvailableModels(instanceId).catch(() => []),
+			]);
+			setModelCatalog(catalog ?? []);
+			setAvailableModels(available ?? []);
 		} catch {
+			setModelCatalog([]);
 			setAvailableModels([]);
 		} finally {
 			setLoadingCatalog(false);
@@ -5061,7 +5124,7 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 
 	const openEditForm = (id: string) => {
 		const config = providers[id];
-		const catalogModels = availableModels.filter((model) => model.provider === id);
+		const catalogModels = modelCatalog.filter((model) => model.provider === id);
 		if (!config && catalogModels.length === 0) return;
 		setIsNew(false);
 		setEditingId(id);
@@ -5074,7 +5137,7 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 
 	const openCatalogForm = (id: string) => {
 		const config = providers[id];
-		const catalogModels = availableModels.filter((model) => model.provider === id);
+		const catalogModels = modelCatalog.filter((model) => model.provider === id);
 		setIsNew(false);
 		setEditingId(null);
 		setFormId(id);
@@ -5128,31 +5191,236 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 		}
 	};
 
-	const catalogProviderEntries = useMemo<CatalogProviderEntry[]>(() => {
+	interface ProviderEntry {
+		id: string;
+		name: string;
+		custom: boolean;
+		configured: boolean;
+		models: AvailableModel[];
+		config?: ModelProviderConfig;
+		auth?: { type?: string; source?: string; configured: boolean };
+	}
+
+	const providerEntries = useMemo<ProviderEntry[]>(() => {
+		// Full catalog (built-in + custom, configured or not), grouped by provider.
 		const groups = new Map<string, AvailableModel[]>();
-		for (const model of availableModels) {
+		for (const model of modelCatalog) {
 			const list = groups.get(model.provider) ?? [];
 			list.push(model);
 			groups.set(model.provider, list);
 		}
-		return [...groups.entries()]
-			.map(([id, models]) => ({
-				id,
-				name: providerDisplayName(id, models, providers[id]),
-				models: models.slice().sort((left, right) => (left.name || left.id).localeCompare(right.name || right.id)),
-				config: providers[id],
-				auth: authStatuses[id],
-			}))
-			.sort((left, right) => left.name.localeCompare(right.name));
-	}, [authStatuses, availableModels, providers]);
 
-	const catalogProviderIds = useMemo(
-		() => new Set(catalogProviderEntries.map((entry) => entry.id)),
-		[catalogProviderEntries],
+		// Providers considered configured: present in the available snapshot,
+		// authenticated via OAuth, or holding an API key in models.json.
+		const availableProviders = new Set(availableModels.map((model) => model.provider));
+
+		const byId = new Map<string, ProviderEntry>();
+		const ensure = (id: string): ProviderEntry => {
+			let entry = byId.get(id);
+			if (!entry) {
+				entry = {
+					id,
+					name: id,
+					custom: !BUILTIN_PROVIDER_IDS.has(id),
+					configured: false,
+					models: [],
+					config: providers[id],
+					auth: authStatuses[id],
+				};
+				byId.set(id, entry);
+			}
+			return entry;
+		};
+
+		for (const [id, models] of groups) {
+			const entry = ensure(id);
+			entry.name = providerDisplayName(id, models, providers[id]);
+			entry.models = models
+				.slice()
+				.sort((left, right) => (left.name || left.id).localeCompare(right.name || right.id));
+		}
+		for (const [id, config] of Object.entries(providers)) {
+			const entry = ensure(id);
+			if (entry.models.length === 0) entry.name = config?.name || id;
+		}
+
+		for (const entry of byId.values()) {
+			entry.configured =
+				availableProviders.has(entry.id) || Boolean(entry.auth?.configured) || Boolean(entry.config?.apiKey);
+		}
+
+		return [...byId.values()].sort(
+			(left, right) => Number(right.configured) - Number(left.configured) || left.name.localeCompare(right.name),
+		);
+	}, [authStatuses, availableModels, modelCatalog, providers]);
+
+	const enabledEntries = useMemo(() => providerEntries.filter((entry) => entry.configured), [providerEntries]);
+	const disabledCustomEntries = useMemo(
+		() => providerEntries.filter((entry) => entry.custom && !entry.configured),
+		[providerEntries],
+	);
+	const disabledBuiltinEntries = useMemo(
+		() => providerEntries.filter((entry) => !entry.custom && !entry.configured),
+		[providerEntries],
 	);
 
-	const providerEntries = Object.entries(providers);
-	const customEntries = providerEntries.filter(([id]) => !catalogProviderIds.has(id));
+	const normalizedSearch = searchQuery.trim().toLowerCase();
+	const matchesSearch = (text: string) => text.toLowerCase().includes(normalizedSearch);
+	const matchesEntry = (entry: ProviderEntry) =>
+		matchesSearch(`${entry.id} ${entry.name} ${entry.config?.baseUrl ?? ""}`);
+	const filteredEnabledEntries = normalizedSearch ? enabledEntries.filter(matchesEntry) : enabledEntries;
+	const filteredDisabledCustomEntries = normalizedSearch
+		? disabledCustomEntries.filter(matchesEntry)
+		: disabledCustomEntries;
+	const filteredDisabledBuiltinEntries = normalizedSearch
+		? disabledBuiltinEntries.filter(matchesEntry)
+		: disabledBuiltinEntries;
+
+	const renderProviderItem = (entry: ProviderEntry) => {
+		const expanded = expandedId === entry.id;
+		const isOauth = entry.auth?.type === "oauth";
+		const defaultBaseUrl = providerDefaultBaseUrl(entry.models);
+		const currentBaseUrl = entry.config?.baseUrl ?? defaultBaseUrl ?? "默认地址";
+		const currentApi = entry.config?.api ?? providerDefaultApi(entry.models);
+		// Configured providers and disabled built-ins configure through the inline
+		// form; unconfigured customs only offer edit/delete until a key is set.
+		const useInlineForm = entry.configured || !entry.custom;
+		return (
+			<div className="model-provider-catalog-item" key={entry.id}>
+				<button
+					type="button"
+					className="model-provider-catalog-head"
+					onClick={() => {
+						setExpandedId(expanded ? null : entry.id);
+						if (!expanded && useInlineForm) openCatalogForm(entry.id);
+					}}
+				>
+					{expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+					<span className={`model-provider-icon ${entry.custom ? "custom" : "builtin"}`}>
+						<Server size={16} />
+					</span>
+					<span className="model-provider-info">
+						<strong>
+							{entry.name}
+							{entry.custom && <span className="model-provider-kind-badge">自定义</span>}
+							{entry.config?.apiKey && <span className="model-api-key-badge">API Key</span>}
+						</strong>
+						<span>
+							{entry.models.length > 0 ? `${entry.models.length} 个模型 · ` : ""}
+							{currentBaseUrl}
+						</span>
+					</span>
+					<span className="model-api-key-badge muted">{currentApi}</span>
+					{entry.configured && <span className="model-api-key-badge">已启用</span>}
+				</button>
+				{expanded && (
+					<div className="model-provider-catalog-body">
+						{useInlineForm ? (
+							<>
+								<div className="model-provider-inline-form">
+									<label className="model-form-field">
+										<span>显示名称</span>
+										<input
+											type="text"
+											value={formId === entry.id ? formName : (entry.config?.name ?? "")}
+											placeholder={entry.name}
+											onChange={(event) => setFormName(event.target.value)}
+										/>
+									</label>
+									<label className="model-form-field">
+										<span>Base URL</span>
+										<input
+											type="text"
+											value={formId === entry.id ? formBaseUrl : (currentBaseUrl ?? "")}
+											placeholder={defaultBaseUrl ?? "默认地址"}
+											onChange={(event) => setFormBaseUrl(event.target.value)}
+										/>
+									</label>
+									<label className="model-form-field">
+										<span>API Key</span>
+										<input
+											type="password"
+											value={formId === entry.id ? formApiKey : ""}
+											placeholder={entry.configured ? "已配置，输入新 Key 覆盖" : "API Key"}
+											onChange={(event) => setFormApiKey(event.target.value)}
+										/>
+									</label>
+									<label className="model-form-field">
+										<span>API 类型</span>
+										<select
+											value={formId === entry.id ? formApi : currentApi}
+											onChange={(event) => setFormApi(event.target.value)}
+										>
+											{API_TYPE_OPTIONS.map((option) => (
+												<option key={option.value} value={option.value}>
+													{option.label}
+												</option>
+											))}
+										</select>
+									</label>
+									<div className="model-provider-inline-actions">
+										<button
+											type="button"
+											className="primary"
+											disabled={saving || formId !== entry.id}
+											onClick={() => void handleSave(entry.id)}
+										>
+											{saving ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+											{entry.configured ? "更新配置" : "保存配置"}
+										</button>
+										{isOauth && (
+											<button
+												type="button"
+												className={entry.configured ? "secondary" : "primary"}
+												disabled={loginBusy === entry.id || !instanceId}
+												onClick={() =>
+													void (entry.configured ? handleLogout(entry.id) : handleLogin(entry.id))
+												}
+											>
+												{loginBusy === entry.id ? (
+													<RefreshCw size={14} className="spin" />
+												) : (
+													<LogIn size={14} />
+												)}
+												{entry.configured ? "登出" : "登录"}
+											</button>
+										)}
+										{entry.custom && (
+											<button type="button" className="danger" onClick={() => void handleDelete(entry.id)}>
+												<Trash2 size={14} />
+												删除服务商
+											</button>
+										)}
+									</div>
+								</div>
+								{entry.models.length > 0 && <ModelCatalogTable models={entry.models} />}
+							</>
+						) : (
+							<>
+								<div className="model-provider-custom-actions">
+									<button type="button" onClick={() => openEditForm(entry.id)}>
+										<Pencil size={13} />
+										编辑配置
+									</button>
+									<button type="button" className="danger" onClick={() => void handleDelete(entry.id)}>
+										<Trash2 size={13} />
+										删除服务商
+									</button>
+								</div>
+								{entry.models.length > 0 ? (
+									<ModelCatalogTable models={entry.models} />
+								) : (
+									<p className="model-provider-models-empty">
+										未配置模型列表，调用时使用服务商返回的默认模型。
+									</p>
+								)}
+							</>
+						)}
+					</div>
+				)}
+			</div>
+		);
+	};
 
 	return (
 		<div className="model-providers-panel">
@@ -5241,14 +5509,23 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 			) : (
 				<>
 					<div className="model-providers-toolbar">
-						<button type="button" className="primary" onClick={openAddForm}>
-							<Plus size={14} />
-							自定义服务商
-						</button>
+						<div className="model-providers-toolbar-left">
+							<button type="button" className="primary" onClick={openAddForm}>
+								<Plus size={14} />
+								自定义服务商
+							</button>
+							<div className="model-provider-search">
+								<Search size={13} />
+								<input
+									type="text"
+									placeholder="搜索服务商…"
+									value={searchQuery}
+									onChange={(event) => setSearchQuery(event.target.value)}
+								/>
+							</div>
+						</div>
 						<span className="model-providers-count">
-							{catalogProviderEntries.length > 0
-								? `pi.dev 支持 ${catalogProviderEntries.length} 个服务商`
-								: "打开对话后加载 pi.dev 服务商"}
+							{providerEntries.length > 0 ? `共 ${providerEntries.length} 个服务商` : "打开对话后加载服务商目录"}
 						</span>
 					</div>
 
@@ -5261,209 +5538,54 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 						</div>
 					) : (
 						<>
-							{customEntries.length > 0 && (
+							{filteredEnabledEntries.length > 0 && (
 								<section className="model-provider-group">
 									<div className="model-provider-group-heading">
-										<strong>自定义服务商</strong>
-										<span>{customEntries.length}</span>
+										<strong>已启用的服务商</strong>
+										<span>{filteredEnabledEntries.length}</span>
 									</div>
-									{customEntries.map(([id, config]) => (
-										<article className="model-provider-row" key={id}>
-											<div className="model-provider-icon custom">
-												<Server size={16} />
-											</div>
-											<div className="model-provider-info">
-												<strong>
-													{config.name || id}
-													{config.apiKey && <span className="model-api-key-badge">API Key</span>}
-												</strong>
-												<span>{config.baseUrl || "默认地址"}</span>
-											</div>
-											<div className="model-provider-actions">
-												<button
-													type="button"
-													title="编辑"
-													aria-label="编辑"
-													onClick={() => openEditForm(id)}
-												>
-													<Pencil size={13} />
-												</button>
-												<button
-													type="button"
-													className="danger"
-													title="删除"
-													aria-label="删除"
-													onClick={() => void handleDelete(id)}
-												>
-													<Trash2 size={13} />
-												</button>
-											</div>
-										</article>
-									))}
+									{filteredEnabledEntries.length === 0 ? (
+										<div className="model-providers-search-empty">没有匹配的服务商</div>
+									) : (
+										filteredEnabledEntries.map((entry) => renderProviderItem(entry))
+									)}
 								</section>
 							)}
 
-							<section className="model-provider-group">
-								<div className="model-provider-group-heading">
-									<strong>pi.dev 支持的服务商</strong>
-									<span>{catalogProviderEntries.length}</span>
-								</div>
+							{filteredDisabledCustomEntries.length > 0 && (
+								<section className="model-provider-group">
+									<div className="model-provider-group-heading">
+										<strong>自定义服务商</strong>
+										<span>{filteredDisabledCustomEntries.length}</span>
+									</div>
+									{filteredDisabledCustomEntries.length === 0 ? (
+										<div className="model-providers-search-empty">没有匹配的服务商</div>
+									) : (
+										filteredDisabledCustomEntries.map((entry) => renderProviderItem(entry))
+									)}
+								</section>
+							)}
 
-								{loadingCatalog ? (
-									<div className="model-providers-loading">
-										<RefreshCw size={18} className="spin" />
-										<span>加载目录…</span>
+							{filteredDisabledBuiltinEntries.length > 0 && (
+								<section className="model-provider-group">
+									<div className="model-provider-group-heading">
+										<strong>内置服务商</strong>
+										<span>{filteredDisabledBuiltinEntries.length}</span>
 									</div>
-								) : catalogProviderEntries.length === 0 ? (
-									<div className="model-providers-empty">
-										<Server size={28} />
-										<strong>暂无可用服务商</strong>
-										<span>打开一个对话后会自动加载 pi.dev 服务商目录。</span>
-									</div>
-								) : (
-									catalogProviderEntries.map((entry) => {
-										const isOauth = entry.auth?.type === "oauth";
-										const configured = entry.auth?.configured || !!entry.config?.apiKey;
-										const expanded = expandedId === entry.id;
-										const defaultBaseUrl = providerDefaultBaseUrl(entry.models);
-										const currentBaseUrl = entry.config?.baseUrl ?? defaultBaseUrl ?? "默认地址";
-										const currentApi = entry.config?.api ?? providerDefaultApi(entry.models);
-										return (
-											<div className="model-provider-catalog-item" key={entry.id}>
-												<button
-													type="button"
-													className="model-provider-catalog-head"
-													onClick={() => {
-														setExpandedId(expanded ? null : entry.id);
-														if (!expanded) openCatalogForm(entry.id);
-													}}
-												>
-													{expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-													<span className="model-provider-icon builtin">
-														<Server size={16} />
-													</span>
-													<span className="model-provider-info">
-														<strong>{entry.name}</strong>
-														<span>
-															{entry.models.length} 个模型 · {currentBaseUrl}
-														</span>
-													</span>
-													<span className="model-api-key-badge muted">{currentApi}</span>
-													{configured && <span className="model-api-key-badge">已配置</span>}
-												</button>
-												{expanded && (
-													<div className="model-provider-catalog-body">
-														<div className="model-provider-inline-form">
-															<label className="model-form-field">
-																<span>显示名称</span>
-																<input
-																	type="text"
-																	value={formId === entry.id ? formName : (entry.config?.name ?? "")}
-																	placeholder={entry.name}
-																	onChange={(event) => setFormName(event.target.value)}
-																/>
-															</label>
-															<label className="model-form-field">
-																<span>Base URL</span>
-																<input
-																	type="text"
-																	value={formId === entry.id ? formBaseUrl : (currentBaseUrl ?? "")}
-																	placeholder={defaultBaseUrl ?? "默认地址"}
-																	onChange={(event) => setFormBaseUrl(event.target.value)}
-																/>
-															</label>
-															<label className="model-form-field">
-																<span>API Key</span>
-																<input
-																	type="password"
-																	value={formId === entry.id ? formApiKey : ""}
-																	placeholder={configured ? "已配置，输入新 Key 覆盖" : "API Key"}
-																	onChange={(event) => setFormApiKey(event.target.value)}
-																/>
-															</label>
-															<label className="model-form-field">
-																<span>API 类型</span>
-																<select
-																	value={formId === entry.id ? formApi : currentApi}
-																	onChange={(event) => setFormApi(event.target.value)}
-																>
-																	{API_TYPE_OPTIONS.map((option) => (
-																		<option key={option.value} value={option.value}>
-																			{option.label}
-																		</option>
-																	))}
-																</select>
-															</label>
-															<div className="model-provider-inline-actions">
-																<button
-																	type="button"
-																	className="primary"
-																	disabled={saving || formId !== entry.id}
-																	onClick={() => void handleSave(entry.id)}
-																>
-																	{saving ? (
-																		<RefreshCw size={14} className="spin" />
-																	) : (
-																		<Save size={14} />
-																	)}
-																	{configured ? "更新配置" : "保存配置"}
-																</button>
-																{isOauth && (
-																	<button
-																		type="button"
-																		className={configured ? "secondary" : "primary"}
-																		disabled={loginBusy === entry.id || !instanceId}
-																		onClick={() =>
-																			void (configured
-																				? handleLogout(entry.id)
-																				: handleLogin(entry.id))
-																		}
-																	>
-																		{loginBusy === entry.id ? (
-																			<RefreshCw size={14} className="spin" />
-																		) : (
-																			<LogIn size={14} />
-																		)}
-																		{configured ? "登出" : "登录"}
-																	</button>
-																)}
-															</div>
-														</div>
-														<table className="model-catalog-table">
-															<thead>
-																<tr>
-																	<th>模型</th>
-																	<th>上下文</th>
-																	<th>输入 $/M</th>
-																	<th>输出 $/M</th>
-																</tr>
-															</thead>
-															<tbody>
-																{entry.models.map((model) => (
-																	<tr key={model.id}>
-																		<td>{model.name || model.id}</td>
-																		<td>
-																			{model.contextWindow
-																				? `${Math.round(model.contextWindow / 1000)}K`
-																				: "—"}
-																		</td>
-																		<td>
-																			{model.cost?.input != null ? `$${model.cost.input}` : "—"}
-																		</td>
-																		<td>
-																			{model.cost?.output != null ? `$${model.cost.output}` : "—"}
-																		</td>
-																	</tr>
-																))}
-															</tbody>
-														</table>
-													</div>
-												)}
-											</div>
-										);
-									})
-								)}
-							</section>
+									{loadingCatalog && modelCatalog.length === 0 ? (
+										<div className="model-providers-loading">
+											<RefreshCw size={18} className="spin" />
+											<span>加载目录…</span>
+										</div>
+									) : filteredDisabledBuiltinEntries.length === 0 ? (
+										<div className="model-providers-search-empty">
+											{normalizedSearch ? "没有匹配的服务商" : "全部内置服务商已启用"}
+										</div>
+									) : (
+										filteredDisabledBuiltinEntries.map((entry) => renderProviderItem(entry))
+									)}
+								</section>
+							)}
 						</>
 					)}
 				</>

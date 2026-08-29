@@ -57,7 +57,6 @@ function applyConfigFields(config: MemoryConfig, record: Record<string, unknown>
 	if (typeof record.vectorAlpha === "number" && record.vectorAlpha >= 0 && record.vectorAlpha <= 1) {
 		config.vectorAlpha = record.vectorAlpha;
 	}
-	if (typeof record.semanticSearch === "boolean") config.semanticSearch = record.semanticSearch;
 	if (typeof record.autoBackup === "boolean") config.autoBackup = record.autoBackup;
 	if (typeof record.maxBackups === "number" && record.maxBackups > 0) {
 		config.maxBackups = Math.floor(record.maxBackups);

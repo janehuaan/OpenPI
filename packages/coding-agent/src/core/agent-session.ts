@@ -59,9 +59,11 @@ import {
 	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	saveCompactionCheckpoint,
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
+import { appendEvent, compactionEvent, eventFilePath, toolCallEvent, toolResultEvent } from "./event-ledger.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -133,7 +135,9 @@ import {
 	startBackgroundJob,
 	waitForJob as waitForJobImpl,
 } from "./background-jobs.ts";
+import { compactCheckpoint, loadCheckpoint } from "./context-checkpoint.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
+import { compactTaskState, loadTaskState } from "./task-state.ts";
 import { type BashOperations, createDockerBashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { formatTodos, loadTodoState } from "./tools/todo.ts";
@@ -633,7 +637,11 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
+		const eventFile = eventFilePath(this._cwd);
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			try {
+				appendEvent(eventFile, toolCallEvent(this._cwd, this.sessionId, toolCall.name, args));
+			} catch {}
 			// Builtin security gate runs before extension handlers: zero-config baseline.
 			const security = this._builtinSecurity;
 			if (security) {
@@ -688,6 +696,12 @@ export class AgentSession {
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
+			try {
+				const _r: any = result;
+				const _t = ((_r?.content as any[]) ?? []).find((c: any) => c?.type === "text")?.text;
+				const resultSize = typeof _t === "string" ? Buffer.byteLength(_t) : undefined;
+				appendEvent(eventFile, toolResultEvent(this._cwd, this.sessionId, toolCall.name, 0, !isError, resultSize));
+			} catch {}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_result")) {
 				return undefined;
@@ -1363,31 +1377,50 @@ export class AgentSession {
 	// =========================================================================
 
 	private _lastInjectedTodoText: string | undefined;
+	private _lastInjectedTaskState: string | undefined;
+	private _lastInjectedCheckpoint: string | undefined;
 
 	/**
-	 * Inject the task list as a message instead of inside the system prompt.
-	 * The todo message is appended only when its content actually changes, and
-	 * it is placed before the final (current) user message — so a todo update
-	 * invalidates only the tail of the history, while the rest of the prefix
-	 * (and the provider prompt cache) stays intact across turns.
+	 * Inject task state and context checkpoint as messages.
 	 */
-	private _maybeInjectTodo(messages: AgentMessage[]): AgentMessage[] {
+	private _maybeInjectContext(messages: AgentMessage[]): AgentMessage[] {
+		if (messages.length === 0) return messages;
+		const parts: AgentMessage[] = [];
+		const taskState = loadTaskState(this._cwd);
+		const taskText = compactTaskState(taskState);
+		if (taskText && taskText !== this._lastInjectedTaskState) {
+			this._lastInjectedTaskState = taskText;
+			parts.push({ role: "user", content: `## Task State\n\n${taskText}`, timestamp: Date.now() });
+		}
+		const checkpoint = loadCheckpoint(this._cwd);
+		if (checkpoint) {
+			const checkpointText = compactCheckpoint(checkpoint);
+			if (checkpointText && checkpointText !== this._lastInjectedCheckpoint) {
+				this._lastInjectedCheckpoint = checkpointText;
+				parts.push({
+					role: "user",
+					content: `## Previous Session Context\n\n${checkpointText}`,
+					timestamp: Date.now(),
+				});
+			}
+		}
 		const todoState = loadTodoState(this._cwd);
 		const todoText = todoState?.todos.some((item) => item.status !== "completed")
 			? `## Current task list\n\n${formatTodos(todoState)}`
 			: undefined;
-		if (!todoText || messages.length === 0) return messages;
-		if (todoText === this._lastInjectedTodoText) return messages;
-		this._lastInjectedTodoText = todoText;
-		const todoMessage: AgentMessage = { role: "user", content: todoText, timestamp: Date.now() };
-		return [...messages.slice(0, -1), todoMessage, ...messages.slice(-1)];
+		if (todoText && todoText !== this._lastInjectedTodoText) {
+			this._lastInjectedTodoText = todoText;
+			parts.push({ role: "user", content: todoText, timestamp: Date.now() });
+		}
+		if (parts.length === 0) return messages;
+		return [...messages.slice(0, -1), ...parts, messages[messages.length - 1]!];
 	}
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
 		this._isAgentRunActive = true;
 		try {
-			const withTodo = this._maybeInjectTodo(Array.isArray(messages) ? messages : [messages]);
-			await this.agent.prompt(withTodo);
+			const withContext = this._maybeInjectContext(Array.isArray(messages) ? messages : [messages]);
+			await this.agent.prompt(withContext);
 			while (await this._handlePostAgentRun()) {
 				await this.agent.continue();
 			}
@@ -2229,6 +2262,15 @@ export class AgentSession {
 			}
 
 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
+			// Persist structured checkpoint for restart continuity
+			saveCompactionCheckpoint(this._cwd, summary);
+			// Log compaction event
+			try {
+				appendEvent(
+					eventFilePath(this._cwd),
+					compactionEvent(this._cwd, this.sessionId, fromExtension ? "extension" : "manual", tokensBefore),
+				);
+			} catch {}
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
@@ -2508,6 +2550,15 @@ export class AgentSession {
 			}
 
 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
+			// Persist structured checkpoint for restart continuity
+			saveCompactionCheckpoint(this._cwd, summary);
+			// Log compaction event
+			try {
+				appendEvent(
+					eventFilePath(this._cwd),
+					compactionEvent(this._cwd, this.sessionId, fromExtension ? "extension" : "manual", tokensBefore),
+				);
+			} catch {}
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;

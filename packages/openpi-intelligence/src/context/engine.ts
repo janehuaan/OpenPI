@@ -61,7 +61,7 @@ export async function buildContextSnapshot(
 	const candidateGroups = await Promise.all([
 		Promise.resolve(collectCodeCandidates(cwd, prompt, exclusions)),
 		collectGitCandidates(pi, cwd),
-		collectMemoryCandidates(cwd, prompt, config),
+		Promise.resolve(collectMemoryCandidates(cwd, prompt)),
 		Promise.resolve(collectKnowledgeCandidates(cwd, prompt)),
 		Promise.resolve(collectConversationCandidates(messages, prompt)),
 	]);

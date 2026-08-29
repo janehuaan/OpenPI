@@ -17,6 +17,7 @@ import {
 } from "./store.ts";
 import type { MemoryConfig, MemoryIndexEntry, MemoryType } from "./types.ts";
 import { MEMORY_TYPES } from "./types.ts";
+import { reindexVectors } from "./vectors.ts";
 
 export interface MemoryMeta {
 	lastMaintainAt?: string;
@@ -72,6 +73,17 @@ export function maintainMemoryIndex(cwd: string, config: MemoryConfig): Maintain
  * Maintain an absolute memory directory (project `.pi/memory` or `~/.pi/memory`).
  * Always archives pruned entries — never hard-drops content.
  */
+function repairKey(key: string, _value: string, type: MemoryType, occupied: Set<string>): string {
+	const canonical = sanitizeKey(key);
+	const separatorCount = (key.match(/[-_]/g) ?? []).length;
+	if (separatorCount >= 2 && occupied.has(`${type}:${canonical}`)) {
+		const suffix = `-${separatorCount}`;
+		const candidate = `${canonical}${suffix}`;
+		if (!occupied.has(`${type}:${candidate}`)) return candidate;
+	}
+	return canonical;
+}
+
 export function maintainMemoryDirectory(directory: string, config: MemoryConfig): MaintainResult {
 	if (config.autoBackup) {
 		try {
@@ -170,20 +182,10 @@ export function maintainMemoryDirectory(directory: string, config: MemoryConfig)
 
 	const deduped = dedupeEntries(next);
 	const saved = saveIndexAt(directory, deduped, config.maxIndexEntries);
+	// Rebuild vector index so retrieval stays sharp after merges
+	reindexVectors(directory, saved, (entry) => readTopicAt(directory, entry.type, entry.key) ?? "");
 	saveMetadataAt(directory, metadata);
 	return { before, after: saved.length, merged, pruned };
-}
-
-function repairKey(key: string, value: string, type: MemoryType, occupied: Set<string>): string {
-	const canonical = sanitizeKey(key);
-	const separatorCount = (key.match(/[-_]/g) ?? []).length;
-	const lowInformation = canonical.length < 3 || /^[-_]+$/.test(key) || separatorCount / Math.max(1, key.length) > 0.4;
-	if (!lowInformation) return key;
-	const base = sanitizeKey(value).slice(0, 48) || `${type}-memory`;
-	let candidate = base;
-	let n = 2;
-	while (occupied.has(`${type}:${candidate}`) && candidate !== key) candidate = `${base.slice(0, 56)}-${n++}`;
-	return candidate;
 }
 
 /** Idle-time organize: backup + maintain + reindex when due. */

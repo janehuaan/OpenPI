@@ -1,7 +1,7 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
-import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ElementRef, forwardRef } from "react";
 import { cn } from "../../lib/utils";
+import { Check, ChevronDown, ChevronUp } from "../icons.tsx";
 
 const Select = SelectPrimitive.Root;
 const SelectValue = SelectPrimitive.Value;

@@ -1,108 +1,64 @@
 import type { IntelligenceConfig } from "../config.ts";
 import type { ContextCandidate } from "../contract.ts";
-
-export const QWEN_EMBEDDING_DIMENSIONS = 1024;
-export const DEFAULT_QWEN_EMBEDDING_ENDPOINT = "http://127.0.0.1:18080/v1";
-export const DEFAULT_QWEN_EMBEDDING_MODEL = "Qwen3-Embedding-0.6B";
-export const DEFAULT_QWEN_QUERY_INSTRUCTION = "Given a user query, retrieve relevant passages that answer the query.";
+import { queryTerms } from "./utils.ts";
 
 export interface EmbeddingProvider {
 	name: string;
-	embedQuery(query: string): Promise<number[]>;
-	embedDocuments(documents: string[]): Promise<number[][]>;
+	embed(texts: string[]): Promise<number[][]>;
 }
 
-interface OpenAIEmbeddingResponse {
-	data?: unknown;
+function hashTerm(term: string): number {
+	let hash = 2166136261;
+	for (const char of term) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619);
+	return hash >>> 0;
 }
 
-function normalizeEndpoint(endpoint: string): string {
-	return endpoint.replace(/\/+$/, "");
+export class LocalHashEmbeddingProvider implements EmbeddingProvider {
+	readonly name = "local-hash";
+	private readonly dimensions: number;
+	constructor(dimensions = 256) {
+		this.dimensions = dimensions;
+	}
+	async embed(texts: string[]): Promise<number[][]> {
+		return texts.map((text) => {
+			const vector = Array.from({ length: this.dimensions }, () => 0);
+			for (const term of queryTerms(text)) vector[hashTerm(term) % this.dimensions] += 1;
+			const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+			return vector.map((value) => value / norm);
+		});
+	}
 }
 
-function normalizeVector(value: unknown, label: string): number[] {
-	if (!Array.isArray(value) || value.length !== QWEN_EMBEDDING_DIMENSIONS) {
-		throw new Error(`Invalid Qwen embedding ${label}: expected a ${QWEN_EMBEDDING_DIMENSIONS}-dimension vector.`);
-	}
-	if (!value.every((entry) => typeof entry === "number" && Number.isFinite(entry))) {
-		throw new Error(`Invalid Qwen embedding ${label}: vector contains a non-finite value.`);
-	}
-	const vector = value as number[];
-	const norm = Math.sqrt(vector.reduce((sum, entry) => sum + entry * entry, 0));
-	if (!Number.isFinite(norm) || norm === 0) {
-		throw new Error(`Invalid Qwen embedding ${label}: vector has zero norm.`);
-	}
-	return vector.map((entry) => entry / norm);
-}
-
-function parseEmbeddings(value: unknown, expectedCount: number): number[][] {
-	if (!value || typeof value !== "object" || !Array.isArray((value as OpenAIEmbeddingResponse).data)) {
-		throw new Error("Invalid Qwen embedding response: expected a data array.");
-	}
-	const data = (value as OpenAIEmbeddingResponse).data as unknown[];
-	if (data.length !== expectedCount) {
-		throw new Error(`Invalid Qwen embedding response: expected ${expectedCount} vectors, received ${data.length}.`);
-	}
-	return data.map((item, position) => {
-		if (!item || typeof item !== "object") {
-			throw new Error(`Invalid Qwen embedding response item ${position}.`);
-		}
-		const record = item as { embedding?: unknown; index?: unknown };
-		if (record.index !== undefined && record.index !== position) {
-			throw new Error(`Invalid Qwen embedding response: vector ${position} has an unexpected index.`);
-		}
-		return normalizeVector(record.embedding, String(position));
-	});
-}
-
-/** Qwen3 embeddings served by a local OpenAI-compatible llama-server. */
-export class QwenLocalEmbeddingProvider implements EmbeddingProvider {
-	readonly name = "qwen3-local";
-
+export class HttpEmbeddingProvider implements EmbeddingProvider {
+	readonly name = "http";
 	private readonly endpoint: string;
 	private readonly model: string;
-	private readonly queryInstruction: string;
-
-	constructor(
-		endpoint = DEFAULT_QWEN_EMBEDDING_ENDPOINT,
-		model = DEFAULT_QWEN_EMBEDDING_MODEL,
-		queryInstruction = DEFAULT_QWEN_QUERY_INSTRUCTION,
-	) {
+	private readonly apiKey: string | undefined;
+	constructor(endpoint: string, model: string, apiKey?: string) {
 		this.endpoint = endpoint;
 		this.model = model;
-		this.queryInstruction = queryInstruction;
+		this.apiKey = apiKey;
 	}
-
-	async embedQuery(query: string): Promise<number[]> {
-		return (await this.embed([`Instruct: ${this.queryInstruction}\nQuery: ${query}`]))[0];
-	}
-
-	async embedDocuments(documents: string[]): Promise<number[][]> {
-		return this.embed(documents);
-	}
-
-	private async embed(input: string[]): Promise<number[][]> {
-		if (input.length === 0) return [];
-		let response: Response;
-		try {
-			response = await fetch(`${normalizeEndpoint(this.endpoint)}/embeddings`, {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ model: this.model, input }),
-				signal: AbortSignal.timeout(15_000),
-			});
-		} catch (error) {
-			throw new Error(
-				`Qwen local embedding server is unavailable at ${normalizeEndpoint(this.endpoint)}. Start the Qwen3 llama-server or set embedding.mode to "off".`,
-				{ cause: error },
-			);
-		}
-		if (!response.ok) {
-			throw new Error(
-				`Qwen local embedding server at ${normalizeEndpoint(this.endpoint)} returned HTTP ${response.status}.`,
-			);
-		}
-		return parseEmbeddings(await response.json(), input.length);
+	async embed(texts: string[]): Promise<number[][]> {
+		const response = await fetch(this.endpoint, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+			},
+			body: JSON.stringify({ model: this.model, input: texts }),
+			signal: AbortSignal.timeout(15_000),
+		});
+		if (!response.ok) throw new Error(`Embedding endpoint returned ${response.status}.`);
+		const value: unknown = await response.json();
+		if (!value || typeof value !== "object" || !("data" in value) || !Array.isArray(value.data))
+			throw new Error("Invalid embedding response.");
+		return value.data.map((item: unknown) => {
+			if (!item || typeof item !== "object" || !("embedding" in item) || !Array.isArray(item.embedding))
+				throw new Error("Invalid embedding vector.");
+			const embedding: unknown[] = item.embedding;
+			return embedding.filter((entry): entry is number => typeof entry === "number");
+		});
 	}
 }
 
@@ -121,11 +77,14 @@ export function cosine(left: number[], right: number[]): number {
 
 function providerFromConfig(config: IntelligenceConfig): EmbeddingProvider | undefined {
 	if (config.embedding.mode === "off") return undefined;
-	return new QwenLocalEmbeddingProvider(
-		config.embedding.endpoint,
-		config.embedding.model,
-		config.embedding.queryInstruction,
-	);
+	if (config.embedding.mode === "http" && config.embedding.endpoint && config.embedding.model) {
+		return new HttpEmbeddingProvider(
+			config.embedding.endpoint,
+			config.embedding.model,
+			config.embedding.apiKeyEnv ? process.env[config.embedding.apiKeyEnv] : undefined,
+		);
+	}
+	return new LocalHashEmbeddingProvider();
 }
 
 export async function applySemanticScores(
@@ -135,11 +94,15 @@ export async function applySemanticScores(
 ): Promise<void> {
 	const provider = providerFromConfig(config);
 	if (!provider || candidates.length === 0) return;
-	const queryVector = await provider.embedQuery(query);
-	const documentVectors = await provider.embedDocuments(
-		candidates.map((candidate) => `${candidate.title}\n${candidate.content.slice(0, 4000)}`),
-	);
-	for (let index = 0; index < candidates.length; index++) {
-		candidates[index].metadata.semanticScore = Math.max(0, cosine(queryVector, documentVectors[index]));
+	try {
+		const vectors = await provider.embed([
+			query,
+			...candidates.map((candidate) => `${candidate.title}\n${candidate.content.slice(0, 4000)}`),
+		]);
+		const queryVector = vectors[0];
+		for (let index = 0; index < candidates.length; index++)
+			candidates[index].metadata.semanticScore = Math.max(0, cosine(queryVector, vectors[index + 1]));
+	} catch {
+		// Keep lexical fallback when the embedding provider is unavailable.
 	}
 }

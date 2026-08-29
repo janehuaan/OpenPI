@@ -18,8 +18,83 @@ import {
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
+import type { TruncationResult } from "./truncate.ts";
+
+/**
+ * When output is very large, extract key lines (errors, warnings, summaries)
+ * instead of sending raw tail to the LLM. This keeps context budget low.
+ */
+const LARGE_OUTPUT_THRESHOLD_LINES = 500;
+const LARGE_OUTPUT_THRESHOLD_BYTES = 20 * 1024; // 20KB
+
+function summarizeLargeOutput(lines: string[]): string {
+	const errors = lines.filter((l) => /(?:error|fail|exception|abort|fatal|undefinedvariable)/i.test(l)).slice(-10);
+	const warnings = lines.filter((l) => /(?:warn|deprecated|notice)/i.test(l)).slice(-5);
+	const summaryLines = lines.filter((l) => /^[\s]*[✓✔✗✘×]/.test(l) || /^\s*[-*] /.test(l)).slice(-10);
+	const parts: string[] = [];
+	if (errors.length > 0) {
+		parts.push(`Errors (${errors.length}):`);
+		for (const e of errors) parts.push(`  ${e.trim().slice(0, 200)}`);
+	}
+	if (warnings.length > 0) {
+		parts.push(`Warnings (${warnings.length}):`);
+		for (const w of warnings) parts.push(`  ${w.trim().slice(0, 200)}`);
+	}
+	if (summaryLines.length > 0 && errors.length === 0 && warnings.length === 0) {
+		parts.push("Key lines:");
+		for (const s of summaryLines) parts.push(`  ${s.trim().slice(0, 200)}`);
+	}
+	if (parts.length === 0) {
+		// Fallback: first 5 + last 5 lines
+		const head = lines
+			.slice(0, 5)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		const tail = lines
+			.slice(-5)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		const unique = [...new Set([...head, ...tail])];
+		return unique.length > 0 ? unique.join("\n") : "(large output, no key lines found)";
+	}
+	return parts.join("\n");
+}
+
+function formatOutputWithSmartTruncation(
+	snapshot: { content: string; truncation: TruncationResult; fullOutputPath?: string },
+	emptyText = "(no output)",
+): { text: string; details?: BashToolDetails } {
+	const truncation = snapshot.truncation;
+	const lines = snapshot.content ? snapshot.content.split("\n") : [];
+	const isLarge =
+		truncation.truncated &&
+		(lines.length > LARGE_OUTPUT_THRESHOLD_LINES || snapshot.truncation.totalBytes > LARGE_OUTPUT_THRESHOLD_BYTES);
+
+	let text = snapshot.content || emptyText;
+	let details: BashToolDetails | undefined;
+	if (truncation.truncated) {
+		details = { truncation, fullOutputPath: snapshot.fullOutputPath };
+		if (isLarge) {
+			const summary = summarizeLargeOutput(lines);
+			text = `[Output truncated: ${truncation.totalLines} lines, ${snapshot.truncation.totalBytes} bytes. Showing key lines instead of raw output.]\n\n${summary}\n\n[Full output: ${snapshot.fullOutputPath}]`;
+		} else {
+			const startLine = truncation.totalLines - truncation.outputLines + 1;
+			const endLine = truncation.totalLines;
+			if (truncation.lastLinePartial) {
+				const lastLineSize = formatSize(snapshot.truncation.outputBytes);
+				text += `\n\n[Showing last ${formatSize(snapshot.truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
+			} else if (truncation.truncatedBy === "lines") {
+				text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
+			} else {
+				text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
+			}
+		}
+	}
+	return { text, details };
+}
+
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult } from "./truncate.ts";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "./truncate.ts";
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
@@ -442,26 +517,6 @@ export function createBashToolDefinition(
 				return snapshot;
 			};
 
-			const formatOutput = (snapshot: Awaited<ReturnType<typeof finishOutput>>, emptyText = "(no output)") => {
-				const truncation = snapshot.truncation;
-				let text = snapshot.content || emptyText;
-				let details: BashToolDetails | undefined;
-				if (truncation.truncated) {
-					details = { truncation, fullOutputPath: snapshot.fullOutputPath };
-					const startLine = truncation.totalLines - truncation.outputLines + 1;
-					const endLine = truncation.totalLines;
-					if (truncation.lastLinePartial) {
-						const lastLineSize = formatSize(output.getLastLineBytes());
-						text += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${snapshot.fullOutputPath}]`;
-					} else if (truncation.truncatedBy === "lines") {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${snapshot.fullOutputPath}]`;
-					} else {
-						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
-					}
-				}
-				return { text, details };
-			};
-
 			const appendStatus = (text: string, status: string) => `${text ? `${text}\n\n` : ""}${status}`;
 
 			try {
@@ -476,7 +531,7 @@ export function createBashToolDefinition(
 					exitCode = result.exitCode;
 				} catch (err) {
 					const snapshot = await finishOutput();
-					const { text } = formatOutput(snapshot, "");
+					const { text } = formatOutputWithSmartTruncation(snapshot, "");
 					if (err instanceof Error && err.message === "aborted") {
 						throw new Error(appendStatus(text, "Command aborted"));
 					}
@@ -488,7 +543,7 @@ export function createBashToolDefinition(
 				}
 
 				const snapshot = await finishOutput();
-				const { text: outputText, details } = formatOutput(snapshot);
+				const { text: outputText, details } = formatOutputWithSmartTruncation(snapshot);
 				if (exitCode !== 0 && exitCode !== null) {
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}

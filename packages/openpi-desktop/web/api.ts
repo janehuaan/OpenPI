@@ -173,8 +173,6 @@ export const desktopApi = {
 		),
 	getVisionFallback: () => call<VisionFallbackConfig>("get_vision_fallback"),
 	getVisionFallbackModels: () => call<VisionFallbackModel[]>("get_vision_fallback_models"),
-	getAutoStartMilvus: () => call<boolean>("get_auto_start_milvus"),
-	setAutoStartMilvus: (enabled: boolean) => call<boolean>("set_auto_start_milvus", { enabled }),
 	configureVisionFallback: async (input: { apiKey?: string; enabled: boolean; model?: string }) => {
 		const result = await call<VisionFallbackConfig>("configure_vision_fallback", input);
 		window.dispatchEvent(new Event("openpi:model-providers-changed"));

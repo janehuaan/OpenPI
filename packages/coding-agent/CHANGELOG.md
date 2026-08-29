@@ -2,9 +2,21 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Milvus session search: removed `session-search-milvus.ts` and its test. Session search now uses the local vector library (`vector-store.ts`) with hybrid cosine+BM25 retrieval only.
+
+### Changed
+
+- Local embedding server: reverted from `qwen3-embedding-0.6b` (1024-dim, ~639 MB) back to `bge-small-zh` (512-dim, 25 MB) as the default bundled GGUF model. Model filename in bundle path updated accordingly.
+- Desktop UI: removed Milvus auto-start toggle and related API endpoints (`getAutoStartMilvus`/`setAutoStartMilvus`).
+
 ### Added
 
-- Dynamic context: `settings.json` `skillsPromptMode` (`full` default | `compact` | `none`) controls how the skill catalog is injected into the system prompt. `compact` renders a short index without locations; `none` replaces the catalog with a one-line pointer and injects only the skills relevant to the current conversation per turn (keyword-scored against the recent messages). New `skill_search` tool lets the agent find and load skills on demand (name/description/path matches). Cuts startup system-prompt size by up to ~75% (e.g. 87KB → 21KB with 146 installed skills).
+- Structured task state (`task-state.ts`): persists goal, steps with evidence, checkpoints, errors, and next steps to `.pi/tasks/current.json`. Injected on session start for continuity across restarts.
+- Context checkpoint (`context-checkpoint.ts`): structured JSON summary of goal/done/inProgress/nextSteps/decisions/issues written after compaction and loaded on restart.
+
+## [0.80.8] - 2026-07-24 `compact` renders a short index without locations; `none` replaces the catalog with a one-line pointer and injects only the skills relevant to the current conversation per turn (keyword-scored against the recent messages). New `skill_search` tool lets the agent find and load skills on demand (name/description/path matches). Cuts startup system-prompt size by up to ~75% (e.g. 87KB → 21KB with 146 installed skills).
 - Memoized system prompt assembly (`buildSystemPrompt`): deterministic fingerprint (tools, guidelines, skills, context files, cwd) caches the assembled prompt, skipping string rebuilding on unchanged turns.
 - Provider error policy helpers in `provider-composer`: `classifyProviderError` (rate-limit / server / timeout / network / auth / unknown), `shouldRetryProviderError`, and `computeProviderRetryDelayMs` (exponential backoff with rate-limit jitter).
 - `read` tool binary detection: files with NUL bytes or a high ratio of control bytes are reported as binary with `file`/`strings` suggestions instead of emitting garbage text.

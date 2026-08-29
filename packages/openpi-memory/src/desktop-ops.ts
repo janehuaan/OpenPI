@@ -9,10 +9,12 @@
  *   desktop-ops meta <cwd>
  *   desktop-ops maintain <cwd>
  */
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { listArchiveCount } from "./durability.ts";
 import { loadMeta, maintainMemoryDirectory, maintainMemoryIndex } from "./maintain.ts";
+import { LEXICON_BIN } from "./rank.ts";
 
 import {
 	deleteTopic,
@@ -30,6 +32,7 @@ import {
 	upsertEntry,
 } from "./store.ts";
 import { DEFAULT_MEMORY_CONFIG } from "./types.ts";
+import { VECTORS_BIN } from "./vectors.ts";
 
 const [op, cwd, ...rest] = process.argv.slice(2);
 if (!op || !cwd) {
@@ -55,6 +58,10 @@ try {
 		const projectDir = memoryDir(cwd);
 		const digests = projectEntries.filter((e) => e.type === "project" && e.key.startsWith("session-"));
 		const archiveCount = listArchiveCount(projectDir);
+		const hasVectors =
+			fs.existsSync(path.join(projectDir, VECTORS_BIN)) || fs.existsSync(path.join(globalDir, VECTORS_BIN));
+		const hasLexicon =
+			fs.existsSync(path.join(projectDir, LEXICON_BIN)) || fs.existsSync(path.join(globalDir, LEXICON_BIN));
 		process.stdout.write(
 			`${JSON.stringify({
 				ok: true,
@@ -64,12 +71,14 @@ try {
 				archiveCount,
 				digestCount: digests.length,
 				latestDigest: digests.at(-1)?.value ?? null,
+				hasVectors,
+				hasLexicon,
 				features: {
 					proactiveInject: DEFAULT_MEMORY_CONFIG.proactiveInject,
 					softExtractEveryTurn: DEFAULT_MEMORY_CONFIG.softExtractEveryTurn,
 					autoSessionDigest: DEFAULT_MEMORY_CONFIG.autoSessionDigest,
 					promoteUserToGlobal: DEFAULT_MEMORY_CONFIG.promoteUserToGlobal,
-					qwenMilvus: true,
+					searchArchive: DEFAULT_MEMORY_CONFIG.searchArchive,
 				},
 			})}\n`,
 		);

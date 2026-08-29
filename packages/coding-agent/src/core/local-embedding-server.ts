@@ -1,25 +1,19 @@
 /**
- * Local Qwen embedding server management (built-in).
+ * Local embedding server management (built-in).
  *
  * Spawns a llama.cpp `llama-server` (OpenAI-compatible /v1/embeddings) on the
- * local machine. The binary and Qwen3-Embedding-0.6B GGUF model come from
- * explicit environment variables or the desktop bundle. One server is kept
- * alive per process; callers decide whether unavailable service is fatal.
+ * local machine so embedding quality doesn't depend on a remote API key.
+ * Enabled with `OPENPI_EMBEDDING_LOCAL=1`; the server binary and GGUF model
+ * come from `OPENPI_EMBEDDING_BIN` / `OPENPI_EMBEDDING_MODEL_FILE`, or from
+ * the desktop bundle's Resources/embedding directory. The server is spawned
+ * once per process and kept alive; failures degrade silently.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-export const DEFAULT_LOCAL_EMBEDDING_PORT = 18080;
-
-export function localEmbeddingPort(env: NodeJS.ProcessEnv = process.env): number {
-	const parsed = Number.parseInt(env.OPENPI_EMBEDDING_PORT ?? "", 10);
-	return Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : DEFAULT_LOCAL_EMBEDDING_PORT;
-}
-
-export function localEmbeddingBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-	return `http://127.0.0.1:${localEmbeddingPort(env)}/v1`;
-}
+export const LOCAL_EMBEDDING_PORT = 18080;
+export const LOCAL_EMBEDDING_BASE_URL = `http://127.0.0.1:${LOCAL_EMBEDDING_PORT}/v1`;
 
 let serverProcess: ChildProcess | undefined;
 let starting: Promise<boolean> | undefined;
@@ -28,12 +22,12 @@ function resolveBundlePaths(env: NodeJS.ProcessEnv): { bin: string; model: strin
 	const bin = env.OPENPI_EMBEDDING_BIN;
 	const model = env.OPENPI_EMBEDDING_MODEL_FILE;
 	if (bin && model && existsSync(bin) && existsSync(model)) return { bin, model };
-
+	// Desktop bundle: <app>/Contents/Resources/embedding/{llama-server, bge-small-zh-q8_0.gguf}
 	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 	for (const base of [resourcesPath, join(process.cwd(), "Resources"), join(process.cwd(), "embedding")]) {
 		const candidate = base ? join(base, "embedding") : base;
 		const candidateBin = candidate ? join(candidate, "llama-server") : undefined;
-		const candidateModel = candidate ? join(candidate, "qwen3-embedding-0.6b-q8_0.gguf") : undefined;
+		const candidateModel = candidate ? join(candidate, "bge-small-zh-q8_0.gguf") : undefined;
 		if (candidateBin && candidateModel && existsSync(candidateBin) && existsSync(candidateModel)) {
 			return { bin: candidateBin, model: candidateModel };
 		}
@@ -41,12 +35,11 @@ function resolveBundlePaths(env: NodeJS.ProcessEnv): { bin: string; model: strin
 	return undefined;
 }
 
-async function serverReady(timeoutMs: number, env: NodeJS.ProcessEnv): Promise<boolean> {
+async function serverReady(timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
-	const baseUrl = localEmbeddingBaseUrl(env);
 	while (Date.now() < deadline) {
 		try {
-			const response = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(1500) });
+			const response = await fetch(`${LOCAL_EMBEDDING_BASE_URL}/models`, { signal: AbortSignal.timeout(1500) });
 			if (response.ok) return true;
 		} catch {
 			// Not up yet.
@@ -56,14 +49,14 @@ async function serverReady(timeoutMs: number, env: NodeJS.ProcessEnv): Promise<b
 	return false;
 }
 
-/** True when a bundled local Qwen embedding server is available. */
+/** True when a bundled local embedding server (binary + model) is available. */
 export function localEmbeddingAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
 	return resolveBundlePaths(env) !== undefined;
 }
 
 /**
- * Spawn Qwen3-Embedding through llama-server when bundled resources exist.
- * `OPENPI_EMBEDDING_LOCAL=0` disables automatic startup explicitly.
+ * Spawn the local llama-server when bundled resources exist (built-in) —
+ * `OPENPI_EMBEDDING_LOCAL=0` disables it explicitly.
  */
 export function ensureLocalEmbeddingServer(env: NodeJS.ProcessEnv = process.env): Promise<boolean> | undefined {
 	if (env.OPENPI_EMBEDDING_LOCAL === "0") return undefined;
@@ -74,8 +67,8 @@ export function ensureLocalEmbeddingServer(env: NodeJS.ProcessEnv = process.env)
 	if (!paths) return undefined;
 	starting = (async () => {
 		try {
-			const probe = await fetch(`${localEmbeddingBaseUrl(env)}/models`, { signal: AbortSignal.timeout(800) });
-			if (probe.ok) return true;
+			const probe = await fetch(`${LOCAL_EMBEDDING_BASE_URL}/models`, { signal: AbortSignal.timeout(800) });
+			if (probe.ok) return true; // Already running (e.g. started externally).
 		} catch {
 			// Not running — spawn it.
 		}
@@ -85,13 +78,11 @@ export function ensureLocalEmbeddingServer(env: NodeJS.ProcessEnv = process.env)
 				[
 					"-m",
 					paths.model,
-					"--embedding",
-					"--pooling",
-					"last",
+					"--embeddings",
 					"--port",
-					String(localEmbeddingPort(env)),
+					String(LOCAL_EMBEDDING_PORT),
 					"-c",
-					"32768",
+					"512",
 					"--host",
 					"127.0.0.1",
 				],
@@ -100,7 +91,7 @@ export function ensureLocalEmbeddingServer(env: NodeJS.ProcessEnv = process.env)
 			serverProcess.on("exit", () => {
 				serverProcess = undefined;
 			});
-			return await serverReady(30_000, env);
+			return await serverReady(30_000);
 		} catch {
 			return false;
 		} finally {

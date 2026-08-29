@@ -1,6 +1,6 @@
-import { ArrowLeft, Bell, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktopApi } from "./api";
+import { ArrowLeft, Bell, RefreshCw, X } from "./components/icons.tsx";
 import {
 	type AppMode,
 	CapabilitiesSurface,
@@ -136,7 +136,6 @@ export function App() {
 	const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceSummary>();
 	const [runningTools, setRunningTools] = useState<RunningTool[]>([]);
 	const [visionFallback, setVisionFallback] = useState<VisionFallbackConfig>();
-	const [autoStartMilvus, setAutoStartMilvus] = useState<boolean>(true);
 	const [workspaceIntelligenceRuns, setWorkspaceIntelligenceRuns] = useState<string[]>([]);
 	const [intelligenceDetail, setIntelligenceDetail] = useState<string>("");
 	const [selectedIntelligenceRunId, setSelectedIntelligenceRunId] = useState<string>();
@@ -1869,11 +1868,6 @@ export function App() {
 					<DaemonSurface
 						snapshot={snapshot}
 						busy={busy}
-						autoStartMilvus={autoStartMilvus}
-						onAutoStartMilvusChange={(enabled) => {
-							setAutoStartMilvus(enabled);
-							void desktopApi.setAutoStartMilvus(enabled).catch(() => undefined);
-						}}
 						onOpenSidebar={() => setSidebarOpen(true)}
 						onStart={() => void perform("daemon-start", desktopApi.startDaemon)}
 						onStop={() => void perform("daemon-stop", desktopApi.stopDaemon)}

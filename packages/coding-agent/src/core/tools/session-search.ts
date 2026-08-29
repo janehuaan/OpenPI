@@ -1,20 +1,27 @@
 /**
- * Session search tool (built-in): Qwen3 semantic retrieval over session
- * transcripts stored in the isolated Milvus session-message namespace.
+ * Session search tool (built-in): BM25 retrieval over historical session
+ * transcripts so the agent can recall what was discussed/done in earlier
+ * conversations in this workspace.
+ *
+ * Scans the most recently modified session files under the session dir,
+ * indexes message-level documents, and returns the top hits with a few
+ * surrounding messages for context.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { ensureLocalEmbeddingServer, localEmbeddingBaseUrl } from "../local-embedding-server.ts";
 import {
-	buildSessionMemoryIdentity,
-	mapMilvusResults,
-	type SessionMemoryDocument,
-	SessionMilvusStore,
-} from "../session-search-milvus.ts";
+	type EmbedBatchFn,
+	localEmbedBatch,
+	searchVectorStore,
+	upsertVectorStore,
+	type VectorStoreDoc,
+} from "../vector-store.ts";
+import { embeddingCachePath, embedTexts, loadEmbeddingConfig } from "./embedding.ts";
 
 interface SessionDoc {
 	file: string;
@@ -22,7 +29,6 @@ interface SessionDoc {
 	timestamp: string;
 	role: string;
 	text: string;
-	milvusId?: string;
 }
 
 interface SessionSearchHit {
@@ -34,7 +40,10 @@ interface SessionSearchHit {
 
 const MAX_FILES = 30;
 const MAX_MESSAGES_PER_FILE = 400;
-const milvus = new SessionMilvusStore();
+
+function tokenize(text: string): string[] {
+	return text.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+}
 
 function extractText(message: unknown): string {
 	if (typeof message === "string") return message;
@@ -95,51 +104,60 @@ function scanSessionFile(file: string): { docs: SessionDoc[]; labels: Map<string
 	return { docs, labels };
 }
 
+/** BM25 scoring: k1 = 1.5, b = 0.75. */
+function scoreDocs(queryTokens: string[], docs: SessionDoc[]): Array<{ doc: SessionDoc; score: number }> {
+	if (docs.length === 0 || queryTokens.length === 0) return [];
+	const n = docs.length;
+	const avgdl = docs.reduce((sum, doc) => sum + tokenize(doc.text).length, 0) / n;
+	const docTokenCounts = docs.map((doc) => tokenize(doc.text));
+	const df = new Map<string, number>();
+	for (const tokens of docTokenCounts) {
+		for (const token of new Set(tokens)) {
+			df.set(token, (df.get(token) ?? 0) + 1);
+		}
+	}
+	const results: Array<{ doc: SessionDoc; score: number }> = [];
+	for (let i = 0; i < docs.length; i++) {
+		const tokens = docTokenCounts[i];
+		if (tokens.length === 0) continue;
+		const tf = new Map<string, number>();
+		for (const token of tokens) tf.set(token, (tf.get(token) ?? 0) + 1);
+		let score = 0;
+		for (const token of queryTokens) {
+			const termFreq = tf.get(token);
+			if (termFreq === undefined || termFreq === 0) continue;
+			const docFreq = df.get(token) ?? 0;
+			const idf = Math.log(1 + (n - docFreq + 0.5) / (docFreq + 0.5));
+			const numerator = termFreq * (1.5 + 1);
+			const denominator = termFreq + 1.5 * (1 - 0.75 + 0.75 * (tokens.length / avgdl));
+			score += idf * (numerator / denominator);
+		}
+		if (score > 0) results.push({ doc: docs[i], score });
+	}
+	return results.sort((a, b) => b.score - a.score);
+}
+
 function contextAround(docs: SessionDoc[], index: number, window = 2): string[] {
 	const out: string[] = [];
 	for (let i = Math.max(0, index - window); i <= Math.min(docs.length - 1, index + window); i++) {
-		if (i === index) continue;
 		const doc = docs[i];
+		if (i === index) continue;
 		const snippet = doc.text.length > 220 ? `${doc.text.slice(0, 220)}…` : doc.text;
 		out.push(`[${doc.role}] ${snippet}`);
 	}
 	return out;
 }
 
-async function embedQwen3(texts: string[]): Promise<number[][]> {
-	const started = ensureLocalEmbeddingServer();
-	if (!started || !(await started)) {
-		throw new Error("Qwen3 embedding server is unavailable; configure the local embedding server and model first.");
-	}
-	const response = await fetch(`${localEmbeddingBaseUrl()}/embeddings`, {
-		method: "POST",
-		headers: { "content-type": "application/json", authorization: "Bearer local" },
-		body: JSON.stringify({ model: process.env.OPENPI_EMBEDDING_MODEL ?? "qwen3-embedding", input: texts }),
-	});
-	if (!response.ok) throw new Error(`Qwen3 embedding request failed (${response.status}).`);
-	const body = (await response.json()) as { data?: Array<{ index?: number; embedding?: unknown }> };
-	if (!Array.isArray(body.data) || body.data.length !== texts.length) {
-		throw new Error("Qwen3 embedding server returned an invalid response.");
-	}
-	const vectors = new Array<number[]>(texts.length);
-	for (const item of body.data) {
-		if (
-			!Number.isInteger(item.index) ||
-			!Array.isArray(item.embedding) ||
-			item.embedding.some((v) => typeof v !== "number")
-		) {
-			throw new Error("Qwen3 embedding server returned an invalid vector.");
-		}
-		vectors[item.index!] = item.embedding;
-	}
-	if (vectors.some((vector) => !vector)) throw new Error("Qwen3 embedding server omitted a vector.");
-	return vectors;
-}
-
 const SessionSearchParams = Type.Object({
-	query: Type.String({ description: "Semantic search query over past session messages" }),
+	query: Type.String({ description: "Search query; tokens are matched with BM25 over past messages" }),
 	limit: Type.Optional(
 		Type.Integer({ default: 5, minimum: 1, maximum: 10, description: "Max hits to return (default 5)" }),
+	),
+	rerank: Type.Optional(
+		Type.Union([Type.Literal("auto"), Type.Literal("on"), Type.Literal("off")], {
+			description:
+				"Semantic reranking: auto (default) uses embeddings when OPENPI_EMBEDDING_API_KEY is set, on forces it, off disables it",
+		}),
 	),
 });
 
@@ -151,7 +169,57 @@ function shortTimestamp(timestamp: string): string {
 	if (!timestamp) return "";
 	const date = new Date(timestamp);
 	if (Number.isNaN(date.getTime())) return timestamp;
-	return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+	return date.toLocaleString("zh-CN", {
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+	});
+}
+
+interface MemoryEntry {
+	type: string;
+	key: string;
+	value: string;
+}
+
+function parseMemoryIndex(content: string): MemoryEntry[] {
+	const entries: MemoryEntry[] = [];
+	let currentType: string | null = null;
+	for (const line of content.split("\n")) {
+		const heading = line.match(/^##\s+(user|feedback|project|lesson)$/i);
+		if (heading) {
+			currentType = heading[1].toLowerCase();
+			continue;
+		}
+		if (!currentType) continue;
+		const match = line.match(/^\s*-\s*\[([^\]]+)\]\s*(.+)$/);
+		if (match) entries.push({ type: currentType, key: match[1], value: match[2].trim() });
+	}
+	return entries;
+}
+
+/** Memory index entries (project + user-global) as searchable docs. */
+function loadMemoryDocs(cwd: string): SessionDoc[] {
+	const paths = [join(cwd, ".pi", "memory", "MEMORY.md"), join(homedir(), ".pi", "memory", "MEMORY.md")];
+	const docs: SessionDoc[] = [];
+	for (const file of paths) {
+		try {
+			const entries = parseMemoryIndex(readFileSync(file, "utf8"));
+			for (const entry of entries) {
+				docs.push({
+					id: `memory:${entry.type}:${entry.key}`,
+					file: `memory:${entry.type}`,
+					timestamp: "",
+					role: "memory",
+					text: `[${entry.key}] ${entry.value}`,
+				});
+			}
+		} catch {
+			// Index absent or unreadable — skip this source.
+		}
+	}
+	return docs;
 }
 
 export function createSessionSearchToolDefinition(): ToolDefinition<typeof SessionSearchParams, undefined> {
@@ -159,15 +227,15 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 		name: "session_search",
 		label: "Session Search",
 		description:
-			"Semantically search past session messages in this workspace with Qwen3 embeddings and Milvus. Use it to recall decisions, commands, or context from earlier sessions instead of asking the user or guessing.",
-		promptSnippet: "session_search - recall past conversations with Qwen3/Milvus semantic retrieval",
+			"Search past conversations in this workspace (BM25 over session transcripts). Use to recall decisions, commands, or context from earlier sessions instead of asking the user or guessing.",
+		promptSnippet: "session_search - recall past conversations with BM25",
 		promptGuidelines: [
 			"Before asking the user to repeat earlier context, try session_search to recall what was already discussed or done.",
 		],
 		parameters: SessionSearchParams,
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const sessionDir = ctx.sessionManager.getSessionDir();
-			let files: string[];
+			let files: string[] = [];
 			try {
 				files = readdirSync(sessionDir)
 					.filter((name) => name.endsWith(".jsonl"))
@@ -185,58 +253,91 @@ export function createSessionSearchToolDefinition(): ToolDefinition<typeof Sessi
 				labelsByFileTarget.set(file, labels);
 				allDocs.push(...docs);
 			}
-			if (allDocs.length === 0) return textResult(`No past conversation matched "${params.query}".`);
+			allDocs.push(...loadMemoryDocs(ctx.cwd));
 
-			try {
-				const vectors = await embedQwen3([...allDocs.map((doc) => doc.text), params.query]);
-				const documents: SessionMemoryDocument[] = allDocs.map((doc, index) => {
-					const identity = buildSessionMemoryIdentity({
-						workspace: ctx.cwd,
-						file: doc.file,
-						messageId: doc.id,
-						timestamp: doc.timestamp,
-						role: doc.role,
-						text: doc.text,
-					});
-					doc.milvusId = identity.id;
-					return { ...identity, vector: vectors[index] };
-				});
-				await milvus.upsert(documents);
-				const results = await milvus.search(
-					documents[0].namespace,
-					vectors.at(-1)!,
-					Math.max(30, params.limit ?? 5),
-				);
-				const ranked = mapMilvusResults(
-					results,
-					allDocs.map((doc) => ({ ...doc, id: doc.milvusId!, sessionEntryId: doc.id })),
-				);
-				if (ranked.length === 0) return textResult(`No past conversation matched "${params.query}".`);
-
-				const hits: SessionSearchHit[] = [];
-				for (const { doc, score } of ranked.slice(0, params.limit ?? 5)) {
-					const fileDocs = allDocs.filter((candidate) => candidate.file === doc.file);
-					const index = fileDocs.findIndex((candidate) => candidate.milvusId === doc.milvusId);
-					const label = doc.sessionEntryId ? labelsByFileTarget.get(doc.file)?.get(doc.sessionEntryId) : undefined;
-					hits.push({ doc, score, context: index === -1 ? [] : contextAround(fileDocs, index), label });
-				}
-				const lines: string[] = [];
-				for (const hit of hits) {
-					const fileBase = hit.doc.file.split("/").pop() ?? hit.doc.file;
-					const time = shortTimestamp(hit.doc.timestamp);
-					lines.push(`### ${hit.label ?? fileBase}${time ? ` · ${time}` : ""} · score=${hit.score.toFixed(3)}`);
-					lines.push(
-						`[${hit.doc.role}] ${hit.doc.text.length > 500 ? `${hit.doc.text.slice(0, 500)}…` : hit.doc.text}`,
-					);
-					for (const context of hit.context) lines.push(context);
-					lines.push("");
-				}
-				return textResult(lines.join("\n"));
-			} catch (error) {
-				return textResult(
-					`(semantic session search unavailable: ${error instanceof Error ? error.message : String(error)})`,
-				);
+			const queryTokens = tokenize(params.query);
+			if (queryTokens.length === 0) {
+				return textResult("(empty query; provide at least one search term)");
 			}
+			const scored = scoreDocs(queryTokens, allDocs);
+			if (scored.length === 0) {
+				return textResult(`No past conversation matched "${params.query}".`);
+			}
+
+			// Vector-library path (default): persist + incrementally update the
+			// local vector store over all memory/session docs, search the whole
+			// store by cosine, and blend with normalized BM25 for word-exact
+			// recall. `rerank: off` keeps the pure BM25 path.
+			let ranked: Array<{ doc: SessionDoc; score: number }> = scored.slice(0, 30);
+			const useSemantic = params.rerank === "on" || params.rerank !== "off";
+			if (useSemantic) {
+				const vectorDocs: VectorStoreDoc[] = allDocs.map((doc) => ({
+					id: doc.id ?? `${doc.file}:${doc.timestamp}:${doc.role}`,
+					source: doc.file,
+					role: doc.role,
+					text: doc.text,
+					timestamp: doc.timestamp || undefined,
+				}));
+				// Embedder: real embeddings (remote API or local llama-server)
+				// when configured, otherwise the zero-dependency hash embedder.
+				const embeddingConfig = loadEmbeddingConfig();
+				let embed: EmbedBatchFn = localEmbedBatch;
+				if (embeddingConfig) {
+					embed = async (texts) => {
+						const vectors = await embedTexts(texts, embeddingConfig, embeddingCachePath(ctx.cwd));
+						return vectors ?? [];
+					};
+				}
+				await upsertVectorStore(ctx.cwd, vectorDocs, embed);
+				const vectorHits = await searchVectorStore(ctx.cwd, params.query, 30, embed);
+				if (vectorHits.length > 0) {
+					const maxBm25 = Math.max(...scored.map((entry) => entry.score), 1e-9);
+					const bm25ByText = new Map<string, number>();
+					for (const entry of scored) bm25ByText.set(entry.doc.text, entry.score / maxBm25);
+					ranked = vectorHits.map((hit) => ({
+						doc: {
+							id: hit.id,
+							file: hit.source,
+							timestamp: hit.timestamp ?? "",
+							role: hit.role,
+							text: hit.text,
+						},
+						score: 0.7 * hit.score + 0.3 * (bm25ByText.get(hit.text) ?? 0),
+					}));
+				}
+			}
+
+			const hits: SessionSearchHit[] = [];
+			for (const { doc, score } of ranked.slice(0, params.limit ?? 5)) {
+				// Find the doc's position within its own file for context.
+				const fileDocs = allDocs.filter((candidate) => candidate.file === doc.file);
+				const index = fileDocs.findIndex(
+					(candidate) =>
+						candidate === doc ||
+						(candidate.timestamp === doc.timestamp && candidate.role === doc.role && candidate.text === doc.text),
+				);
+				const label = doc.id ? labelsByFileTarget.get(doc.file)?.get(doc.id) : undefined;
+				hits.push({
+					doc,
+					score,
+					context: index === -1 ? [] : contextAround(fileDocs, index),
+					label,
+				});
+			}
+
+			const lines: string[] = [];
+			for (const hit of hits) {
+				const fileBase = hit.doc.file.startsWith("memory:")
+					? hit.doc.file
+					: (hit.doc.file.split("/").pop() ?? hit.doc.file);
+				const time = shortTimestamp(hit.doc.timestamp);
+				lines.push(`### ${hit.label ?? fileBase}${time ? ` · ${time}` : ""} · score=${hit.score.toFixed(1)}`);
+				const snippet = hit.doc.text.length > 500 ? `${hit.doc.text.slice(0, 500)}…` : hit.doc.text;
+				lines.push(`[${hit.doc.role}] ${snippet}`);
+				for (const context of hit.context) lines.push(context);
+				lines.push("");
+			}
+			return textResult(lines.join("\n"));
 		},
 	};
 }

@@ -11,13 +11,7 @@ export interface IntelligenceConfig {
 	subAgents: { maxConcurrent: number; defaultTimeoutMs: number; maxContextItems: number };
 	workflow: { maxConcurrent: number; pollIntervalMs: number; requireApprovalAt: "high" | "critical" };
 	memory: { minimumScore: number; minimumConfidence: number; defaultTtlDays: number };
-	memoryRetrieval: { milvusAddress: string; milvusTimeoutMs: number; namespaceSalt: string; limit: number };
-	embedding: {
-		mode: "off" | "local";
-		endpoint: string;
-		model: string;
-		queryInstruction: string;
-	};
+	embedding: { mode: "off" | "local" | "http"; endpoint?: string; model?: string; apiKeyEnv?: string };
 	excludedPatterns: string[];
 }
 
@@ -44,13 +38,7 @@ export const DEFAULT_INTELLIGENCE_CONFIG: IntelligenceConfig = {
 	subAgents: { maxConcurrent: 3, defaultTimeoutMs: 300_000, maxContextItems: 8 },
 	workflow: { maxConcurrent: 3, pollIntervalMs: 250, requireApprovalAt: "high" },
 	memory: { minimumScore: 0.75, minimumConfidence: 0.7, defaultTtlDays: 90 },
-	memoryRetrieval: { milvusAddress: "127.0.0.1:19530", milvusTimeoutMs: 10_000, namespaceSalt: "", limit: 20 },
-	embedding: {
-		mode: "local",
-		endpoint: "http://127.0.0.1:18080/v1",
-		model: "Qwen3-Embedding-0.6B",
-		queryInstruction: "Given a user query, retrieve relevant passages that answer the query.",
-	},
+	embedding: { mode: "local" },
 	excludedPatterns: [
 		".git/",
 		"node_modules/",
@@ -90,7 +78,6 @@ function mergeConfig(base: IntelligenceConfig, partial: Partial<IntelligenceConf
 		subAgents: { ...base.subAgents, ...(partial.subAgents ?? {}) },
 		workflow: { ...base.workflow, ...(partial.workflow ?? {}) },
 		memory: { ...base.memory, ...(partial.memory ?? {}) },
-		memoryRetrieval: { ...base.memoryRetrieval, ...(partial.memoryRetrieval ?? {}) },
 		embedding: { ...base.embedding, ...(partial.embedding ?? {}) },
 		excludedPatterns: partial.excludedPatterns ?? base.excludedPatterns,
 	};

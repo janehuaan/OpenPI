@@ -5,6 +5,8 @@
  * and after compaction the session is reloaded.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/pi-ai/compat";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -442,77 +444,41 @@ export function findCutPoint(
 // Summarization
 // ============================================================================
 
-const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint in JSON format that another LLM will use to continue the work.
 
-Use this EXACT format:
+Output ONLY valid JSON, no markdown fences, no explanation. Use this EXACT structure:
 
-## Goal
-[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+{
+  "goal": "What is the user trying to accomplish?",
+  "done": ["Completed tasks/changes"],
+  "inProgress": ["Current work"],
+  "nextSteps": ["Ordered list of what should happen next"],
+  "decisions": [{"what": "Decision made", "why": "Rationale"}],
+  "issues": [{"message": "Error or blocker", "recovered": false, "tool": "tool-name"}],
+  "criticalContext": ["File paths, function names, error messages to preserve"],
+  "constraints": ["User requirements and constraints"]
+}
 
-## Constraints & Preferences
-- [Any constraints, preferences, or requirements mentioned by user]
-- [Or "(none)" if none were mentioned]
-
-## Progress
-### Done
-- [x] [Completed tasks/changes]
-
-### In Progress
-- [ ] [Current work]
-
-### Blocked
-- [Issues preventing progress, if any]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale]
-
-## Next Steps
-1. [Ordered list of what should happen next]
-
-## Critical Context
-- [Any data, examples, or references needed to continue]
-- [Or "(none)" if not applicable]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Rules:
+- Preserve exact file paths, function names, and error messages
+- Keep each field concise but complete
+- "done" should include all completed items
+- "inProgress" should have at most 1-2 items (the current focus)
+- "issues" only includes unresolved problems (recovered=false)
+- If a section has nothing, use empty array [] not null`;
 
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
-Update the existing structured summary with new information. RULES:
-- PRESERVE all existing information from the previous summary
+Update the JSON summary with new information. RULES:
+- PRESERVE all existing fields from the previous summary
 - ADD new progress, decisions, and context from the new messages
-- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
-- UPDATE "Next Steps" based on what was accomplished
+- UPDATE "done": move items from "inProgress" to "done" when completed
+- UPDATE "nextSteps" based on what was accomplished
+- UPDATE "issues": mark recovered=true when an issue is resolved
 - PRESERVE exact file paths, function names, and error messages
-- If something is no longer relevant, you may remove it
+- If something is no longer relevant, remove it from that field
 
-Use this EXACT format:
-
-## Goal
-[Preserve existing goals, add new ones if the task expanded]
-
-## Constraints & Preferences
-- [Preserve existing, add new ones discovered]
-
-## Progress
-### Done
-- [x] [Include previously done items AND newly completed items]
-
-### In Progress
-- [ ] [Current work - update based on progress]
-
-### Blocked
-- [Current blockers - remove if resolved]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale] (preserve all previous, add new)
-
-## Next Steps
-1. [Update based on current state]
-
-## Critical Context
-- [Preserve important context, add new if needed]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Output ONLY the updated JSON, no markdown fences, no explanation.`;
 
 function createSummarizationOptions(
 	model: Model<any>,
@@ -609,6 +575,16 @@ export async function generateSummary(
 		.map((c) => c.text)
 		.join("\n");
 
+	// Try to parse as structured JSON checkpoint; fall back to raw text
+	try {
+		const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+		if (jsonMatch) {
+			const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+			if (parsed.goal !== undefined) return JSON.stringify(parsed);
+		}
+	} catch {
+		/* fall through to raw text */
+	}
 	return textContent;
 }
 
@@ -827,6 +803,70 @@ export async function compact(
 		tokensBefore,
 		details: { readFiles, modifiedFiles } as CompactionDetails,
 	};
+}
+
+/**
+ * Parse a compaction summary (JSON or text) into a ContextCheckpoint object.
+ * Returns undefined if parsing fails.
+ */
+export function parseCheckpoint(summary: string): Record<string, unknown> | undefined {
+	try {
+		const jsonMatch = summary.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) return undefined;
+		const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+		if (parsed.goal !== undefined) return parsed;
+	} catch {
+		/* not JSON */
+	}
+	return undefined;
+}
+
+/**
+ * Save a context checkpoint to disk after compaction.
+ * The checkpoint is a structured JSON summary that survives restarts.
+ */
+export function saveCompactionCheckpoint(cwd: string, summary: string): void {
+	const parsed = parseCheckpoint(summary);
+	if (!parsed) return;
+	try {
+		const checkpoint = {
+			version: 1 as const,
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+			goal: (parsed.goal as string) ?? "",
+			done: Array.isArray(parsed.done) ? (parsed.done as string[]).filter(Boolean) : [],
+			inProgress: Array.isArray(parsed.inProgress) ? (parsed.inProgress as string[]).filter(Boolean) : [],
+			nextSteps: Array.isArray(parsed.nextSteps) ? (parsed.nextSteps as string[]).filter(Boolean) : [],
+			decisions: Array.isArray(parsed.decisions)
+				? (parsed.decisions as Array<{ what?: string; why?: string }>)
+						.map((d) => ({
+							what: d.what ?? "",
+							why: d.why ?? "",
+						}))
+						.filter((d) => d.what)
+				: [],
+			issues: Array.isArray(parsed.issues)
+				? (parsed.issues as Array<{ message?: string; recovered?: boolean; tool?: string }>)
+						.map((i) => ({
+							message: i.message ?? "",
+							recovered: i.recovered ?? false,
+							tool: i.tool,
+							note: "",
+						}))
+						.filter((i) => i.message)
+				: [],
+			criticalContext: Array.isArray(parsed.criticalContext)
+				? (parsed.criticalContext as string[]).filter(Boolean)
+				: [],
+			constraints: Array.isArray(parsed.constraints) ? (parsed.constraints as string[]).filter(Boolean) : [],
+			historySummary: summary.length > 2000 ? `${summary.slice(0, 2000)}...` : summary,
+		};
+		const dir = join(cwd, ".pi");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "context-checkpoint.json"), JSON.stringify(checkpoint, null, "\t"));
+	} catch {
+		/* best-effort: checkpoint failure must not break compaction */
+	}
 }
 
 /**
