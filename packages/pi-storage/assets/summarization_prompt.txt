@@ -1,0 +1,22 @@
+The messages above are a conversation to summarize. Create a structured context checkpoint in JSON format that another LLM will use to continue the work.
+
+Output ONLY valid JSON, no markdown fences, no explanation. Use this EXACT structure:
+
+{
+  "goal": "What is the user trying to accomplish?",
+  "done": ["Completed tasks/changes"],
+  "inProgress": ["Current work"],
+  "nextSteps": ["Ordered list of what should happen next"],
+  "decisions": [{"what": "Decision made", "why": "Rationale"}],
+  "issues": [{"message": "Error or blocker", "recovered": false, "tool": "tool-name"}],
+  "criticalContext": ["File paths, function names, error messages to preserve"],
+  "constraints": ["User requirements and constraints"]
+}
+
+Rules:
+- Preserve exact file paths, function names, and error messages
+- Keep each field concise but complete
+- "done" should include all completed items
+- "inProgress" should have at most 1-2 items (the current focus)
+- "issues" only includes unresolved problems (recovered=false)
+- If a section has nothing, use empty array [] not null

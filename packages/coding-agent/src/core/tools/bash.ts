@@ -16,6 +16,7 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { summarizeLargeOutput } from "../pi-storage-wrapper.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import type { TruncationResult } from "./truncate.ts";
@@ -26,39 +27,6 @@ import type { TruncationResult } from "./truncate.ts";
  */
 const LARGE_OUTPUT_THRESHOLD_LINES = 500;
 const LARGE_OUTPUT_THRESHOLD_BYTES = 20 * 1024; // 20KB
-
-function summarizeLargeOutput(lines: string[]): string {
-	const errors = lines.filter((l) => /(?:error|fail|exception|abort|fatal|undefinedvariable)/i.test(l)).slice(-10);
-	const warnings = lines.filter((l) => /(?:warn|deprecated|notice)/i.test(l)).slice(-5);
-	const summaryLines = lines.filter((l) => /^[\s]*[✓✔✗✘×]/.test(l) || /^\s*[-*] /.test(l)).slice(-10);
-	const parts: string[] = [];
-	if (errors.length > 0) {
-		parts.push(`Errors (${errors.length}):`);
-		for (const e of errors) parts.push(`  ${e.trim().slice(0, 200)}`);
-	}
-	if (warnings.length > 0) {
-		parts.push(`Warnings (${warnings.length}):`);
-		for (const w of warnings) parts.push(`  ${w.trim().slice(0, 200)}`);
-	}
-	if (summaryLines.length > 0 && errors.length === 0 && warnings.length === 0) {
-		parts.push("Key lines:");
-		for (const s of summaryLines) parts.push(`  ${s.trim().slice(0, 200)}`);
-	}
-	if (parts.length === 0) {
-		// Fallback: first 5 + last 5 lines
-		const head = lines
-			.slice(0, 5)
-			.map((l) => l.trim())
-			.filter(Boolean);
-		const tail = lines
-			.slice(-5)
-			.map((l) => l.trim())
-			.filter(Boolean);
-		const unique = [...new Set([...head, ...tail])];
-		return unique.length > 0 ? unique.join("\n") : "(large output, no key lines found)";
-	}
-	return parts.join("\n");
-}
 
 function formatOutputWithSmartTruncation(
 	snapshot: { content: string; truncation: TruncationResult; fullOutputPath?: string },

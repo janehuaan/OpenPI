@@ -1,1 +1,1 @@
-/Users/huaan/OpenPI/packages/pi-storage/target/release/pi-storage-cli: /Users/huaan/OpenPI/packages/pi-storage/src/main.rs
+/Users/huaan/OpenPI/packages/pi-storage/target/release/pi-storage-cli: /Users/huaan/OpenPI/packages/pi-storage/assets/summarization_prompt.txt /Users/huaan/OpenPI/packages/pi-storage/assets/update_summarization_prompt.txt /Users/huaan/OpenPI/packages/pi-storage/src/main.rs

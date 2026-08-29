@@ -187,6 +187,12 @@ pub struct ContextCheckpoint {
 #[derive(Deserialize)]
 #[serde(tag = "cmd")]
 enum CliCommand {
+    #[serde(rename = "bash_summarize")]
+    BashSummarize { lines: Vec<String> },
+    #[serde(rename = "build_summarization_prompt")]
+    BuildSummarizationPrompt { conversation_text: String, previous_summary: Option<String>, custom_instructions: Option<String> },
+    #[serde(rename = "parse_json_from_text")]
+    ParseJsonFromText { text: String },
     #[serde(rename = "task_state_load")]
     TaskStateLoad { path: String },
     #[serde(rename = "task_state_save")]
@@ -545,6 +551,46 @@ fn cmd_checkpoint_compact(checkpoint: &ContextCheckpoint) -> CliResponse {
     ok_response(serde_json::json!(lines.join("\n")))
 }
 
+fn cmd_bash_summarize(input: &SummarizeInput) -> CliResponse {
+    let t0 = Instant::now();
+    let summary = summarize_large_output(&input.lines);
+    CliResponse {
+        ok: true,
+        data: Some(serde_json::to_value(SummarizeOutput { summary }).unwrap()),
+        error: None,
+        elapsed_ms: Some(t0.elapsed().as_secs_f64() * 1000.0),
+    }
+}
+
+fn cmd_build_summarization_prompt(input: &BuildPromptInput) -> CliResponse {
+    let t0 = Instant::now();
+    let prompt = build_summarization_prompt(input);
+    CliResponse {
+        ok: true,
+        data: Some(serde_json::json!({"prompt": prompt})),
+        error: None,
+        elapsed_ms: Some(t0.elapsed().as_secs_f64() * 1000.0),
+    }
+}
+
+fn cmd_parse_json_from_text(input: &str) -> CliResponse {
+    let t0 = Instant::now();
+    match parse_json_from_text(input) {
+        Some(json) => CliResponse {
+            ok: true,
+            data: Some(serde_json::json!({"json": json})),
+            error: None,
+            elapsed_ms: Some(t0.elapsed().as_secs_f64() * 1000.0),
+        },
+        None => CliResponse {
+            ok: true,
+            data: Some(serde_json::json!(null)),
+            error: None,
+            elapsed_ms: Some(t0.elapsed().as_secs_f64() * 1000.0),
+        },
+    }
+}
+
 fn main() {
     let mut input = String::new();
     std::io::Read::read_to_string(&mut io::stdin(), &mut input).unwrap_or_default();
@@ -568,6 +614,11 @@ fn main() {
         CliCommand::CheckpointSave { path, checkpoint } => cmd_checkpoint_save(&path, &checkpoint),
         CliCommand::CheckpointFormat { checkpoint } => cmd_checkpoint_format(&checkpoint),
         CliCommand::CheckpointCompact { checkpoint } => cmd_checkpoint_compact(&checkpoint),
+        CliCommand::BashSummarize { lines } => cmd_bash_summarize(&SummarizeInput { lines }),
+        CliCommand::BuildSummarizationPrompt { conversation_text, previous_summary, custom_instructions } => {
+            cmd_build_summarization_prompt(&BuildPromptInput { conversation_text, previous_summary, custom_instructions })
+        }
+        CliCommand::ParseJsonFromText { text } => cmd_parse_json_from_text(&text),
     };
     // Attach elapsed time
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -633,3 +684,141 @@ mod tests {
         assert_eq!(resp.elapsed_ms.unwrap() as u64, resp.elapsed_ms.unwrap() as u64); // just check it runs
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Bash Output Summarizer
+// ═══════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct SummarizeInput {
+    lines: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SummarizeOutput {
+    summary: String,
+}
+
+fn summarize_large_output(lines: &[String]) -> String {
+    let error_re = regex::Regex::new(
+        r"(?i)(?:error|fail|exception|abort|fatal|undefinedvariable)",
+    ).unwrap();
+    let warn_re = regex::Regex::new(r"(?i)(?:warn|deprecated|notice)").unwrap();
+    let summary_re = regex::Regex::new(r"^[\s]*[✓✔✗✘×]").unwrap();
+    let bullet_re = regex::Regex::new(r"^\s*[-*] ").unwrap();
+
+    let errors: Vec<&str> = lines
+        .iter()
+        .filter(|l| error_re.is_match(l))
+        .map(|l| l.as_str())
+        .rev()
+        .take(10)
+        .collect();
+    let warnings: Vec<&str> = lines
+        .iter()
+        .filter(|l| warn_re.is_match(l))
+        .map(|l| l.as_str())
+        .rev()
+        .take(5)
+        .collect();
+    let summary_lines: Vec<&str> = lines
+        .iter()
+        .filter(|l| summary_re.is_match(l) || bullet_re.is_match(l))
+        .map(|l| l.as_str())
+        .rev()
+        .take(10)
+        .collect();
+
+    let mut parts: Vec<String> = Vec::new();
+    if !errors.is_empty() {
+        parts.push(format!("Errors ({}):", errors.len()));
+        for e in &errors {
+            parts.push(format!("  {}", e.trim().chars().take(200).collect::<String>()));
+        }
+    }
+    if !warnings.is_empty() {
+        parts.push(format!("Warnings ({}):", warnings.len()));
+        for w in &warnings {
+            parts.push(format!("  {}", w.trim().chars().take(200).collect::<String>()));
+        }
+    }
+    if (!summary_lines.is_empty()) && errors.is_empty() && warnings.is_empty() {
+        parts.push("Key lines:".to_string());
+        for s in summary_lines {
+            parts.push(format!("  {}", s.trim().chars().take(200).collect::<String>()));
+        }
+    }
+    if parts.is_empty() {
+        let head: Vec<String> = lines.iter()
+            .take(5)
+            .map(|l| l.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let tail: Vec<String> = lines.iter()
+            .rev()
+            .take(5)
+            .map(|l| l.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut seen = HashSet::new();
+        let unique: Vec<String> = head.into_iter()
+            .chain(tail.into_iter())
+            .filter(|s| seen.insert(s.clone()))
+            .collect();
+        if unique.is_empty() {
+            return "(large output, no key lines found)".to_string();
+        }
+        unique.join("\n")
+    } else {
+        parts.join("\n")
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Compaction Prompt Builder (no LLM call, just prompt construction)
+// ═══════════════════════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct BuildPromptInput {
+    conversation_text: String,
+    previous_summary: Option<String>,
+    custom_instructions: Option<String>,
+}
+
+#[derive(Serialize)]
+struct BuildPromptOutput {
+    prompt: String,
+}
+
+fn build_summarization_prompt(input: &BuildPromptInput) -> String {
+    let base_prompt = if input.previous_summary.is_some() {
+        include_str!("../assets/update_summarization_prompt.txt")
+    } else {
+        include_str!("../assets/summarization_prompt.txt")
+    };
+    let mut prompt = format!("<conversation>\n{}\n</conversation>\n\n", input.conversation_text);
+    if let Some(ref summary) = input.previous_summary {
+        prompt.push_str(&format!("<previous-summary>\n{}\n</previous-summary>\n\n", summary));
+    }
+    prompt.push_str(base_prompt);
+    if let Some(ref instructions) = input.custom_instructions {
+        prompt.push_str(&format!("\n\nAdditional focus: {}", instructions));
+    }
+    prompt
+}
+
+fn parse_json_from_text(text: &str) -> Option<String> {
+    // Find the first { and last } to extract JSON
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    if start > end { return None; }
+    let json_str = &text[start..=end];
+    // Validate it's valid JSON with a goal field
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    if parsed.get("goal").is_some() {
+        Some(json_str.to_string())
+    } else {
+        None
+    }
+}
+

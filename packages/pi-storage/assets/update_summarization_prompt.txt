@@ -1,0 +1,12 @@
+The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
+
+Update the JSON summary with new information. RULES:
+- PRESERVE all existing fields from the previous summary
+- ADD new progress, decisions, and context from the new messages
+- UPDATE "done": move items from "inProgress" to "done" when completed
+- UPDATE "nextSteps" based on what was accomplished
+- UPDATE "issues": mark recovered=true when an issue is resolved
+- PRESERVE exact file paths, function names, and error messages
+- If something is no longer relevant, remove it from that field
+
+Output ONLY the updated JSON, no markdown fences, no explanation.

@@ -123,3 +123,104 @@ export {
 	toolCallEvent,
 	toolResultEvent,
 } from "./event-ledger.ts";
+
+// ── Bash Summarizer ─────────────────────────────────────────
+export function summarizeLargeOutput(lines: string[]): string {
+	const r = cliCall({ cmd: "bash_summarize", lines });
+	if (r?.ok && typeof r.data === "object" && typeof (r.data as any).summary === "string") {
+		return (r.data as { summary: string }).summary;
+	}
+	// Fallback to TS implementation
+	return summarizeLargeOutputTs(lines);
+}
+
+function summarizeLargeOutputTs(lines: string[]): string {
+	const errorRe = /(?:error|fail|exception|abort|fatal|undefinedvariable)/i;
+	const warnRe = /(?:warn|deprecated|notice)/i;
+	const summaryRe = /^[,\s]*[✓✔✗✘×]/;
+	const bulletRe = /^\s*[-*] /;
+	const errors = lines.filter((l) => errorRe.test(l)).slice(-10);
+	const warnings = lines.filter((l) => warnRe.test(l)).slice(-5);
+	const summaryLines = lines.filter((l) => summaryRe.test(l) || bulletRe.test(l)).slice(-10);
+	const parts: string[] = [];
+	if (errors.length > 0) {
+		parts.push(`Errors (${errors.length}):`);
+		for (const e of errors) parts.push(`  ${e.trim().slice(0, 200)}`);
+	}
+	if (warnings.length > 0) {
+		parts.push(`Warnings (${warnings.length}):`);
+		for (const w of warnings) parts.push(`  ${w.trim().slice(0, 200)}`);
+	}
+	if (summaryLines.length > 0 && errors.length === 0 && warnings.length === 0) {
+		parts.push("Key lines:");
+		for (const s of summaryLines) parts.push(`  ${s.trim().slice(0, 200)}`);
+	}
+	if (parts.length === 0) {
+		const head = lines
+			.slice(0, 5)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		const tail = lines
+			.slice(-5)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		const unique = [...new Set([...head, ...tail])];
+		return unique.length > 0 ? unique.join("\n") : "(large output, no key lines found)";
+	}
+	return parts.join("\n");
+}
+
+// ── Compaction Prompt Builder ───────────────────────────────
+export function buildSummarizationPrompt(
+	conversationText: string,
+	previousSummary: string | undefined,
+	customInstructions: string | undefined,
+): string {
+	const r = cliCall({
+		cmd: "build_summarization_prompt",
+		conversation_text: conversationText,
+		previous_summary: previousSummary,
+		custom_instructions: customInstructions,
+	});
+	if (r?.ok && typeof r.data === "object" && typeof (r.data as any).prompt === "string") {
+		return (r.data as { prompt: string }).prompt;
+	}
+	// Fallback: build prompt in TS
+	return buildSummarizationPromptTs(conversationText, previousSummary, customInstructions);
+}
+
+function buildSummarizationPromptTs(
+	conversationText: string,
+	previousSummary: string | undefined,
+	customInstructions: string | undefined,
+): string {
+	const basePrompt = previousSummary
+		? `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.\n\nUpdate the JSON summary with new information. RULES:\n- PRESERVE all existing fields from the previous summary\n- ADD new progress, decisions, and context from the new messages\n- UPDATE "done": move items from "inProgress" to "done" when completed\n- UPDATE "nextSteps" based on what was accomplished\n- UPDATE "issues": mark recovered=true when an issue is resolved\n- PRESERVE exact file paths, function names, and error messages\n- If something is no longer relevant, remove it from that field\n\nOutput ONLY the updated JSON, no markdown fences, no explanation.`
+		: `The messages above are a conversation to summarize. Create a structured context checkpoint in JSON format that another LLM will use to continue the work.\n\nOutput ONLY valid JSON, no markdown fences, no explanation. Use this EXACT structure:\n{\n  "goal": "What is the user trying to accomplish?",\n  "done": ["Completed tasks/changes"],\n  "inProgress": ["Current work"],\n  "nextSteps": ["Ordered list of what should happen next"],\n  "decisions": [{"what": "Decision made", "why": "Rationale"}],\n  "issues": [{"message": "Error or blocker", "recovered": false, "tool": "tool-name"}],\n  "criticalContext": ["File paths, function names, error messages to preserve"],\n  "constraints": ["User requirements and constraints"]\n}\n\nRules:\n- Preserve exact file paths, function names, and error messages\n- Keep each field concise but complete\n- "done" should include all completed items\n- "inProgress" should have at most 1-2 items (the current focus)\n- "issues" only includes unresolved problems (recovered=false)\n- If a section has nothing, use empty array [] not null`;
+	let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
+	if (previousSummary) {
+		promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
+	}
+	promptText += basePrompt;
+	if (customInstructions) {
+		promptText += `\n\nAdditional focus: ${customInstructions}`;
+	}
+	return promptText;
+}
+
+export function parseJsonFromText(text: string): string | null {
+	const r = cliCall({ cmd: "parse_json_from_text", text });
+	if (r?.ok && typeof r.data === "object" && (r.data as any)?.json) {
+		return (r.data as { json: string }).json;
+	}
+	// Fallback
+	const match = text.match(/\{[\s\S]*\}/);
+	if (!match) return null;
+	try {
+		const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+		if (parsed.goal !== undefined) return match[0];
+	} catch {
+		/* fall through */
+	}
+	return null;
+}
