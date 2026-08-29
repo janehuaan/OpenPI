@@ -274,3 +274,69 @@ export {
 	toolCallEvent,
 	toolResultEvent,
 } from "./event-ledger.ts";
+
+// ── Fuzzy Matching ──────────────────────────────────────────
+export function fuzzyMatch(query: string, text: string): { matches: boolean; score: number } {
+	const r = cliCall<{ matches: boolean; score: number }>("fuzzy_match", { query, text });
+	if (r) return r;
+	// TS fallback
+	const queryLower = query.toLowerCase();
+	const textLower = text.toLowerCase();
+	if (queryLower.length === 0) return { matches: true, score: 0 };
+	if (queryLower.length > textLower.length) return { matches: false, score: 0 };
+	let queryIndex = 0;
+	let score = 0;
+	let lastMatchIndex = -1;
+	for (let i = 0; i < textLower.length && queryIndex < queryLower.length; i++) {
+		if (textLower[i] === queryLower[queryIndex]) {
+			const isWordBoundary = i === 0 || /[\s\-_./:]/.test(textLower[i - 1]!);
+			if (lastMatchIndex === i - 1) {
+				score -= (lastMatchIndex + 1) * 5;
+			} else {
+				if (lastMatchIndex >= 0) score += (i - lastMatchIndex - 1) * 2;
+			}
+			if (isWordBoundary) score -= 10;
+			score += i * 0.1;
+			lastMatchIndex = i;
+			queryIndex++;
+		}
+	}
+	return { matches: queryIndex >= queryLower.length, score };
+}
+
+// ── JSONL Operations ────────────────────────────────────────
+export function jsonlRead(filePath: string): unknown[] {
+	const r = cliCall<unknown[]>("jsonl_read", { path: filePath });
+	if (r) return r;
+	// TS fallback
+	const { readFileSync, existsSync } = require("node:fs");
+	if (!existsSync(filePath)) return [];
+	try {
+		return readFileSync(filePath, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line: string) => JSON.parse(line));
+	} catch {
+		return [];
+	}
+}
+
+export function jsonlAppend(filePath: string, value: unknown): void {
+	const r = cliCall<boolean>("jsonl_append", { path: filePath, value });
+	if (r) return;
+	// TS fallback
+	const { appendFileSync, mkdirSync, existsSync } = require("node:fs");
+	const dir = require("node:path").dirname(filePath);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	appendFileSync(filePath, `${JSON.stringify(value)}\n`, "utf8");
+}
+
+export function jsonlWrite(filePath: string, values: unknown[]): void {
+	const r = cliCall<boolean>("jsonl_write", { path: filePath, values });
+	if (r) return;
+	// TS fallback
+	const { writeFileSync, mkdirSync, existsSync } = require("node:fs");
+	const dir = require("node:path").dirname(filePath);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	writeFileSync(filePath, values.map((v) => JSON.stringify(v)).join("\n") + "\n", "utf8");
+}
