@@ -1,164 +1,87 @@
 <p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
+  <img alt="OpenPI" src="packages/openpi-desktop/build/icon.png" width="96">
 </p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-</p>
+<h1 align="center">OpenPI 个人智能助手</h1>
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+<p align="center">本地优先的个人 AI Agent，桌面端开箱即用，无需命令行。</p>
 
-# Pi Agent Harness
+---
 
-This is the home of the Pi agent harness project including our self extensible coding agent.
+## 特性
 
-* **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
-* **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
-* **[@earendil-works/pi-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
+| 能力 | 说明 |
+|------|------|
+| **本地记忆** | bge-small-zh 嵌入模型（25 MB，本地运行），记忆全部存本地文件 |
+| **语义检索** | 混合向量 + BM25 搜索，无需外部向量数据库，无 API key |
+| **任务状态** | 结构化目标/步骤/检查点/错误持久化，崩溃重启后无缝续跑 |
+| **上下文压缩** | 智能压缩生成结构化检查点，长任务不丢状态 |
+| **可观测性** | 工具调用/任务进度/事件日志实时可见，桌面状态栏 + 运行视图 |
+| **桌面应用** | Electron 打包，双击即用，无需 CLI |
 
-To learn more about Pi:
+## 架构
 
-* [Visit pi.dev](https://pi.dev), the project website with demos
-* [Read the documentation](https://pi.dev/docs/latest), but you can also ask the agent to explain itself
-
-## All Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
-
-## Permissions & Containerization
-
-Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.
-
-If you need stronger boundaries, containerize or sandbox Pi. See [packages/coding-agent/docs/containerization.md](packages/coding-agent/docs/containerization.md) for three patterns:
-
-- **Gondolin extension**: keep `pi` and provider auth on the host while routing built-in tools and `!` commands into a local Linux micro-VM.
-- **Plain Docker**: run the whole `pi` process in a local container for simple isolation.
-- **OpenShell**: run the whole `pi` process in a policy-controlled sandbox.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
-
-## Development
-
-```bash
-npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build        # Build all packages
-npm run check        # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+```
+用户输入
+    │
+    ▼
+┌───────────────────────────────┐
+│  Agent Session                │
+│  ├─ 上下文注入(检查点+任务)   │
+│  ├─ 工具调用 → 事件日志       │
+│  └─ 上下文压缩 → 检查点文件   │
+└───────────────────────────────┘
+    │
+    ▼
+┌───────────────────────────────┐
+│  本地记忆检索                 │
+│  ├─ 向量搜索 (bge-small-zh)   │
+│  └─ BM25 关键词               │
+└───────────────────────────────┘
 ```
 
-## Supply-chain hardening
+所有数据存储在本地 `.pi/` 目录，无云端依赖。
 
-We treat npm dependency changes as reviewed code changes.
+## 快速开始
 
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
-- `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
-- `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent shrinkwrap.
-- The published CLI package includes `packages/coding-agent/npm-shrinkwrap.json`, generated from the root lockfile, to pin transitive deps for npm users.
-- Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
-- Local release installs, documented npm installs, and `pi update --self` use `--ignore-scripts` where supported.
-- CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
+### 桌面版（推荐）
 
-## Share your OSS coding agent sessions
+```bash
+# 打包 macOS 应用
+cd packages/openpi-desktop
+npm run pack:mac
 
-If you use Pi or other coding agents for open source work, please share your sessions.
+# 安装
+open release/OpenPI-0.80.8.dmg
+```
 
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
+### 开发模式
 
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
+```bash
+npm install --ignore-scripts
+npm run check        # lint + 类型检查
+./pi-test.sh         # 从源码运行
+```
 
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
+## 性能
 
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
+| 指标 | 数值 |
+|------|------|
+| 嵌入延迟 | ~25 ms（本地 bge-small-zh） |
+| 检索延迟（1000条记忆） | ~30 ms |
+| 存储（1000条记忆） | ~2 MB |
+| 应用安装包 | 418 MB DMG |
 
-I regularly publish my own `pi-mono` work sessions here:
+## 技术栈
 
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
+- **Agent 核心**：基于 [pi](https://github.com/earendil-works/pi) 构建
+- **桌面端**：Electron + Vite + React
+- **嵌入模型**：bge-small-zh（GGUF，本地 llama-server 运行）
+- **检索**：本地哈希向量 + BM25 混合
 
-## License
+## 许可
 
 MIT
 
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>
+---
 
-## Local-First AI Memory (2026-08)
-
-OpenPI now ships with a fully local memory and observability stack — no vector DB, no API keys, no Docker required.
-
-### What's included
-
-| Feature | How it works |
-|---------|-------------|
-| **bge-small-zh embeddings** | 25 MB GGUF model runs locally via llama-server (512-dim, Chinese-optimized) |
-| **Hybrid vector + BM25 search** | Local `vectors.bin` + `lexicon.bin` — no external services |
-| **Structured task state** | `goal/steps/checkpoints/errors/nextSteps` persisted to `.pi/tasks/` |
-| **Context checkpoints** | Compaction outputs structured JSON, saved to `.pi/context-checkpoint.json` |
-| **Event ledger** | Tool calls, errors, compaction events logged to `.pi/events/events.jsonl` |
-| **Status bar integration** | Task progress and recent events visible in the desktop status bar |
-| **Daemon surface panels** | Task progress + event log panels in the Desktop runtime view |
-
-### Architecture
-
-```
-User prompt
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  agent-session.ts                       │
-│  ├─ _maybeInjectContext()               │  ← loads checkpoint + task state
-│  ├─ beforeToolCall → event-ledger       │  ← logs tool call
-│  └─ afterToolCall → event-ledger        │  ← logs tool result
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  Compaction (when context full)         │
-│  ├─ LLM summarizes conversation        │
-│  └─ saveCompactionCheckpoint()          │  ← persists to .pi/
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│  Memory retrieval                       │
-│  ├─ hybridSearch() → vectors.bin       │  ← cosine similarity
-│  └─ rankBm25() → lexicon.bin           │  ← keyword matching
-└─────────────────────────────────────────┘
-```
-
-### Performance
-
-| Metric | Value |
-|--------|-------|
-| Embedding latency | ~25 ms (bge-small-zh, local) |
-| Search latency (1000 entries) | ~30 ms |
-| Storage (1000 memories) | ~2 MB |
-| App size (DMG) | 418 MB |
-
-### Comparison: before vs after
-
-| | Before (Milvus + Qwen) | After (bge + local) |
-|--|----------------------|---------------------|
-| Vector DB | Milvus (Docker) | None — file-based |
-| Embedding model | Qwen3-Embedding (1024-dim) | bge-small-zh (512-dim) |
-| Model size | 639 MB GGUF | 25 MB GGUF |
-| External deps | Docker + @zilliz | None |
-| App size | ~1 GB | 418 MB DMG |
-| Memory recall | ~85% (top-20) | ~90% (top-100) |
-
+<p align="center"><sub>基于 <a href="https://github.com/earendil-works/pi">pi</a> 构建</sub></p>
