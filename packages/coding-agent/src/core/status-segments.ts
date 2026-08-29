@@ -206,6 +206,40 @@ function builtinProviders(session: AgentSession): StatusSegmentProvider[] {
 			order: 28,
 			getValue: async () => (await getShared()).compactThreshold,
 		},
+		{
+			id: "task-progress",
+			label: "任务",
+			order: 29,
+			getValue: async () => {
+				const cwd = (session as any).cwd;
+				const state = readTaskState(cwd);
+				if (!state || !state.total || state.completed === undefined) return undefined;
+				const pct = Math.round((state.completed / state.total) * 100);
+				return {
+					value: `${state.completed}/${state.total}`,
+					hint: (state.goal ?? "进行中").slice(0, 40),
+					progress: pct / 100,
+					tone: pct >= 100 ? "normal" : "warn",
+				};
+			},
+		},
+		{
+			id: "recent-events",
+			label: "事件",
+			order: 30,
+			getValue: async () => {
+				const cwd = (session as any).cwd;
+				const events = readRecentEvents(cwd, 3);
+				if (events.length === 0) return undefined;
+				const last = events[events.length - 1];
+				const tool = last.tool ? ` ${last.tool}` : "";
+				const dur = last.duration !== undefined ? ` (${last.duration}ms)` : "";
+				return {
+					value: `${last.type}${tool}${dur}`,
+					hint: `${events.length} 个近期事件`,
+				};
+			},
+		},
 	];
 }
 
@@ -242,4 +276,37 @@ export async function getStatusSegments(session: AgentSession): Promise<StatusSe
 	}
 	present.sort((left, right) => left.order - right.order);
 	return present.map((entry) => entry.segment);
+}
+
+// ── Task State & Event Log Segments ───────────────────────────────────────────
+
+function readTaskState(cwd: string): { goal?: string; completed?: number; total?: number } | undefined {
+	try {
+		const { loadTaskState } = require("./task-state.ts") as {
+			loadTaskState: (cwd: string) => { goal?: string; steps?: Array<{ status: string }> } | undefined;
+		};
+		const state = loadTaskState(cwd);
+		if (!state || !state.steps || state.steps.length === 0) return undefined;
+		const completed = state.steps.filter((s) => s.status === "completed").length;
+		return { goal: state.goal, completed, total: state.steps.length };
+	} catch {
+		return undefined;
+	}
+}
+
+function readRecentEvents(cwd: string, limit = 3): Array<{ type: string; tool?: string; duration?: number }> {
+	try {
+		const { readEvents, eventFilePath } = require("./event-ledger.ts") as {
+			readEvents: (path: string) => Array<{ type: string; data?: Record<string, unknown> }>;
+			eventFilePath: (cwd: string) => string;
+		};
+		const events = readEvents(eventFilePath(cwd));
+		return events.slice(-limit).map((e) => ({
+			type: e.type,
+			tool: (e.data as any)?.toolName,
+			duration: (e.data as any)?.durationMs,
+		}));
+	} catch {
+		return [];
+	}
 }
