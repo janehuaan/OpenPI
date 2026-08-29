@@ -2457,6 +2457,25 @@ export function DaemonSurface({
 							</strong>
 						</div>
 					</div>
+					<div className="operation-panel">
+						<div className="operation-panel-title">
+							<h2>任务进度</h2>
+						</div>
+						<div className="task-progress-list">
+							{(() => {
+								// Task progress is shown via status segments, rendered inline below
+								return <div className="task-progress-hint">查看状态栏中的"任务"segment 获取实时进度</div>;
+							})()}
+						</div>
+					</div>
+					<div className="operation-panel">
+						<div className="operation-panel-title">
+							<h2>事件日志</h2>
+						</div>
+						<div className="event-log">
+							<div className="event-log-hint">工具调用和 compaction 事件将显示在这里</div>
+						</div>
+					</div>
 					<div className="operation-panel daemon-instances">
 						<div className="operation-panel-title">
 							<div>

@@ -6882,3 +6882,37 @@ input.ui-command-input:focus-visible {
 .reference-scroll-to-bottom {
 	border-radius: 12px;
 }
+
+/* Task progress & event log */
+.task-progress-hint, .event-log-hint {
+	padding: 16px;
+	color: var(--text-secondary);
+	font-size: 13px;
+	text-align: center;
+}
+.event-log {
+	max-height: 200px;
+	overflow-y: auto;
+}
+.event-log-entry {
+	padding: 8px 16px;
+	border-bottom: 1px solid var(--border);
+	font-size: 12px;
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+.event-log-entry:last-child {
+	border-bottom: none;
+}
+.event-type {
+	font-weight: 600;
+	min-width: 80px;
+}
+.event-tool {
+	color: var(--text-secondary);
+}
+.event-duration {
+	color: var(--text-muted);
+	margin-left: auto;
+}
