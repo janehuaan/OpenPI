@@ -63,6 +63,8 @@ export const desktopApi = {
 		call<{ currency: string; totalBalance: number } | null>("get_provider_balance", { provider }),
 	getSessionTodo: (instanceId: string) => call<TodoState | null>("get_session_todo", { instanceId }),
 	getStatusSegments: (instanceId: string) => call<StatusSegment[]>("get_status_segments", { instanceId }),
+	getSessionEvents: (instanceId: string, limit = 20) => call<any[]>("get_session_events", { instanceId, limit }),
+	getSessionTaskState: (instanceId: string) => call<any>("get_session_task_state", { instanceId }),
 	getConversationModels: (instanceId: string) =>
 		call<ConversationModelOption[]>("get_conversation_models", { instanceId }),
 	getConversationCapabilities: (instanceId: string) =>

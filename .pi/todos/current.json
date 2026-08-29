@@ -1,0 +1,36 @@
+{
+	"updatedAt": "2026-08-27T14:30:37.243Z",
+	"sessionId": "01a0432f-4028-7ed8-8222-5fe9c03efbee",
+	"todos": [
+		{
+			"content": "下载 Qwen3.5-4B-Q4_K_M（2.55GB）",
+			"status": "completed",
+			"activeForm": "下载 Qwen3.5-4B-Q4_K_M",
+			"level": 1
+		},
+		{
+			"content": "下载 Qwen3.5-9B-Q4_K_M（5.29GB）",
+			"status": "completed",
+			"activeForm": "下载 Qwen3.5-9B-Q4_K_M",
+			"level": 1
+		},
+		{
+			"content": "验证 4B 文本推理 + 全 GPU 加载（28 t/s）",
+			"status": "completed",
+			"activeForm": "验证 4B 推理",
+			"level": 1
+		},
+		{
+			"content": "bench 扫描：确定 9B 最优 -ngl 分层点",
+			"status": "in_progress",
+			"activeForm": "对 9B 扫描最优分层",
+			"level": 1
+		},
+		{
+			"content": "汇总对比表 + 给出最终使用建议",
+			"status": "pending",
+			"activeForm": "汇总对比表",
+			"level": 1
+		}
+	]
+}

@@ -15,6 +15,7 @@ import * as crypto from "node:crypto";
 import type { AuthEvent, AuthInteraction, AuthPrompt } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../../config.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+import { eventFilePath, readEvents } from "../../core/event-ledger.ts";
 import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -29,6 +30,7 @@ import {
 } from "../../core/output-guard.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import { getStatusSegments } from "../../core/status-segments.ts";
+import { loadTaskState } from "../../core/task-state.ts";
 import { loadTodoState } from "../../core/tools/todo.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
@@ -777,6 +779,18 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "get_session_todo": {
 				const cwd = session.sessionManager.getCwd();
 				return success(id, "get_session_todo", loadTodoState(cwd) ?? null);
+			}
+
+			case "get_session_events": {
+				const cwd = session.sessionManager.getCwd();
+				const limit = command.limit ?? 20;
+				const events = readEvents(eventFilePath(cwd)).slice(-limit);
+				return success(id, "get_session_events", events);
+			}
+
+			case "get_session_task_state": {
+				const cwd = session.sessionManager.getCwd();
+				return success(id, "get_session_task_state", loadTaskState(cwd) ?? null);
 			}
 
 			case "export_html": {
