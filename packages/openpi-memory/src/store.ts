@@ -1,9 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { appendJournal, archiveEntry, ensureDurabilityLayout, listArchivedEntries } from "./durability.ts";
+import { hybridSearchRustSync } from "./hybrid-search-rust.ts";
 import { rankBm25 } from "./rank.ts";
 import { MEMORY_TYPES, type MemoryIndexEntry, type MemoryMetadata, type MemoryType } from "./types.ts";
-import { hybridSearch, removeVector, upsertVector } from "./vectors.ts";
+import { removeVector, upsertVector } from "./vectors.ts";
 
 export const MEMORY_DIR = ".pi/memory";
 export const INDEX_FILE = "MEMORY.md";
@@ -364,7 +365,7 @@ export function queryEntries(
 	const minScore = options?.archiveSearchMinScore ?? 0.25;
 
 	if (options?.hybrid !== false && options?.memoryDirectory) {
-		const hits = hybridSearch(typed, needle, options.memoryDirectory, {
+		const hits = hybridSearchRustSync(typed, needle, options.memoryDirectory, {
 			bodyResolver,
 			type,
 			alpha: options.alpha,
@@ -384,7 +385,7 @@ export function queryEntries(
 		const archiveTyped = type ? archived.filter((e) => e.type === type) : archived;
 		if (archiveTyped.length > 0) {
 			// Archive: BM25/hybrid without durable vectors (ephemeral score over value+body)
-			const archHits = hybridSearch(archiveTyped, needle, undefined, {
+			const archHits = hybridSearchRustSync(archiveTyped, needle, undefined, {
 				bodyResolver: (e) => {
 					const a = e as MemoryIndexEntry & { body?: string };
 					return a.body ?? "";

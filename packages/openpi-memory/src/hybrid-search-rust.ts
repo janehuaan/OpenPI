@@ -110,6 +110,7 @@ async function ensureServer(): Promise<void> {
 export interface RustSearchOptions {
 	limit?: number;
 	alpha?: number;
+	type?: string;
 	bodyResolver?: (entry: MemoryIndexEntry) => string;
 }
 
@@ -154,3 +155,49 @@ export async function hybridSearchRust(
 }
 
 export { findRustBin };
+
+/**
+ * Synchronous hybrid search using Rust CLI (no server).
+ * Use this when async is not available.
+ */
+export function hybridSearchRustSync(
+	entries: MemoryIndexEntry[],
+	query: string,
+	memoryDirectory: string | undefined,
+	options?: RustSearchOptions,
+): HybridHit[] {
+	if (!RUST_BIN) {
+		return hybridSearchTs(entries, query, memoryDirectory, options);
+	}
+
+	try {
+		const limit = options?.limit ?? 50;
+		const alpha = options?.alpha ?? 0.55;
+		const docs = entries.map((e) => ({
+			id: `${e.type}:${e.key}`,
+			type: e.type,
+			key: e.key,
+			value: e.value,
+			body: options?.bodyResolver?.(e) ?? "",
+		}));
+		const input = JSON.stringify({ docs, query, limit, alpha });
+		const { execSync } = require("node:child_process");
+		const output = execSync(`echo '${input.replace(/'/g, "'\\''")}' | ${RUST_BIN}`, {
+			encoding: "utf8",
+			timeout: 5000,
+		});
+		const result = JSON.parse(output) as {
+			hits: Array<{ id: string; score: number; vector_score: number; bm25_score: number }>;
+		};
+		const entryMap = new Map(entries.map((e) => [`${e.type}:${e.key}`, e]));
+		return result.hits.map((h) => ({
+			id: h.id,
+			score: h.score,
+			vectorScore: h.vector_score,
+			bm25Score: h.bm25_score,
+			entry: entryMap.get(h.id) ?? { type: h.id.split(":")[0] ?? "", key: h.id.split(":")[1] ?? "", value: "" },
+		})) as HybridHit[];
+	} catch {
+		return hybridSearchTs(entries, query, memoryDirectory, options);
+	}
+}
