@@ -268,6 +268,16 @@ function pruneEmbeddingDylibs(embeddingDir) {
 	if (freed > 0) console.log(`afterPack: freed ${formatSize(freed)} from embedding dylibs`);
 }
 
+// Copy pi-storage binary
+function copyPiStorageBinary(resourcesDir) {
+	const src = join(projectDir, "../pi-storage/target/release/pi-storage-cli");
+	const dest = join(resourcesDir, "pi-storage-cli");
+	if (existsSync(src)) {
+		cpSync(src, dest, { recursive: true, force: true });
+		console.log(`afterPack: copied pi-storage-cli → ${dest}`);
+	}
+}
+
 // Copy pi-memsearch binary if it exists
 function copyRustBinary(resourcesDir) {
 	const src = join(projectDir, "../pi-memsearch/target/release/pi-memsearch");
