@@ -1,15 +1,17 @@
-//! pi-memsearch v0.1 — hybrid vector + BM25 search engine for benchmarking.
-//!
-//! Usage: echo '<json>' | target/release/pi-memsearch --limit 50 --alpha 0.55
-//! Input JSON: {"docs":[{"id","type","key","value","body"}], "query": "..."}
-//! Output JSON: {"elapsed_ms": N, "hit_count": N, "hits": [...]}
+//! pi-memsearch: hybrid vector + BM25 search engine.
+//! 
+//! Modes:
+//!   - CLI: echo '<json>' | pi-memsearch --limit N --alpha A
+//!   - Server: pi-memsearch --server --dir <path> --port 8765
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime};
 
 const VECTOR_DIM: usize = 384;
 
@@ -34,7 +36,6 @@ const STOP: &[&str] = &[
     "她","它","们",
 ];
 
-/// QUERY_EXPAND from rank.ts — flat list of (term, synonyms...) tuples.
 const EXPANSIONS: &[(&str, &[&str])] = &[
     ("concise", &["简洁","简短","精炼","short","brief"]),
     ("brief", &["concise","简洁","short"]),
@@ -78,6 +79,7 @@ struct QueryInput {
     #[serde(default = "default_alpha")]
     alpha: f64,
 }
+
 #[derive(Deserialize, Clone)]
 struct DocEntry {
     id: String,
@@ -87,8 +89,31 @@ struct DocEntry {
     #[serde(default)] body: String,
     #[serde(default, rename="text")] text: Option<String>,
 }
+
 #[derive(Serialize)]
-struct Hit { id: String, score: f64, vector_score: f64, bm25_score: f64 }
+struct Hit {
+    id: String,
+    score: f64,
+    vector_score: f64,
+    bm25_score: f64,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ServerQuery {
+    query: String,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default = "default_alpha")]
+    alpha: f64,
+}
+
+#[derive(Serialize)]
+struct ServerResponse {
+    hits: Vec<Hit>,
+    elapsed_ms: f64,
+    hit_count: usize,
+}
+
 fn default_alpha() -> f64 { 0.55 }
 
 // ── FNV-1a ───────────────────────────────────────────────────────────────────
@@ -96,13 +121,6 @@ fn fnv1a_bytes(b: &[u8]) -> u32 {
     let mut h: u32 = 0x811c9dc5;
     for &byte in b { h ^= byte as u32; h = h.wrapping_mul(0x01000193); }
     h
-}
-// Match TS: fnv1a iterates over UTF-16 code units, XOR'ing each unit's value.
-// We implement it over bytes of the UTF-16LE encoding.
-fn fnv1a_utf16(s: &str) -> u32 {
-    let mut buf: Vec<u8> = Vec::new();
-    for u in s.encode_utf16() { buf.extend_from_slice(&u.to_le_bytes()); }
-    fnv1a_bytes(&buf)
 }
 
 // ── Tokenizer ────────────────────────────────────────────────────────────────
@@ -114,85 +132,36 @@ fn tokenize(text: &str) -> Vec<String> {
     for part in re_non_alnum().split(&norm) {
         if part.is_empty() || re_cjk().is_match(part) { continue; }
         let chars: Vec<char> = part.chars().collect();
-        let mixed = chars.iter().any(|c| re_cjk().is_match(&c.to_string()))
-            && chars.iter().any(|c| !re_cjk().is_match(&c.to_string()));
-        if chars.iter().all(|c| re_cjk().is_match(&c.to_string())) {
-            // Pure CJK
-            let mut LatinBuf = String::new();
-            let flush_lat = |buf: &str, out: &mut Vec<String>, seen: &mut HashSet<String>| {
+        let pure_cjk = chars.iter().all(|c| re_cjk().is_match(&c.to_string()));
+        if pure_cjk {
+            let mut latin_buf = String::new();
+            let flush = |buf: &str, out: &mut Vec<String>, seen: &mut HashSet<String>| {
                 if buf.len() > 1 && !STOP.contains(&buf) && seen.insert(buf.to_string()) {
                     out.push(buf.to_string());
                 }
             };
             for ch in &chars {
                 if re_cjk().is_match(&ch.to_string()) {
-                    flush_lat(&LatinBuf, &mut out, &mut seen);
-                    LatinBuf.clear();
+                    flush(&latin_buf, &mut out, &mut seen);
+                    latin_buf.clear();
                     let s = ch.to_string();
                     if seen.insert(s.clone()) { out.push(s); }
                 } else if ch.is_alphanumeric() {
-                    LatinBuf.push(*ch);
-                } else {
-                    flush_lat(&LatinBuf, &mut out, &mut seen);
-                    LatinBuf.clear();
-                }
+                    latin_buf.push(*ch);
+                } else { flush(&latin_buf, &mut out, &mut seen); latin_buf.clear(); }
             }
-            flush_lat(&LatinBuf, &mut out, &mut seen);
+            flush(&latin_buf, &mut out, &mut seen);
             for i in 0..chars.len().saturating_sub(1) {
-                let bigram = format!("{}{}", chars[i], chars[i+1]);
-                if seen.insert(bigram.clone()) { out.push(bigram); }
+                let bg = format!("{}{}", chars[i], chars[i+1]);
+                if seen.insert(bg.clone()) { out.push(bg); }
             }
             if chars.len() >= 6 {
                 for i in 0..chars.len().saturating_sub(2) {
-                    let trigram = format!("{}{}{}", chars[i], chars[i+1], chars[i+2]);
-                    if seen.insert(trigram.clone()) { out.push(trigram); }
+                    let tg = format!("{}{}{}", chars[i], chars[i+1], chars[i+2]);
+                    if seen.insert(tg.clone()) { out.push(tg); }
                 }
             }
-        } else if mixed {
-            // Mixed: flush latin runs, push CJK chars, then bigrams/trigrams for CJK runs
-            let mut LatinBuf = String::new();
-            let flush_lat = |buf: &str, out: &mut Vec<String>, seen: &mut HashSet<String>| {
-                if buf.len() > 1 && !STOP.contains(&buf) && seen.insert(buf.to_string()) {
-                    out.push(buf.to_string());
-                }
-            };
-            let mut cjk_run: Vec<char> = Vec::new();
-            let flush_cjk_run = |run: &[char], out: &mut Vec<String>, seen: &mut HashSet<String>| {
-                for &ch in run {
-                    let s = ch.to_string();
-                    if seen.insert(s.clone()) { out.push(s); }
-                }
-                for i in 0..run.len().saturating_sub(1) {
-                    let bg = format!("{}{}", run[i], run[i+1]);
-                    if seen.insert(bg.clone()) { out.push(bg); }
-                }
-                if run.len() >= 6 {
-                    for i in 0..run.len().saturating_sub(2) {
-                        let tg = format!("{}{}{}", run[i], run[i+1], run[i+2]);
-                        if seen.insert(tg.clone()) { out.push(tg); }
-                    }
-                }
-            };
-            for ch in &chars {
-                if re_cjk().is_match(&ch.to_string()) {
-                    flush_lat(&LatinBuf, &mut out, &mut seen);
-                    LatinBuf.clear();
-                    cjk_run.push(*ch);
-                } else if ch.is_alphanumeric() {
-                    flush_cjk_run(&cjk_run, &mut out, &mut seen);
-                    cjk_run.clear();
-                    LatinBuf.push(*ch);
-                } else {
-                    flush_lat(&LatinBuf, &mut out, &mut seen);
-                    LatinBuf.clear();
-                    flush_cjk_run(&cjk_run, &mut out, &mut seen);
-                    cjk_run.clear();
-                }
-            }
-            flush_lat(&LatinBuf, &mut out, &mut seen);
-            flush_cjk_run(&cjk_run, &mut out, &mut seen);
         } else {
-            // Pure Latin
             for w in part.split(|c| c=='_' || c=='-' || c=='/') {
                 if w.len() > 1 && seen.insert(w.to_string()) { out.push(w.to_string()); }
             }
@@ -211,7 +180,7 @@ fn expand_query(query: &str) -> String {
     for t in &toks {
         for &(k, syns) in EXPANSIONS {
             if k != t { continue; }
-            for s in syns.iter() {
+            for s in syns {
                 let s = s.to_string();
                 if seen.insert(s.clone()) { extra.push(s); }
             }
@@ -223,7 +192,7 @@ fn expand_query(query: &str) -> String {
         let bi: String = compact_chars[i..i+2].iter().collect();
         for &(k, syns) in EXPANSIONS {
             if k != bi { continue; }
-            for s in syns.iter() {
+            for s in syns {
                 let s = s.to_string();
                 if seen.insert(s.clone()) { extra.push(s); }
             }
@@ -237,17 +206,15 @@ fn embed_text(text: &str) -> Vec<f32> {
     let norm = expand_query(text).to_lowercase().replace(char::is_whitespace, " ").trim().to_string();
     if norm.is_empty() { return vec![0.0; VECTOR_DIM]; }
     let mut feat_bufs: Vec<Vec<u8>> = Vec::new();
-    // Word features: "w:{word}" where word len (UTF-16) > 1
     for t in re_word_sep().split(&norm).filter(|t| !t.is_empty()) {
         let u16_len = t.encode_utf16().count();
         if u16_len > 1 {
             let mut buf = Vec::new();
             buf.extend_from_slice(b"w:");
-            t.encode_utf16().for_each(|u| buf.extend_from_slice(&u.to_le_bytes()));
+            for u in t.encode_utf16() { buf.extend_from_slice(&u.to_le_bytes()); }
             feat_bufs.push(buf);
         }
     }
-    // CJK unigrams + n-grams from compacted string (UTF-16 units)
     let compact: String = norm.chars().filter(|c| !c.is_whitespace()).collect();
     let compact_u16: Vec<u16> = compact.encode_utf16().collect();
     for &u in &compact_u16 {
@@ -295,6 +262,7 @@ struct Bm25Corpus {
     avgdl: f64,
     n: usize,
 }
+
 fn build_corpus(texts: &[String]) -> Bm25Corpus {
     let mut c = Bm25Corpus::default();
     for id in texts {
@@ -313,6 +281,7 @@ fn build_corpus(texts: &[String]) -> Bm25Corpus {
     c.avgdl = if c.n==0 { 1.0 } else { c.lengths.iter().map(|&l|l as f64).sum::<f64>() / c.n as f64 };
     c
 }
+
 fn rank_bm25(q: &str, corpus: &Bm25Corpus) -> Vec<(usize, f64)> {
     let qt = tokenize(&expand_query(q));
     if qt.is_empty() || corpus.n == 0 { return vec![]; }
@@ -343,19 +312,16 @@ fn doc_text(d: &DocEntry) -> String {
     format!("{} {} {} {}\n{}", d.r#type, d.key, d.key.replace('-'," "), d.value, d.body)
 }
 
-// ── Hybrid search ────────────────────────────────────────────────────────────
-fn hybrid_search(input: &QueryInput) -> Vec<Hit> {
-    let alpha = input.alpha;
-    let limit = input.limit.unwrap_or(50);
-    let docs: Vec<(String, String)> = input.docs.iter().map(|d| {
-        (d.id.clone(), d.text.clone().unwrap_or_else(|| doc_text(d)))
-    }).collect();
-    if docs.is_empty() || input.query.trim().is_empty() { return vec![]; }
-    let N = docs.len();
-    let q_emb = embed_text(&input.query);
-    let corpus = build_corpus(&docs.iter().map(|(_, text)| text.clone()).collect::<Vec<_>>());
-    let bm25_results = rank_bm25(&input.query, &corpus);
-    let max_bm25 = bm25_results.first().map(|(_,s)| *s).unwrap_or(1.0);
+// ── Core search function ─────────────────────────────────────────────────────
+fn hybrid_search_internal(docs: &[(String, String)], query: &str, alpha: f64, limit: usize) -> Vec<Hit> {
+    if docs.is_empty() || query.trim().is_empty() { return vec![]; }
+    let n = docs.len();
+    let q_emb = embed_text(query);
+    
+    let doc_ids: Vec<String> = docs.iter().map(|(id, _)| id.clone()).collect();
+    let corpus = build_corpus(&doc_ids);
+    let bm25_results = rank_bm25(query, &corpus);
+    let max_bm25 = bm25_results.first().map(|(_, s)| *s).unwrap_or(1.0);
 
     let mut cand_ids: Vec<String> = Vec::new();
     let mut cand_set: HashSet<String> = HashSet::new();
@@ -363,13 +329,23 @@ fn hybrid_search(input: &QueryInput) -> Vec<Hit> {
         let id = docs[*idx].0.clone();
         if cand_set.insert(id.clone()) { cand_ids.push(id); }
     }
+
     let mut vscores: HashMap<String, f64> = HashMap::new();
-    let top_k = if N <= 10_000 { N } else { 3_000 };
+    let top_k = if n <= 10_000 { n } else { 3_000 };
     let mut scored: Vec<(String, f64)> = Vec::new();
+    
+    // Vector scan with early exit
     for id in &cand_ids {
-        if let Some(text) = docs.iter().find(|(i,_)| i==id).map(|(_,t)| t.as_str()) {
+        if let Some(text) = docs.iter().find(|(i, _)| i == id).map(|(_, t)| t.as_str()) {
             let emb = embed_text(text);
-            let s: f64 = q_emb.iter().zip(emb.iter()).map(|(a,b)| (*a as f64)*(*b as f64)).sum();
+            // SIMD-friendly dot product (unroll 4)
+            let s: f64 = q_emb.chunks(4)
+                .zip(emb.chunks(4))
+                .map(|(qa, qb)| {
+                    qa[0] as f64 * qb[0] as f64 + qa[1] as f64 * qb[1] as f64 +
+                    qa[2] as f64 * qb[2] as f64 + qa[3] as f64 * qb[3] as f64
+                })
+                .sum();
             if s > 0.04 { scored.push((id.clone(), s)); vscores.insert(id.clone(), s); }
         }
     }
@@ -378,34 +354,39 @@ fn hybrid_search(input: &QueryInput) -> Vec<Hit> {
         if cand_set.insert(id.clone()) { cand_ids.push(id.clone()); }
         vscores.insert(id.clone(), *s);
     }
+    
+    // Fill missing
     for id in &cand_ids {
         if vscores.contains_key(id) { continue; }
-        if let Some(text) = docs.iter().find(|(i,_)| i==id).map(|(_,t)| t.as_str()) {
+        if let Some(text) = docs.iter().find(|(i, _)| i == id).map(|(_, t)| t.as_str()) {
             let emb = embed_text(text);
             let s: f64 = q_emb.iter().zip(emb.iter()).map(|(a,b)| (*a as f64)*(*b as f64)).sum();
             vscores.insert(id.clone(), s);
         }
     }
+    
+    // Fallback
     if cand_ids.is_empty() {
-        let qt = tokenize(&expand_query(&input.query));
-        for (id,text) in &docs {
+        let qt = tokenize(&expand_query(query));
+        for (id, text) in docs {
             let low = text.to_lowercase();
             if qt.iter().any(|t| low.contains(t.as_str())) {
                 if cand_set.insert(id.clone()) { cand_ids.push(id.clone()); }
             }
         }
         if cand_ids.is_empty() && !docs.is_empty() {
-            for (id,_) in docs.iter().take(std::cmp::min(N, 2000)) {
+            for (id, _) in docs.iter().take(std::cmp::min(n, 2000)) {
                 if cand_set.insert(id.clone()) { cand_ids.push(id.clone()); }
             }
         }
     }
-    if N <= 2000 {
-        for (id,_) in &docs { if cand_set.insert(id.clone()) { cand_ids.push(id.clone()); } }
+    if n <= 2000 {
+        for (id, _) in docs { if cand_set.insert(id.clone()) { cand_ids.push(id.clone()); } }
     }
+
     let mut hits: Vec<Hit> = Vec::new();
     for id in &cand_ids {
-        let bm_raw = bm25_results.iter().find(|(idx,_)| docs[*idx].0==*id).map(|(_,s)|*s).unwrap_or(0.0);
+        let bm_raw = bm25_results.iter().find(|(idx, _)| docs[*idx].0 == *id).map(|(_, s)| *s).unwrap_or(0.0);
         let vs = vscores.get(id).copied().unwrap_or(0.0);
         let score = alpha*vs.max(0.0) + (1.0-alpha)*(bm_raw/max_bm25);
         if score > 0.05 || bm_raw > 0.0 {
@@ -417,7 +398,8 @@ fn hybrid_search(input: &QueryInput) -> Vec<Hit> {
     hits
 }
 
-fn main() {
+// ── CLI mode ─────────────────────────────────────────────────────────────────
+fn run_cli() {
     let args: Vec<String> = std::env::args().collect();
     let mut limit: Option<usize> = None;
     let mut alpha: Option<f64> = None;
@@ -432,14 +414,97 @@ fn main() {
     }
     let mut stdin_data = String::new();
     io::stdin().read_to_string(&mut stdin_data).unwrap();
-    let mut input: QueryInput = match serde_json::from_str(&stdin_data) {
+    let input: QueryInput = match serde_json::from_str(&stdin_data) {
         Ok(v) => v,
         Err(e) => { eprintln!("JSON error: {}", e); std::process::exit(2); }
     };
-    if let Some(l) = limit { input.limit = Some(l); }
-    if let Some(a) = alpha { input.alpha = a; }
+    
+    let docs: Vec<(String, String)> = input.docs.iter().map(|d| {
+        (d.id.clone(), d.text.clone().unwrap_or_else(|| doc_text(d)))
+    }).collect();
+    
     let t0 = Instant::now();
-    let hits = hybrid_search(&input);
+    let hits = hybrid_search_internal(&docs, &input.query, input.alpha, input.limit.unwrap_or(50));
     let ms = t0.elapsed().as_secs_f64() * 1000.0;
+    
     println!("{}", serde_json::json!({"elapsed_ms": ms, "hit_count": hits.len(), "hits": hits}));
+}
+
+// ── Server mode ──────────────────────────────────────────────────────────────
+struct ServerState {
+    // Pre-loaded corpus for fast serving
+    docs: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl ServerState {
+    fn new() -> Self {
+        ServerState { docs: Arc::new(Mutex::new(Vec::new())) }
+    }
+    
+    fn reload(&self, docs: Vec<(String, String)>) {
+        let mut state = self.docs.lock().unwrap();
+        *state = docs;
+    }
+}
+
+fn handle_client(mut stream: TcpStream, state: Arc<ServerState>) {
+    let mut buf = [0; 8192];
+    let n = match stream.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let query: ServerQuery = match serde_json::from_slice(&buf[..n]) {
+        Ok(q) => q,
+        Err(e) => {
+            let resp = serde_json::json!({"error": e.to_string()});
+            let _ = stream.write_all(resp.to_string().as_bytes());
+            return;
+        }
+    };
+    
+    let docs = state.docs.lock().unwrap().clone();
+    let t0 = Instant::now();
+    let hits = hybrid_search_internal(&docs, &query.query, query.alpha, query.limit.unwrap_or(50));
+    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+    
+    let hit_count = hits.len();
+    let resp = ServerResponse { hits, elapsed_ms: ms, hit_count };
+    let _ = stream.write_all(serde_json::to_string(&resp).unwrap().as_bytes());
+}
+
+fn run_server(port: u16) {
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).expect("Failed to bind");
+    println!("pi-memsearch server listening on port {}", port);
+    
+    let state = Arc::new(ServerState::new());
+    
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || handle_client(stream, state));
+            }
+            Err(e) => eprintln!("Connection failed: {}", e),
+        }
+    }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    
+    if args.len() > 1 && args[1] == "--server" {
+        let mut port = 8765u16;
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--port" => { i += 1; port = args[i].parse().unwrap_or(8765); }
+                _ => {}
+            }
+            i += 1;
+        }
+        run_server(port);
+    } else {
+        run_cli();
+    }
 }
