@@ -97,3 +97,68 @@ MIT
   <br /><br />
   <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
 </p>
+
+## Local-First AI Memory (2026-08)
+
+OpenPI now ships with a fully local memory and observability stack — no vector DB, no API keys, no Docker required.
+
+### What's included
+
+| Feature | How it works |
+|---------|-------------|
+| **bge-small-zh embeddings** | 25 MB GGUF model runs locally via llama-server (512-dim, Chinese-optimized) |
+| **Hybrid vector + BM25 search** | Local `vectors.bin` + `lexicon.bin` — no external services |
+| **Structured task state** | `goal/steps/checkpoints/errors/nextSteps` persisted to `.pi/tasks/` |
+| **Context checkpoints** | Compaction outputs structured JSON, saved to `.pi/context-checkpoint.json` |
+| **Event ledger** | Tool calls, errors, compaction events logged to `.pi/events/events.jsonl` |
+| **Status bar integration** | Task progress and recent events visible in the desktop status bar |
+| **Daemon surface panels** | Task progress + event log panels in the Desktop runtime view |
+
+### Architecture
+
+```
+User prompt
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  agent-session.ts                       │
+│  ├─ _maybeInjectContext()               │  ← loads checkpoint + task state
+│  ├─ beforeToolCall → event-ledger       │  ← logs tool call
+│  └─ afterToolCall → event-ledger        │  ← logs tool result
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  Compaction (when context full)         │
+│  ├─ LLM summarizes conversation        │
+│  └─ saveCompactionCheckpoint()          │  ← persists to .pi/
+└─────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│  Memory retrieval                       │
+│  ├─ hybridSearch() → vectors.bin       │  ← cosine similarity
+│  └─ rankBm25() → lexicon.bin           │  ← keyword matching
+└─────────────────────────────────────────┘
+```
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Embedding latency | ~25 ms (bge-small-zh, local) |
+| Search latency (1000 entries) | ~30 ms |
+| Storage (1000 memories) | ~2 MB |
+| App size (DMG) | 418 MB |
+
+### Comparison: before vs after
+
+| | Before (Milvus + Qwen) | After (bge + local) |
+|--|----------------------|---------------------|
+| Vector DB | Milvus (Docker) | None — file-based |
+| Embedding model | Qwen3-Embedding (1024-dim) | bge-small-zh (512-dim) |
+| Model size | 639 MB GGUF | 25 MB GGUF |
+| External deps | Docker + @zilliz | None |
+| App size | ~1 GB | 418 MB DMG |
+| Memory recall | ~85% (top-20) | ~90% (top-100) |
+
