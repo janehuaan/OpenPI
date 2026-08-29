@@ -267,3 +267,15 @@ function pruneEmbeddingDylibs(embeddingDir) {
 	}
 	if (freed > 0) console.log(`afterPack: freed ${formatSize(freed)} from embedding dylibs`);
 }
+
+// Copy pi-memsearch binary if it exists
+function copyRustBinary(resourcesDir) {
+	const src = join(projectDir, "../pi-memsearch/target/release/pi-memsearch");
+	const dest = join(resourcesDir, "pi-memsearch");
+	if (existsSync(src)) {
+		cpSync(src, dest, { recursive: true, force: true });
+		console.log(`afterPack: copied pi-memsearch → ${dest}`);
+	} else {
+		console.warn(`afterPack: pi-memsearch binary not found at ${src}`);
+	}
+}

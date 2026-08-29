@@ -775,10 +775,6 @@ export function App() {
 			.getVisionFallback()
 			.then(setVisionFallback)
 			.catch(() => undefined);
-		void desktopApi
-			.getAutoStartMilvus()
-			.then(setAutoStartMilvus)
-			.catch(() => undefined);
 	}, []);
 
 	const loadCapabilities = useCallback(async (instanceId: string, reload = false): Promise<void> => {
