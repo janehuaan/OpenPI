@@ -63,7 +63,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
-import { appendEvent, compactionEvent, eventFilePath, toolCallEvent, toolResultEvent } from "./event-ledger.ts";
+import { compactionEvent } from "./event-ledger.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -97,6 +97,7 @@ import { McpManager } from "./mcp/mcp-manager.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
+import { appendEvent, eventFilePath, toolCallEvent, toolResultEvent } from "./pi-storage-wrapper.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import { BuiltinSecurity, type SecurityMode } from "./security/builtin-security.ts";
