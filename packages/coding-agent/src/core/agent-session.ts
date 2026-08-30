@@ -24,6 +24,8 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+export type { AgentMessage };
+
 import type {
 	AssistantMessage,
 	AuthResult,
@@ -1388,7 +1390,11 @@ export class AgentSession {
 		if (messages.length === 0) return messages;
 		const parts: AgentMessage[] = [];
 		const taskState = loadTaskState(this._cwd);
-		const taskText = compactTaskState(taskState);
+		// Task state and the todo list live under `<cwd>/.pi/`, which every session
+		// in this directory shares. They belong to the session that wrote them, so
+		// only re-inject them into that session (a resumed session keeps its id);
+		// without this an abandoned list is injected into every new conversation.
+		const taskText = taskState?.sessionId === this.sessionId ? compactTaskState(taskState) : "";
 		if (taskText && taskText !== this._lastInjectedTaskState) {
 			this._lastInjectedTaskState = taskText;
 			parts.push({ role: "user", content: `## Task State\n\n${taskText}`, timestamp: Date.now() });
@@ -1406,9 +1412,10 @@ export class AgentSession {
 			}
 		}
 		const todoState = loadTodoState(this._cwd);
-		const todoText = todoState?.todos.some((item) => item.status !== "completed")
-			? `## Current task list\n\n${formatTodos(todoState)}`
-			: undefined;
+		const todoText =
+			todoState?.sessionId === this.sessionId && todoState.todos.some((item) => item.status !== "completed")
+				? `## Current task list\n\n${formatTodos(todoState)}`
+				: undefined;
 		if (todoText && todoText !== this._lastInjectedTodoText) {
 			this._lastInjectedTodoText = todoText;
 			parts.push({ role: "user", content: todoText, timestamp: Date.now() });

@@ -10,9 +10,11 @@
  *   (verification command, review, diff, files, or manual check). Without
  *   evidence the step is rejected.
  *
- * State lives in `<cwd>/.pi/todos/current.json` so it survives restarts and
- * is visible to the desktop UI. The list is injected into the system prompt
- * whenever it changes (see agent-session `_rebuildSystemPrompt`).
+ * State lives in `<cwd>/.pi/todos/current.json` so it survives restarts and is
+ * visible to the desktop UI. Since that file is shared by every session in the
+ * directory, `sessionId` records the owner: agent-session `_maybeInjectContext`
+ * injects the list as a message only for that session, and only while items are
+ * still open.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
