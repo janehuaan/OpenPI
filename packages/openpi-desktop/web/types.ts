@@ -123,10 +123,11 @@ export interface ConversationMessage {
 	toolName?: string;
 	isError?: boolean;
 	errorMessage?: string;
-	/** Tool calls currently running (updated via tool_execution_update events) */
-	runningToolCalls?: Array<{ id: string; name: string; output?: string }> | null;
 	reasoning?: string;
+	/** Live tool-call status, updated via tool_execution_* stream events. */
 	toolCalls?: Array<{ id: string; name: string; status: "running" | "completed" | "error"; result?: string }>;
+	/** Legacy alias kept for cached snapshots. */
+	runningToolCalls?: Array<{ id: string; name: string; output?: string }> | null;
 	usage?: {
 		input: number;
 		output: number;

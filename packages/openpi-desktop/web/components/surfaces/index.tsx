@@ -4132,6 +4132,18 @@ export function MessageItem({
 	const images = contentImages(message.content);
 	const calls = hideAssistantTools ? [] : toolCalls(message);
 	const blockCounts = message.role !== "user" ? messageBlockCounts(message.content) : undefined;
+	// Live tool-call status arrives via tool_execution_* stream events.
+	const liveTools = (message.toolCalls ?? []).filter((tc) => tc.status === "running");
+	// Reasoning/thinking blocks extracted from content (collapsible display).
+	const reasoning = Array.isArray(message.content)
+		? message.content
+				.filter(
+					(block): block is { type: "thinking"; thinking: string } =>
+						isRecord(block) && block.type === "thinking" && typeof block.thinking === "string",
+				)
+				.map((block) => block.thinking)
+				.join("\n\n")
+		: "";
 	// toolResult must use the same avatar+stack grid as assistant messages,
 	// otherwise rows sit full-bleed and misalign with in-message tool chips.
 	if (message.role === "toolResult") {
@@ -4172,8 +4184,17 @@ export function MessageItem({
 		);
 	}
 	const isUser = message.role === "user";
-	// Empty assistant shells after tools are shown as toolResult rows — skip.
-	if (!isUser && !text && images.length === 0 && !message.errorMessage && calls.length === 0) {
+	// Empty assistant shells after tools are shown as toolResult rows — skip,
+	// but keep the message alive while a live tool call is streaming into it.
+	if (
+		!isUser &&
+		!text &&
+		images.length === 0 &&
+		!message.errorMessage &&
+		calls.length === 0 &&
+		!reasoning &&
+		liveTools.length === 0
+	) {
 		return null;
 	}
 
@@ -4202,6 +4223,26 @@ export function MessageItem({
 					</div>
 				)}
 				<div className="message-body">
+					{liveTools.length > 0 && (
+						<div className="tool-live-list">
+							{liveTools.map((tc) => (
+								<div className="tool-live" key={tc.id}>
+									<div className="tool-live-header">
+										<Wrench size={13} className="tool-live-icon" />
+										<span className="tool-live-name">{tc.name}</span>
+										<span className="tool-live-status">运行中</span>
+									</div>
+									{tc.result && <pre className="tool-live-output">{tc.result.slice(-800)}</pre>}
+								</div>
+							))}
+						</div>
+					)}
+					{reasoning && (
+						<details className="message-reasoning">
+							<summary>思考过程</summary>
+							<pre>{reasoning}</pre>
+						</details>
+					)}
 					{images.length > 0 && <MessageImages images={images} />}
 					{text && <div className="message-text">{isUser ? text : <MarkdownText text={text} />}</div>}
 					{message.errorMessage && <div className="message-error">{message.errorMessage}</div>}
