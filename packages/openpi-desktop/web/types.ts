@@ -123,6 +123,8 @@ export interface ConversationMessage {
 	toolName?: string;
 	isError?: boolean;
 	errorMessage?: string;
+	reasoning?: string;
+	toolCalls?: Array<{ id: string; name: string; status: "running" | "completed" | "error"; result?: string }>;
 	usage?: {
 		input: number;
 		output: number;

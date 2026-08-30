@@ -598,9 +598,51 @@ export function App() {
 				});
 				return;
 			}
+			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
+				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
+				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
+				if (toolCallId && toolName && selectedInstanceIdRef.current === payload.instanceId) {
+					setConversation((current) => {
+						if (!current) return current;
+						const lastMsg = current.messages[current.messages.length - 1];
+						if (!lastMsg || lastMsg.role !== "assistant") return current;
+						const existing = lastMsg.toolCalls?.find((t) => t.id === toolCallId);
+						if (existing) return current;
+						return {
+							...current,
+							messages: [
+								...current.messages.slice(0, -1),
+								{
+									...lastMsg,
+									toolCalls: [
+										...(lastMsg.toolCalls ?? []),
+										{ id: toolCallId, name: toolName, status: "running" },
+									],
+								},
+							],
+						};
+					});
+				}
+				return;
+			}
 			if (eventType === "tool_execution_end") {
 				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
-				if (toolCallId) setRunningTools((current) => current.filter((tool) => tool.toolCallId !== toolCallId));
+				const isError = typeof payload.event.isError === "boolean" ? payload.event.isError : false;
+				if (toolCallId && selectedInstanceIdRef.current === payload.instanceId) {
+					setRunningTools((current) => current.filter((tool) => tool.toolCallId !== toolCallId));
+					setConversation((current) => {
+						if (!current) return current;
+						const lastMsg = current.messages[current.messages.length - 1];
+						if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.toolCalls) return current;
+						const updated = lastMsg.toolCalls.map((t) =>
+							t.id === toolCallId ? { ...t, status: isError ? "error" : "completed" } : t,
+						);
+						return {
+							...current,
+							messages: [...current.messages.slice(0, -1), { ...lastMsg, toolCalls: updated }],
+						};
+					});
+				}
 				return;
 			}
 			if (
