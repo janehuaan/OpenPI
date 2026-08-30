@@ -625,6 +625,28 @@ export function App() {
 				}
 				return;
 			}
+			if (eventType === "tool_execution_update") {
+				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
+				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
+				const partialResult = payload.event.partialResult;
+				if (toolCallId && selectedInstanceIdRef.current === payload.instanceId) {
+					setConversation((current) => {
+						if (!current) return current;
+						const lastMsg = current.messages[current.messages.length - 1];
+						if (!lastMsg || lastMsg.role !== "assistant") return current;
+						const existing = lastMsg.toolCalls?.find((t) => t.id === toolCallId);
+						if (!existing) return current;
+						const updated = lastMsg.toolCalls.map((t) =>
+							t.id === toolCallId ? { ...t, result: partialResult?.content?.[0]?.text ?? t.result } : t,
+						);
+						return {
+							...current,
+							messages: [...current.messages.slice(0, -1), { ...lastMsg, toolCalls: updated }],
+						};
+					});
+				}
+				return;
+			}
 			if (eventType === "tool_execution_end") {
 				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
 				const isError = typeof payload.event.isError === "boolean" ? payload.event.isError : false;

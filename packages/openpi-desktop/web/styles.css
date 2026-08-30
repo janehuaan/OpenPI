@@ -6984,3 +6984,65 @@ input.ui-command-input:focus-visible {
 	from { transform: rotate(0deg); }
 	to { transform: rotate(360deg); }
 }
+
+/* Tool calls with output */
+.reference-tool-calls {
+	margin: 8px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+.reference-tool-call {
+	padding: 8px 12px;
+	background: var(--bg-secondary);
+	border-radius: 6px;
+	font-size: 13px;
+}
+.reference-tool-call.running {
+	border-left: 3px solid var(--color-warning);
+}
+.reference-tool-call.completed {
+	border-left: 3px solid var(--color-success);
+}
+.reference-tool-call.error {
+	border-left: 3px solid var(--color-error);
+}
+.reference-tool-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+.reference-tool-name {
+	font-weight: 500;
+	color: var(--text-primary);
+	font-family: monospace;
+}
+.reference-tool-status {
+	font-size: 11px;
+	margin-left: auto;
+}
+.reference-tool-status.spinning::after {
+	content: " ⟳";
+	animation: spin 1s linear infinite;
+}
+.reference-tool-status.done {
+	color: var(--color-success);
+}
+.reference-tool-status.error {
+	color: var(--color-error);
+}
+.reference-tool-output {
+	margin: 4px 0 0 0;
+	padding: 8px;
+	background: var(--bg-primary);
+	border-radius: 4px;
+	font-size: 12px;
+	font-family: monospace;
+	white-space: pre-wrap;
+	word-break: break-all;
+	max-height: 200px;
+	overflow-y: auto;
+	color: var(--text-secondary);
+	line-height: 1.4;
+}
