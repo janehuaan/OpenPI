@@ -7199,3 +7199,51 @@ input.ui-command-input:focus-visible {
 	overflow-y: auto;
 	color: var(--text-secondary);
 }
+
+/* Claude-style inline activity bars for thinking, tool calls, etc. */
+.activity-inline {
+	display: inline-flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin: 4px 0;
+	padding: 4px 8px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--bg-muted) 60%, transparent);
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--text-secondary);
+	max-width: 100%;
+}
+.activity-inline .activity-summary {
+	flex: 1;
+	min-width: 0;
+	font-family: var(--font-mono, monospace);
+	font-size: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.activity-inline.activity-thinking {
+	background: color-mix(in srgb, var(--accent) 8%, var(--bg-muted) 40%, transparent);
+	color: var(--text-secondary);
+}
+.activity-inline.activity-terminal {
+	background: color-mix(in srgb, #0d1117 85%, var(--bg-muted) 15%, transparent);
+	color: #c9d1d9;
+}
+.activity-inline.activity-terminal .activity-summary {
+	color: #7ee787;
+}
+.activity-inline.activity-search {
+	background: color-mix(in srgb, var(--accent) 10%, var(--bg-muted) 30%, transparent);
+}
+.activity-inline.activity-file {
+	background: color-mix(in srgb, var(--bg-muted) 70%, transparent);
+}
+.activity-inline.activity-bot {
+	background: color-mix(in srgb, #6366f1 12%, var(--bg-muted) 40%, transparent);
+	color: #a5b4fc;
+}
+.activity-inline.activity-bot .activity-summary {
+	color: #c7d2fe;
+}

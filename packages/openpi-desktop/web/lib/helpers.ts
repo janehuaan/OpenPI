@@ -273,6 +273,23 @@ export function messageBlockCounts(content: unknown): { tools: number; thinking:
 	return { tools, thinking };
 }
 
+/**
+ * Thinking/reasoning text for collapsible display. Streaming turns carry it as
+ * `thinking` content blocks; cached snapshots may carry a flat `reasoning` string.
+ */
+export function messageReasoning(message: ConversationMessage): string {
+	if (typeof message.reasoning === "string" && message.reasoning.trim()) return message.reasoning.trim();
+	if (!Array.isArray(message.content)) return "";
+	return message.content
+		.filter(
+			(block): block is { type: "thinking"; thinking: string } =>
+				isRecord(block) && block.type === "thinking" && typeof block.thinking === "string",
+		)
+		.map((block) => block.thinking)
+		.join("\n\n")
+		.trim();
+}
+
 export function contentImages(content: unknown): ImageContent[] {
 	if (!Array.isArray(content)) return [];
 	return content.flatMap((block) => {
@@ -526,4 +543,70 @@ export function toolCalls(message: ConversationMessage): Array<{ name: string; d
 		calls.push({ name, detail: input === undefined ? undefined : JSON.stringify(input, null, 2) });
 	}
 	return calls;
+}
+
+export interface ToolCallBlock {
+	type: "toolCall" | "tool_use";
+	id: string;
+	name: string;
+	arguments: Record<string, unknown>;
+}
+
+export function isToolCallBlock(block: unknown): block is ToolCallBlock {
+	if (!isRecord(block)) return false;
+	return block.type === "toolCall" || block.type === "tool_use";
+}
+
+/** Extract a short human-readable summary from a tool call's arguments. */
+export function toolCallSummary(block: ToolCallBlock): string {
+	const args = block.arguments;
+	switch (block.name) {
+		case "bash":
+		case "bash_execution":
+			return String(args.command ?? args.cmd ?? "");
+		case "read_file":
+		case "file_read":
+		case "read":
+			return String(args.path ?? args.file ?? "");
+		case "write_file":
+		case "file_write":
+			return `写入 ${String(args.path ?? args.file ?? "")}`;
+		case "glob":
+		case "search_files":
+		case "find_files":
+			return String(args.pattern ?? args.glob ?? "");
+		case "subagent":
+		case "spawn_subagent":
+		case "launch_subagent":
+			return String(args.task ?? args.description ?? args.prompt ?? args.title ?? "");
+		default: {
+			const s = JSON.stringify(args);
+			return s.length > 100 ? s.slice(0, 97) + "\u2026" : s;
+		}
+	}
+}
+
+/** Return the icon component to use for a tool call, based on its name. */
+export function toolCallIconName(block: ToolCallBlock): string {
+	switch (block.name) {
+		case "bash":
+		case "bash_execution":
+			return "terminal";
+		case "read_file":
+		case "file_read":
+		case "read":
+		case "write_file":
+		case "file_write":
+			return "file";
+		case "glob":
+		case "search_files":
+		case "find_files":
+			return "search";
+		case "subagent":
+		case "spawn_subagent":
+		case "launch_subagent":
+			return "bot";
+		default:
+			return "wrench";
+	}
 }

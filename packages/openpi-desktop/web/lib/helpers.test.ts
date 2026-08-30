@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationMessage } from "../types";
-import { mergeConversationMessage, normalizeConversationModels, thinkingLevelsForModel } from "./helpers";
+import {
+	mergeConversationMessage,
+	messageReasoning,
+	normalizeConversationModels,
+	thinkingLevelsForModel,
+} from "./helpers";
 
 const BASE_LEVELS = ["off", "minimal", "low", "medium", "high"];
 
@@ -69,5 +74,35 @@ describe("mergeConversationMessage", () => {
 		const second: ConversationMessage = { role: "user", content: "two" };
 
 		expect(mergeConversationMessage([first], second)).toEqual([first, second]);
+	});
+});
+
+describe("message reasoning", () => {
+	it("joins thinking blocks so a reasoning-only shell still renders", () => {
+		const message: ConversationMessage = {
+			role: "assistant",
+			content: [
+				{ type: "thinking", thinking: "first" },
+				{ type: "text", text: "answer" },
+				{ type: "thinking", thinking: "second" },
+			],
+		};
+
+		expect(messageReasoning(message)).toBe("first\n\nsecond");
+	});
+
+	it("prefers the flat reasoning field carried by cached snapshots", () => {
+		const message: ConversationMessage = {
+			role: "assistant",
+			content: [{ type: "thinking", thinking: "from blocks" }],
+			reasoning: "from snapshot",
+		};
+
+		expect(messageReasoning(message)).toBe("from snapshot");
+	});
+
+	it("is empty for messages without thinking content", () => {
+		expect(messageReasoning({ role: "assistant", content: [{ type: "text", text: "hi" }] })).toBe("");
+		expect(messageReasoning({ role: "user", content: "hi" })).toBe("");
 	});
 });

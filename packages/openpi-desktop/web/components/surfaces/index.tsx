@@ -35,13 +35,17 @@ import {
 	isConversationMessage,
 	isDocumentFile,
 	isRecord,
+	isToolCallBlock,
 	messageBlockCounts,
+	messageReasoning,
 	prepareDocumentAttachment,
 	prepareImageAttachment,
 	scheduleLabel,
 	shortWorkspacePath,
 	statusLabel,
 	thinkingLevelsForModel,
+	toolCallIconName,
+	toolCallSummary,
 	toolCalls,
 } from "../../lib/helpers";
 import { MarkdownText } from "../../lib/markdown";
@@ -4153,6 +4157,63 @@ function ActivityTimeline({ conversation }: { conversation?: ConversationSnapsho
 			</div>
 		</div>
 	);
+}
+
+/** Minimal inline renderer for assistant content blocks (thinking, tool calls, text, images) — interleaved in-order. */
+function BlockRenderer({
+	content,
+	hideAssistantTools,
+}: {
+	content: unknown;
+	hideAssistantTools?: boolean;
+}): React.ReactNode {
+	if (!Array.isArray(content)) return null;
+	const parts: React.ReactNode[] = [];
+	for (const block of content) {
+		if (!isRecord(block)) continue;
+		const type = typeof block.type === "string" ? block.type : "";
+		if (type === "text" || type === "output_text") {
+			parts.push(
+				<div className="message-text" key={parts.length}>
+					<MarkdownText text={String((block as { text: string }).text)} />
+				</div>,
+			);
+		} else if (type === "thinking") {
+			parts.push(
+				<div className="activity-inline activity-thinking" key={parts.length}>
+					<BrainCircuit size={12} />
+					<span>思考 · 持续了几秒</span>
+				</div>,
+			);
+		} else if (type === "toolCall" || type === "tool_use") {
+			if (hideAssistantTools) continue;
+			const tc = block as unknown as import("../../lib/helpers").ToolCallBlock;
+			const iconName = toolCallIconName(tc);
+			const summary = toolCallSummary(tc);
+			const IconComp =
+				iconName === "terminal"
+					? Terminal
+					: iconName === "search"
+						? Search
+						: iconName === "file"
+							? FileText
+							: iconName === "bot"
+								? Bot
+								: Wrench;
+			parts.push(
+				<div className={`activity-inline activity-${iconName}`} key={tc.id}>
+					<IconComp size={12} />
+					<span className="activity-summary">{summary}</span>
+				</div>,
+			);
+		} else if (type === "image") {
+			const img = block as { data: string; mimeType: string };
+			parts.push(
+				<MessageImages images={[{ type: "image", data: img.data, mimeType: img.mimeType }]} key={parts.length} />,
+			);
+		}
+	}
+	return <>{parts}</>;
 }
 
 export function MessageItem({

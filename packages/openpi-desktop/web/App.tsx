@@ -4,8 +4,6 @@ import { ArrowLeft, Bell, RefreshCw, X } from "./components/icons.tsx";
 import {
 	type AppMode,
 	CapabilitiesSurface,
-	ChatSurface,
-	ContextPanel,
 	ConversationSidebar,
 	ConversationUiDialog,
 	CreateTaskDialog,
@@ -19,7 +17,6 @@ import {
 	RenameConversationDialog,
 	TasksSurface,
 } from "./components/surfaces";
-import { TodoPanel } from "./components/todo-panel";
 import {
 	type CapabilityTab,
 	type DocumentAttachment,
@@ -598,72 +595,10 @@ export function App() {
 				});
 				return;
 			}
-			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
-				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
-				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
-				if (toolCallId && toolName && selectedInstanceIdRef.current === payload.instanceId) {
-					setConversation((current) => {
-						if (!current) return current;
-						const lastMsg = current.messages[current.messages.length - 1];
-						if (!lastMsg || lastMsg.role !== "assistant") return current;
-						const existing = lastMsg.toolCalls?.find((t) => t.id === toolCallId);
-						if (existing) return current;
-						return {
-							...current,
-							messages: [
-								...current.messages.slice(0, -1),
-								{
-									...lastMsg,
-									toolCalls: [
-										...(lastMsg.toolCalls ?? []),
-										{ id: toolCallId, name: toolName, status: "running" },
-									],
-								},
-							],
-						};
-					});
-				}
-				return;
-			}
-			if (eventType === "tool_execution_update") {
-				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
-				const toolName = typeof payload.event.toolName === "string" ? payload.event.toolName : undefined;
-				const partialResult = payload.event.partialResult;
-				if (toolCallId && selectedInstanceIdRef.current === payload.instanceId) {
-					setConversation((current) => {
-						if (!current) return current;
-						const lastMsg = current.messages[current.messages.length - 1];
-						if (!lastMsg || lastMsg.role !== "assistant") return current;
-						const existing = lastMsg.toolCalls?.find((t) => t.id === toolCallId);
-						if (!existing) return current;
-						const updated = lastMsg.toolCalls.map((t) =>
-							t.id === toolCallId ? { ...t, result: partialResult?.content?.[0]?.text ?? t.result } : t,
-						);
-						return {
-							...current,
-							messages: [...current.messages.slice(0, -1), { ...lastMsg, toolCalls: updated }],
-						};
-					});
-				}
-				return;
-			}
 			if (eventType === "tool_execution_end") {
 				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
-				const isError = typeof payload.event.isError === "boolean" ? payload.event.isError : false;
 				if (toolCallId && selectedInstanceIdRef.current === payload.instanceId) {
 					setRunningTools((current) => current.filter((tool) => tool.toolCallId !== toolCallId));
-					setConversation((current) => {
-						if (!current) return current;
-						const lastMsg = current.messages[current.messages.length - 1];
-						if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.toolCalls) return current;
-						const updated = lastMsg.toolCalls.map((t) =>
-							t.id === toolCallId ? { ...t, status: isError ? "error" : "completed" } : t,
-						);
-						return {
-							...current,
-							messages: [...current.messages.slice(0, -1), { ...lastMsg, toolCalls: updated }],
-						};
-					});
 				}
 				return;
 			}
@@ -1693,7 +1628,7 @@ export function App() {
 
 	return (
 		<div
-			className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${(view as View) === "capabilities" ? "capabilities-view" : ""} ${operationView ? "operations-view" : ""} ${sidebarOpen ? "sidebar-open" : ""} ${contextOpen ? "context-open" : ""}`}
+			className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""} ${sidebarOpen ? "sidebar-open" : ""} ${contextOpen ? "context-open" : ""}`}
 		>
 			<ConversationSidebar
 				conversations={conversations}
@@ -1747,15 +1682,13 @@ export function App() {
 			/>
 
 			<div className="main-column">
-				{(view as View) !== "chat" && (
-					<div className="secondary-bar">
-						<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
-							<ArrowLeft size={14} />
-							返回对话
-						</button>
-						<span className="secondary-bar-note">辅助页面 · 主路径是聊天</span>
-					</div>
-				)}
+				<div className="secondary-bar">
+					<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
+						<ArrowLeft size={14} />
+						返回对话
+					</button>
+					<span className="secondary-bar-note">辅助页面 · 主路径是聊天</span>
+				</div>
 				{extensionNotice && (
 					<div className={`notice-banner ${extensionNotice.type}`}>
 						<Bell size={15} />
@@ -1788,80 +1721,6 @@ export function App() {
 						<RefreshCw size={22} className="spin" />
 						<span>加载中…</span>
 					</div>
-				) : (view as View) === "chat" ? (
-					<>
-						<TodoPanel state={todoState} />
-						<ChatSurface
-							mode={activeAgentMode}
-							workspace={
-								activeAgentMode === "code"
-									? activeCodeWorkspace
-									: activeAgentMode === "personal"
-										? undefined
-										: selectedWorkspace
-							}
-							conversation={conversation}
-							selectedInstance={selectedAgentInstance}
-							stats={conversationStats}
-							providerBalance={providerBalance}
-							optimisticMessage={
-								optimisticMessage &&
-								(optimisticMessage.instanceId === undefined ||
-									optimisticMessage.instanceId === selectedInstanceId)
-									? optimisticMessage.message
-									: undefined
-							}
-							runningTools={runningTools}
-							turnProgress={turnProgress}
-							modelOptions={conversationModels}
-							loadingModels={loadingConversationModels}
-							draftRequest={composerDraftRequest}
-							configuring={busy === "set-model" || busy === "set-thinking"}
-							sending={busy === "send-message"}
-							onSend={sendMessage}
-							onError={setError}
-							onModelChange={(model) =>
-								void updateConversationConfiguration("set-model", (instanceId) =>
-									desktopApi.setConversationModel(instanceId, model.provider, model.id),
-								)
-							}
-							onThinkingLevelChange={(level) =>
-								void updateConversationConfiguration("set-thinking", (instanceId) =>
-									desktopApi.setConversationThinkingLevel(instanceId, level),
-								)
-							}
-							onAbort={() =>
-								selectedInstanceId && perform("abort", () => desktopApi.abortConversation(selectedInstanceId))
-							}
-							onOpenSidebar={() => setSidebarOpen(true)}
-							onToggleContext={() => setContextOpen((current) => !current)}
-							activeTab={chatTab}
-							onTabChange={setChatTab}
-							slashCommands={conversationCommands}
-							turnMeta={turnMeta && turnMeta.instanceId === selectedInstanceId ? turnMeta.message : undefined}
-							onRemember={(text) => rememberFromChat(text)}
-							onCreateTaskFromChat={openTaskFromChat}
-							onNavigate={(next) => setView(next)}
-							onNewConversation={() => {
-								if (appMode === "code" && !codeWorkspace) {
-									void changeCodeWorkspace();
-								} else {
-									void createConversation(
-										appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work",
-										appMode === "code" ? codeWorkspace : undefined,
-									);
-								}
-							}}
-							onRenameConversation={() => {
-								if (selectedAgentInstance) setRenamingConversation(selectedAgentInstance);
-							}}
-							onExportConversation={() => {
-								setError("导出功能稍后开放；如需 HTML 备份请用 CLI 的 export-html 子命令");
-							}}
-							appMode={appMode}
-							onAppModeChange={handleModeChange}
-						/>
-					</>
 				) : view === "tasks" ? (
 					<TasksSurface
 						tasks={tasks}
@@ -1940,17 +1799,6 @@ export function App() {
 					/>
 				)}
 			</div>
-
-			{(view as View) === "chat" && (
-				<ContextPanel
-					conversation={conversation}
-					stats={conversationStats}
-					capabilities={capabilities}
-					memoryEntries={workspaceMemory}
-					onClose={() => setContextOpen(false)}
-					onShowTasks={() => setView("tasks")}
-				/>
-			)}
 
 			{sidebarOpen && (
 				<button className="mobile-scrim" aria-label="Close conversations" onClick={() => setSidebarOpen(false)} />
