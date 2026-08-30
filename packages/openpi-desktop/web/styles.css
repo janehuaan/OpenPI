@@ -7046,3 +7046,58 @@ input.ui-command-input:focus-visible {
 	color: var(--text-secondary);
 	line-height: 1.4;
 }
+
+/* Running tool calls */
+.reference-tool-running {
+	margin: 6px 0;
+	padding: 8px 12px;
+	background: linear-gradient(90deg, var(--bg-secondary) 0%, rgba(59,130,246,0.1) 100%);
+	border-radius: 6px;
+	border-left: 3px solid var(--color-primary);
+	animation: pulse-border 2s ease-in-out infinite;
+}
+@keyframes pulse-border {
+	0%, 100% { border-left-color: var(--color-primary); }
+	50% { border-left-color: rgba(59,130,246,0.4); }
+}
+.reference-tool-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+.reference-tool-name {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 500;
+	color: var(--text-primary);
+	font-size: 13px;
+}
+.reference-tool-status {
+	margin-left: auto;
+	font-size: 11px;
+	color: var(--color-primary);
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+.reference-tool-status.spinning::before {
+	content: "⟳";
+	animation: spin 1s linear infinite;
+	display: inline-block;
+}
+.reference-tool-output {
+	margin: 4px 0 0 0;
+	padding: 6px 8px;
+	background: var(--bg-primary);
+	border-radius: 4px;
+	font-size: 11px;
+	font-family: monospace;
+	white-space: pre-wrap;
+	word-break: break-all;
+	max-height: 150px;
+	overflow-y: auto;
+	color: var(--text-secondary);
+	line-height: 1.4;
+}
