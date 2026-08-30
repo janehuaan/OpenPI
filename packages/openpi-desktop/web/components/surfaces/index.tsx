@@ -186,6 +186,38 @@ function hasVisionContext(content: unknown): boolean {
 	return contentText(content).includes("<openpi-vision-context");
 }
 
+/** Live tool-execution card shown at the tail of the message thread. */
+function ChatLiveTools({ tools }: { tools: RunningTool[] }) {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+		return () => window.clearInterval(timer);
+	}, []);
+	return (
+		<div className="tool-live-list">
+			{tools.map((tool) => {
+				const seconds = Math.max(0, Math.floor((now - tool.startedAt) / 1_000));
+				const output =
+					tool.partialResult && typeof tool.partialResult === "object"
+						? (tool.partialResult as { content?: Array<{ type?: string; text?: string }> }).content?.find(
+								(c) => c?.type === "text",
+							)?.text
+						: undefined;
+				return (
+					<div className="tool-live" key={tool.toolCallId}>
+						<div className="tool-live-header">
+							<Wrench size={13} className="tool-live-icon" />
+							<span className="tool-live-name">{tool.toolName}</span>
+							<span className="tool-live-status">运行中{seconds > 0 ? ` · ${seconds}s` : ""}</span>
+						</div>
+						{output && <pre className="tool-live-output">{output.slice(-800)}</pre>}
+					</div>
+				);
+			})}
+		</div>
+	);
+}
+
 function TurnProgressRow({ progress }: { progress?: TurnProgress }) {
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
@@ -2565,6 +2597,7 @@ export function ChatSurface({
 	slashCommands = [],
 	onSend,
 	onError,
+	runningTools = [],
 	onModelChange,
 	onThinkingLevelChange,
 	onAbort,
@@ -2595,6 +2628,7 @@ export function ChatSurface({
 	draftRequest?: { id: string; text: string };
 	configuring: boolean;
 	sending: boolean;
+	runningTools?: RunningTool[];
 	slashCommands?: string[];
 	/** Run stats (TPS etc.) under the latest assistant reply */
 	turnMeta?: string;
@@ -3450,6 +3484,7 @@ export function ChatSurface({
 									/>
 								),
 							)}
+							{runningTools.length > 0 && <ChatLiveTools tools={runningTools} />}
 							<TurnProgressRow progress={turnProgress} />
 							{isWorking && (
 								<div className="agent-progress">

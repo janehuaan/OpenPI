@@ -1811,6 +1811,7 @@ export function App() {
 									? optimisticMessage.message
 									: undefined
 							}
+							runningTools={runningTools}
 							turnProgress={turnProgress}
 							modelOptions={conversationModels}
 							loadingModels={loadingConversationModels}
