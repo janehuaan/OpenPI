@@ -274,3 +274,54 @@ export function truncateLine(
 	}
 	return { text: `${line.slice(0, maxChars)}... [truncated]`, wasTruncated: true };
 }
+
+/** Generate summary for large files. */
+export interface FileSummary {
+	type: "summary";
+	filePath: string;
+	totalLines: number;
+	totalBytes: number;
+	sampleLines: string[];
+	patterns?: Record<string, number>;
+}
+
+export function generateFileSummary(filePath: string, allLines: string[]): FileSummary {
+	const totalLines = allLines.length;
+	const totalBytes = Buffer.byteLength(allLines.join("\n"), "utf-8");
+	const sampleLines = [...allLines.slice(0, 10), ...(totalLines > 15 ? allLines.slice(-5) : [])];
+	const patterns: Record<string, number> = {};
+	for (const line of allLines) {
+		for (const m of line.matchAll(/"([a-zA-Z_][a-zA-Z0-9_]*)"\s*:/g)) {
+			patterns[m[1]] = (patterns[m[1]] ?? 0) + 1;
+		}
+	}
+	const sortedPatterns = Object.entries(patterns)
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, 10)
+		.reduce(
+			(acc, [k, v]) => {
+				acc[k] = v;
+				return acc;
+			},
+			{} as Record<string, number>,
+		);
+	return { type: "summary", filePath, totalLines, totalBytes, sampleLines, patterns: sortedPatterns };
+}
+
+export function formatFileSummary(summary: FileSummary): string {
+	const lines: string[] = [
+		`\n[${summary.totalLines} lines, ${formatSize(summary.totalBytes)} — summary mode]`,
+		`Top patterns: ${
+			Object.entries(summary.patterns ?? {})
+				.map(([k, v]) => `"${k}"(${v})`)
+				.join(", ") || "none detected"
+		}`,
+		"\nFirst 10 lines:",
+		...summary.sampleLines.slice(0, 10).map((l, i) => `${i + 1}: ${l}`),
+		...(summary.totalLines > 15
+			? ["\nLast 5 lines:", ...summary.sampleLines.slice(-5).map((l, i) => `${summary.totalLines - 4 + i}: ${l}`)]
+			: []),
+		"\nUse offset=<N> limit=<M> to read specific ranges.",
+	];
+	return lines.join("\n");
+}
