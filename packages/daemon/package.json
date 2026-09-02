@@ -1,0 +1,21 @@
+{
+  "name": "@openpi/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "openpi-daemon": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@openpi/shared": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  }
+}

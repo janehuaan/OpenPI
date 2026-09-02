@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@openpi/shared": ["./packages/shared/src/index.ts"],
+      "@openpi/daemon": ["./packages/daemon/src/index.ts"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "extensions/*/src/**/*.ts"]
+}
