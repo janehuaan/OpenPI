@@ -7,3 +7,8 @@ release/
 # Electron runtime bundle is a build product - never commit it (the old repo
 # tracked runtime/package.json and it accumulated dead file:/var/folders paths).
 runtime/
+.DS_Store
+spike/agent-dir/
+spike/agent-dir/auth.json
+spike/agent-dir/models.json
+spike/agent-dir/models-store.json
