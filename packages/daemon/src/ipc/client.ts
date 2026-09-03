@@ -86,15 +86,8 @@ export class DaemonClient {
 	}
 
 	private handleChunk(chunk: string): void {
-		let messages: unknown[];
-		try {
-			const decoded = decodeLines(this.buffer, chunk);
-			messages = decoded.messages;
-			this.buffer = decoded.rest;
-		} catch {
-			this.buffer = "";
-			return;
-		}
+		const { messages, rest } = decodeLines(this.buffer, chunk);
+		this.buffer = rest;
 		for (const raw of messages) {
 			const message = raw as ServerMessage;
 			if (message.type === "event") {

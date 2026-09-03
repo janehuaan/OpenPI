@@ -45,3 +45,23 @@ test("encode/decode round-trips an event", () => {
 	const decoded = decodeLines("", line);
 	assert.deepEqual(decoded.messages[0], event);
 });
+
+test("decodeLines skips an unparseable line and keeps the valid frames beside it", () => {
+	// Line framing means one bad line should cost only that line. Throwing here
+	// would lose every valid frame that arrived in the same chunk.
+	const decoded = decodeLines("", '{"id":"1","type":"health"}\ngarbage\n{"id":"2","type":"health"}\n');
+	assert.equal(decoded.messages.length, 2);
+	assert.equal(decoded.errors.length, 1);
+	assert.equal(decoded.rest, "");
+});
+
+test("decodeLines reports no errors for clean input", () => {
+	assert.deepEqual(decodeLines("", '{"id":"1","type":"health"}\n').errors, []);
+});
+
+test("decodeLines does not treat a partial trailing line as an error", () => {
+	const decoded = decodeLines("", '{"id":"1","type":"health"}\n{"id":"2"');
+	assert.equal(decoded.messages.length, 1);
+	assert.deepEqual(decoded.errors, []);
+	assert.equal(decoded.rest, '{"id":"2"');
+});

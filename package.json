@@ -12,7 +12,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "npm test --workspaces --if-present"
+    "test": "npm test --workspaces --if-present",
+    "check": "npm run typecheck && npm test"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "0.84.4",

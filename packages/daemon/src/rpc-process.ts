@@ -134,16 +134,12 @@ export class RpcProcess {
 	}
 
 	private handleChunk(chunk: string): void {
-		let messages: unknown[];
-		try {
-			const decoded = decodeLines(this.stdoutBuffer, chunk);
-			messages = decoded.messages;
-			this.stdoutBuffer = decoded.rest;
-		} catch (error) {
-			// A malformed line must not desync the stream for everything after it.
-			process.stderr.write(`[session ${this.sessionId}] bad frame: ${String(error)}\n`);
-			this.stdoutBuffer = "";
-			return;
+		// decodeLines skips unparseable lines rather than throwing, so a malformed
+		// frame costs only itself - the valid frames in the same chunk still land.
+		const { messages, rest, errors } = decodeLines(this.stdoutBuffer, chunk);
+		this.stdoutBuffer = rest;
+		for (const error of errors) {
+			process.stderr.write(`[session ${this.sessionId}] bad frame: ${error}\n`);
 		}
 		for (const message of messages) {
 			this.dispatch(message as PiRpcEvent);

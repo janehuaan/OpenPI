@@ -51,15 +51,11 @@ export function startServer(handler: RequestHandler): Promise<Server> {
 		};
 
 		socket.on("data", (chunk: string) => {
-			let messages: unknown[];
-			try {
-				const decoded = decodeLines(buffer, chunk);
-				messages = decoded.messages;
-				buffer = decoded.rest;
-			} catch (error) {
-				connection.send({ id: "", type: "response", ok: false, error: `bad frame: ${String(error)}` });
-				buffer = "";
-				return;
+			const { messages, rest, errors } = decodeLines(buffer, chunk);
+			buffer = rest;
+			// One unparseable request must not discard the valid ones sent alongside it.
+			for (const error of errors) {
+				connection.send({ id: "", type: "response", ok: false, error: `bad frame: ${error}` });
 			}
 			for (const message of messages) {
 				void handleRequest(message as ClientRequest, connection, handler);

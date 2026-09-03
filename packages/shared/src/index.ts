@@ -89,18 +89,32 @@ export function encodeMessage(message: ClientRequest | ServerMessage): string {
 }
 
 /**
- * Split a byte chunk into complete JSON lines, returning the parsed values and
- * whatever partial trailing text should be carried into the next call.
+ * Split a byte chunk into complete JSON lines.
+ *
+ * A line that does not parse is reported in `errors` and skipped, rather than
+ * throwing: the framing is line-delimited, so one bad line must cost only that
+ * line. Throwing here would take down every valid frame that arrived in the same
+ * chunk, and the callers' only recovery is to drop the whole buffer.
+ *
+ * `rest` is the trailing partial line to carry into the next call.
  */
-export function decodeLines(buffer: string, chunk: string): { messages: unknown[]; rest: string } {
+export function decodeLines(
+	buffer: string,
+	chunk: string,
+): { messages: unknown[]; rest: string; errors: string[] } {
 	const combined = buffer + chunk;
 	const parts = combined.split("\n");
 	const rest = parts.pop() ?? "";
 	const messages: unknown[] = [];
+	const errors: string[] = [];
 	for (const part of parts) {
 		const line = part.trim();
 		if (!line) continue;
-		messages.push(JSON.parse(line));
+		try {
+			messages.push(JSON.parse(line));
+		} catch (error) {
+			errors.push(error instanceof Error ? error.message : String(error));
+		}
 	}
-	return { messages, rest };
+	return { messages, rest, errors };
 }

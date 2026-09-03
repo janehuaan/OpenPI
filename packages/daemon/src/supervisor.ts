@@ -31,6 +31,8 @@ export type SessionEventListener = (sessionId: string, event: PiRpcEvent) => voi
 export class Supervisor {
 	private readonly records = new Map<string, SessionRecord>();
 	private readonly live = new Map<string, RpcProcess>();
+	/** Sessions whose process we killed on purpose, so its exit is not reported as a crash. */
+	private readonly suspended = new Set<string>();
 	private readonly subscribers = new Map<string, Set<SessionEventListener>>();
 
 	constructor() {
@@ -89,8 +91,11 @@ export class Supervisor {
 
 	/** Suspend a session's process but keep its record and session file. */
 	stop(sessionId: string): void {
-		this.live.get(sessionId)?.stop();
+		const process_ = this.live.get(sessionId);
+		if (!process_) return;
+		this.suspended.add(sessionId);
 		this.live.delete(sessionId);
+		process_.stop();
 	}
 
 	delete(sessionId: string): void {
@@ -100,8 +105,7 @@ export class Supervisor {
 	}
 
 	stopAll(): void {
-		for (const [, process_] of this.live) process_.stop();
-		this.live.clear();
+		for (const sessionId of [...this.live.keys()]) this.stop(sessionId);
 	}
 
 	get runningCount(): number {
@@ -134,9 +138,17 @@ export class Supervisor {
 		// A UI request that nobody answers would hang the agent turn, so surface
 		// it as an event and let the desktop reply through the normal rpc path.
 		process_.setUiRequestHandler((request) => this.broadcast(sessionId, request));
-		process_.onExit(() => {
-			this.live.delete(sessionId);
-			this.broadcast(sessionId, { type: "session_exit", sessionId });
+		process_.onExit((code) => {
+			// SIGTERM is asynchronous, so a session that is suspended and then woken
+			// has two processes briefly alive: the old one exits after the new one is
+			// already registered. Only clear the entry if it still points at this
+			// instance, or the exiting process evicts its own replacement - which
+			// leaves the new child running with nothing tracking it.
+			if (this.live.get(sessionId) === process_) this.live.delete(sessionId);
+			// A deliberate suspend is not news; an unexpected exit is.
+			if (!this.suspended.delete(sessionId)) {
+				this.broadcast(sessionId, { type: "session_exit", sessionId, code });
+			}
 		});
 		this.live.set(sessionId, process_);
 		return process_;
