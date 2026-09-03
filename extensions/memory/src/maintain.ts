@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { globalMemoryDir } from "./config.ts";
 import { archiveEntry, backupMemoryDirectory } from "./durability.ts";
 import { similarText } from "./extract.ts";
 import {
@@ -196,8 +197,7 @@ export function idleOrganize(cwd: string, config: MemoryConfig): MaintainResult 
 	if (Date.now() - last < config.idleOrganizeMinIntervalMs) return undefined;
 	const result = maintainMemoryIndex(cwd, config);
 	if (config.maintainGlobal) {
-		const home = path.join(process.env.HOME ?? "", ".pi", "memory");
-		maintainMemoryDirectory(home, config);
+		maintainMemoryDirectory(globalMemoryDir(), config);
 	}
 	meta.lastIdleOrganizeAt = new Date().toISOString();
 	meta.lastBackupAt = new Date().toISOString();

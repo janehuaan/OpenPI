@@ -3,10 +3,12 @@ import * as path from "node:path";
 import { DEFAULT_MEMORY_CONFIG, MEMORY_TYPES, type MemoryConfig, type MemoryType } from "./types.ts";
 
 export function loadMemoryConfig(cwd: string): MemoryConfig {
+	// Project config first, then openpi's own global config. The old repo also read
+	// ~/.pi/agent/openpi.json, which belongs to the user's pi CLI install; openpi
+	// keeps its own directory so the two never fight over one file.
 	const candidates = [
 		path.join(cwd, ".pi", "memory", "config.json"),
-		path.join(process.env.HOME ?? "", ".pi", "memory", "config.json"),
-		path.join(process.env.HOME ?? "", ".pi", "agent", "openpi.json"),
+		path.join(globalMemoryDir(), "config.json"),
 	];
 	const config = { ...DEFAULT_MEMORY_CONFIG };
 	for (const file of candidates) {
@@ -95,6 +97,15 @@ function applyConfigFields(config: MemoryConfig, record: Record<string, unknown>
 	}
 }
 
+/**
+ * Global (cross-project) memory lives in openpi's own directory, never in the
+ * user's `~/.pi/` pi-CLI directory. The daemon points every session's
+ * PI_CODING_AGENT_DIR at `~/.openpi/agent`, so its parent is openpi's home.
+ */
 export function globalMemoryDir(): string {
-	return path.join(process.env.HOME ?? "", ".pi", "memory");
+	const explicit = process.env.OPENPI_MEMORY_DIR;
+	if (explicit) return explicit;
+	const agentDir = process.env.PI_CODING_AGENT_DIR;
+	if (agentDir) return path.join(agentDir, "..", "memory");
+	return path.join(process.env.HOME ?? "", ".openpi", "memory");
 }

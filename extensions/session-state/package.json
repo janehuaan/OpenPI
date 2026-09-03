@@ -1,0 +1,28 @@
+{
+  "name": "@openpi/extension-session-state",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Task state, context checkpoints, structured compaction and the event ledger, as one pi extension",
+  "keywords": ["pi-package", "openpi", "session-state"],
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "typebox": "1.3.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  },
+  "devDependencies": {
+    "vitest": "3.2.4"
+  },
+  "scripts": {
+    "test": "vitest --run"
+  }
+}
