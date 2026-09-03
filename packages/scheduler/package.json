@@ -1,0 +1,16 @@
+{
+  "name": "@openpi/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cron and one-shot task scheduler with DAG steps, retries and unattended pi runs",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "vitest": "3.2.4"
+  },
+  "scripts": {
+    "test": "vitest --run"
+  }
+}
