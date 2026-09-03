@@ -1,0 +1,45 @@
+{
+  "name": "@openpi/extension-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-dependency personal-agent toolbelt: web search/fetch, code search, knowledge base, session tasks, browser, GitHub, feeds",
+  "keywords": [
+    "pi-package",
+    "openpi",
+    "tools"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/web-search.ts",
+      "./src/web-fetch.ts",
+      "./src/code-search.ts",
+      "./src/knowledge-base.ts",
+      "./src/ai-news.ts",
+      "./src/monitor.ts",
+      "./src/browser.ts",
+      "./src/github.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "permissions": {
+      "network": true,
+      "fs": "project",
+      "shell": true,
+      "env": true
+    }
+  },
+  "dependencies": {
+    "typebox": "1.3.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4"
+  },
+  "devDependencies": {
+    "vitest": "3.2.4"
+  },
+  "scripts": {
+    "test": "vitest --run"
+  }
+}
