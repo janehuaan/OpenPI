@@ -13,6 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { app } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,14 +26,14 @@ function daemonCli(): string {
 	if (override) return override;
 
 	const here = dirname(fileURLToPath(import.meta.url));
-	const candidates = [
-		// packaged: Resources/openpi/daemon.js, a bundle beside its node_modules
-		join(process.resourcesPath ?? "", "openpi/daemon.js"),
-		// staged but unpackaged, e.g. after `npm run build:runtime`
-		join(here, "../runtime/daemon.js"),
-		// dev, from source
-		join(here, "../../../packages/daemon/src/cli.ts"),
-	];
+	// Packaged first, then source. `runtime/` is deliberately NOT consulted when
+	// running unpackaged: it is a build artifact that goes stale the moment the
+	// daemon changes, and preferring it means an unpackaged run silently exercises
+	// yesterday's backend - which is exactly how a new app op came back as
+	// "unknown app op" while its source was right there.
+	const candidates = app.isPackaged
+		? [join(process.resourcesPath ?? "", "openpi/daemon.js")]
+		: [join(here, "../../../packages/daemon/src/cli.ts")];
 	const found = candidates.find(existsSync);
 	if (found) return found;
 	throw new Error(

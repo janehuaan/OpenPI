@@ -18,6 +18,7 @@ import type {
 	MemoryScope,
 	PiRpcCommand,
 	SessionMode,
+	UserProfile,
 } from "@openpi/shared";
 import { INVOKE_CHANNELS, eventChannelName, invokeChannelName, type InvokeChannel } from "./channels.ts";
 import { currentClient, ensureDaemon, onRestartDeferred, restartDaemon, restartIfStale } from "./daemon.ts";
@@ -120,6 +121,23 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				scope: asScope(args),
 				type: asString(args, "type"),
 				key: asString(args, "key"),
+			}),
+
+		rename_session: (args) =>
+			forward({ type: "rename_session", sessionId: asString(args, "sessionId"), name: asString(args, "name") }),
+
+		get_profile: () => app({ name: "get_profile" }),
+		save_profile: (args) => app({ name: "save_profile", profile: (args.profile ?? {}) as UserProfile }),
+		capabilities: () => app({ name: "capabilities" }),
+		add_extension: (args) => app({ name: "add_extension", path: asString(args, "path") }),
+		remove_extension: (args) => app({ name: "remove_extension", path: asString(args, "path") }),
+		install_package: (args) => app({ name: "install_package", source: asString(args, "source") }),
+		remove_package: (args) => app({ name: "remove_package", source: asString(args, "source") }),
+		extract_document: (args) =>
+			app({
+				name: "extract_document",
+				fileName: asString(args, "fileName"),
+				dataBase64: asString(args, "dataBase64"),
 			}),
 
 		list_tasks: () => app({ name: "list_tasks" }),

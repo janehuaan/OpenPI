@@ -53,6 +53,7 @@ export type ClientRequest =
 	| { id: string; type: "create_session"; cwd: string; mode?: SessionMode; model?: string; name?: string }
 	| { id: string; type: "stop_session"; sessionId: string }
 	| { id: string; type: "delete_session"; sessionId: string }
+	| { id: string; type: "rename_session"; sessionId: string; name: string }
 	| { id: string; type: "subscribe"; sessionId: string }
 	| { id: string; type: "unsubscribe"; sessionId: string }
 	/** Forwarded verbatim to the session's pi subprocess. */
@@ -87,7 +88,46 @@ export type AppOp =
 	| { name: "run_task"; taskId: string }
 	| { name: "cancel_run"; runId: string }
 	| { name: "step_runs"; runId: string }
-	| { name: "read_run_log"; runId: string; stream: "stdout" | "stderr" };
+	| { name: "read_run_log"; runId: string; stream: "stdout" | "stderr" }
+	// Profile and capabilities.
+	| { name: "get_profile" }
+	| { name: "save_profile"; profile: UserProfile }
+	| { name: "capabilities" }
+	| { name: "add_extension"; path: string }
+	| { name: "remove_extension"; path: string }
+	| { name: "install_package"; source: string }
+	| { name: "remove_package"; source: string }
+	/** Extract text from an attached document, for prompt inclusion. */
+	| { name: "extract_document"; fileName: string; dataBase64: string };
+
+export interface UserProfile {
+	nickname?: string;
+	/** A single emoji, used as the avatar. */
+	avatarEmoji?: string;
+	updatedAt?: string;
+}
+
+export interface CapabilityEntry {
+	/** Path or package source as written in settings. */
+	source: string;
+	/** Resolved absolute path, when it is a local file. */
+	resolved?: string;
+	kind: "extension" | "package" | "skill" | "prompt";
+	/** False when the path no longer exists on disk. */
+	present: boolean;
+}
+
+export interface Capabilities {
+	agentDir: string;
+	entries: CapabilityEntry[];
+}
+
+export interface DocumentText {
+	name: string;
+	text: string;
+	/** True when the text was cut to fit a prompt. */
+	truncated: boolean;
+}
 
 /**
  * Task shapes, mirrored from @openpi/scheduler.

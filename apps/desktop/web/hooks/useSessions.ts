@@ -150,6 +150,17 @@ export function useSessions() {
 		[refresh],
 	);
 
+	const rename = useCallback(
+		async (sessionId: string, name: string) => {
+			if (!name.trim()) return;
+			await api.renameSession(sessionId, name.trim()).catch((error) => {
+				setState((current) => ({ ...current, error: describe(error) }));
+			});
+			await refresh();
+		},
+		[refresh],
+	);
+
 	const remove = useCallback(
 		async (sessionId: string) => {
 			await api.deleteSession(sessionId).catch(() => undefined);
@@ -179,7 +190,7 @@ export function useSessions() {
 		[],
 	);
 
-	return { ...state, refresh, select, create, send, abort, stop, remove, respondUi };
+	return { ...state, refresh, select, create, send, abort, stop, remove, rename, respondUi };
 }
 
 function omit(record: Record<string, string>, key: string): Record<string, string> {

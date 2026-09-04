@@ -25,6 +25,16 @@ import { bootstrapCredentials, listProviders } from "./bootstrap.ts";
 import { agentDir, openpiDir, piCliMtimeMs, piRpcEntry, pidPath, socketPath, VERSION } from "./config.ts";
 import { type Connection, startServer } from "./ipc/server.ts";
 import {
+	addExtension,
+	capabilities,
+	extractDocument,
+	getProfile,
+	installPackage,
+	removeExtension,
+	removePackage,
+	saveProfile,
+} from "./profile-ops.ts";
+import {
 	cancelRun,
 	createTask,
 	deleteTask,
@@ -111,6 +121,23 @@ async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {
 		case "read_run_log":
 			return readRunLog(op.runId, op.stream);
 
+		case "get_profile":
+			return getProfile();
+		case "save_profile":
+			return saveProfile(op.profile);
+		case "capabilities":
+			return capabilities();
+		case "add_extension":
+			return addExtension(op.path);
+		case "remove_extension":
+			return removeExtension(op.path);
+		case "install_package":
+			return installPackage(op.source);
+		case "remove_package":
+			return removePackage(op.source);
+		case "extract_document":
+			return extractDocument(op.fileName, op.dataBase64);
+
 		default: {
 			const exhaustive: never = op;
 			throw new Error(`unknown app op: ${JSON.stringify(exhaustive)}`);
@@ -189,6 +216,8 @@ export async function serve(): Promise<void> {
 			case "delete_session":
 				supervisor.delete(request.sessionId);
 				return { ok: true };
+			case "rename_session":
+				return supervisor.rename(request.sessionId, request.name);
 			case "subscribe": {
 				const unsubscribe = supervisor.subscribe(request.sessionId, (sessionId, event) => {
 					connection.pushEvent(sessionId, event);

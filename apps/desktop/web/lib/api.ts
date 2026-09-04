@@ -11,7 +11,9 @@
  */
 
 import type {
+	Capabilities,
 	CreateTaskInput,
+	DocumentText,
 	HealthInfo,
 	MemoryEntry,
 	MemoryScope,
@@ -24,6 +26,7 @@ import type {
 	TaskRunSummary,
 	TaskSummary,
 	TaskWithRuns,
+	UserProfile,
 	WorkspaceSummary,
 } from "@openpi/shared";
 
@@ -73,6 +76,9 @@ export const api = {
 	rpc: <T = unknown>(sessionId: string, command: PiRpcCommand) =>
 		invoke<T>("session_rpc", { sessionId, command }),
 
+	renameSession: (sessionId: string, name: string) =>
+		invoke<SessionInfo>("rename_session", { sessionId, name }),
+
 	// app-level
 	authStatus: () => invoke<{ providers: ProviderStatus[] }>("auth_status"),
 	listModels: () => invoke<{ models: ModelOption[] }>("list_models"),
@@ -92,6 +98,17 @@ export const api = {
 	) => invoke<{ entries: MemoryEntry[] }>("write_memory", { cwd, scope, ...entry }),
 	deleteMemory: (cwd: string, type: string, key: string, scope: MemoryScope = "project") =>
 		invoke<{ entries: MemoryEntry[] }>("delete_memory", { cwd, type, key, scope }),
+
+	// profile, capabilities, documents
+	getProfile: () => invoke<UserProfile>("get_profile"),
+	saveProfile: (profile: UserProfile) => invoke<UserProfile>("save_profile", { profile }),
+	capabilities: () => invoke<Capabilities>("capabilities"),
+	addExtension: (path: string) => invoke<Capabilities>("add_extension", { path }),
+	removeExtension: (path: string) => invoke<Capabilities>("remove_extension", { path }),
+	installPackage: (source: string) => invoke<Capabilities>("install_package", { source }),
+	removePackage: (source: string) => invoke<Capabilities>("remove_package", { source }),
+	extractDocument: (fileName: string, dataBase64: string) =>
+		invoke<DocumentText>("extract_document", { fileName, dataBase64 }),
 
 	// scheduled tasks
 	listTasks: () => invoke<{ tasks: TaskWithRuns[] }>("list_tasks"),

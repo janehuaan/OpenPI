@@ -29,6 +29,16 @@ export {
 } from "./config.ts";
 export { DaemonClient, isDaemonLive } from "./ipc/client.ts";
 export { type Connection, startServer } from "./ipc/server.ts";
+export {
+	addExtension,
+	capabilities,
+	extractDocument,
+	getProfile,
+	installPackage,
+	removeExtension,
+	removePackage,
+	saveProfile,
+} from "./profile-ops.ts";
 export { buildRpcArgs, RpcProcess } from "./rpc-process.ts";
 export {
 	cancelRun,

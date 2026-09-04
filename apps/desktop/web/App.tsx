@@ -12,6 +12,8 @@ import type { SessionMode } from "@openpi/shared";
 import { Chat } from "./components/Chat.tsx";
 import { ContextPanel } from "./components/ContextPanel.tsx";
 import { NewSessionDialog } from "./components/NewSessionDialog.tsx";
+import { CapabilitiesView } from "./components/CapabilitiesView.tsx";
+import { ProfileDialog } from "./components/ProfileDialog.tsx";
 import { ProvidersView } from "./components/ProvidersView.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
@@ -20,18 +22,20 @@ import { UiRequestDialog } from "./components/UiRequestDialog.tsx";
 import { api, isNative } from "./lib/api.ts";
 import { useSessions } from "./hooks/useSessions.ts";
 
-type View = "chat" | "tasks" | "providers";
+type View = "chat" | "tasks" | "providers" | "capabilities";
 
 const VIEWS: Array<{ id: View; label: string }> = [
 	{ id: "chat", label: "Chat" },
 	{ id: "tasks", label: "Tasks" },
 	{ id: "providers", label: "Providers" },
+	{ id: "capabilities", label: "Extensions" },
 ];
 
 export function App() {
 	const sessions = useSessions();
 	const [view, setView] = useState<View>("chat");
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [profileOpen, setProfileOpen] = useState(false);
 	const [restartDeferred, setRestartDeferred] = useState(false);
 
 	useEffect(() => {
@@ -77,7 +81,9 @@ export function App() {
 				}}
 				onStop={(id) => void sessions.stop(id)}
 				onDelete={(id) => void sessions.remove(id)}
+				onRename={(id, name) => void sessions.rename(id, name)}
 				onNew={() => setDialogOpen(true)}
+				onProfile={() => setProfileOpen(true)}
 				views={VIEWS}
 				view={view}
 				onView={setView}
@@ -96,8 +102,10 @@ export function App() {
 					/>
 				) : view === "tasks" ? (
 					<TasksView active={view === "tasks"} />
-				) : (
+				) : view === "providers" ? (
 					<ProvidersView active={view === "providers"} />
+				) : (
+					<CapabilitiesView active={view === "capabilities"} />
 				)}
 			</main>
 
@@ -110,6 +118,8 @@ export function App() {
 			/>
 
 			<NewSessionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onCreate={(input) => void create(input)} />
+
+			<ProfileDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
 
 			{pendingUi ? (
 				<UiRequestDialog

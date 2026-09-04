@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { type Attachment, formatBytes, messageWithAttachments, readAttachment } from "../lib/attachments.ts";
 import type { ChatMessage, TurnState } from "../lib/turn.ts";
 import { Markdown } from "./Markdown.tsx";
 
@@ -12,7 +13,11 @@ interface Props {
 
 export function Chat({ turn, sending, onSend, onAbort, disabled }: Props) {
 	const [draft, setDraft] = useState("");
+	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [dropping, setDropping] = useState(false);
+	const [attachError, setAttachError] = useState<string>();
 	const endRef = useRef<HTMLDivElement>(null);
+	const fileRef = useRef<HTMLInputElement>(null);
 
 	// Follow the tail as text streams in.
 	useEffect(() => {
@@ -21,13 +26,41 @@ export function Chat({ turn, sending, onSend, onAbort, disabled }: Props) {
 
 	const submit = () => {
 		const text = draft.trim();
-		if (!text || disabled) return;
+		if ((!text && attachments.length === 0) || disabled) return;
 		setDraft("");
-		onSend(text);
+		setAttachments([]);
+		setAttachError(undefined);
+		onSend(messageWithAttachments(text, attachments));
+	};
+
+	const attach = async (files: FileList | null) => {
+		if (!files || files.length === 0) return;
+		setAttachError(undefined);
+		for (const file of Array.from(files)) {
+			try {
+				const attachment = await readAttachment(file);
+				setAttachments((current) => [...current.filter((entry) => entry.name !== attachment.name), attachment]);
+			} catch (error) {
+				setAttachError(error instanceof Error ? error.message : String(error));
+			}
+		}
 	};
 
 	return (
-		<section className="chat">
+		<section
+			className={dropping ? "chat dropping" : "chat"}
+			onDragOver={(event) => {
+				if (disabled) return;
+				event.preventDefault();
+				setDropping(true);
+			}}
+			onDragLeave={() => setDropping(false)}
+			onDrop={(event) => {
+				event.preventDefault();
+				setDropping(false);
+				if (!disabled) void attach(event.dataTransfer.files);
+			}}
+		>
 			<div className="transcript">
 				{turn.messages.length === 0 ? (
 					<p className="empty">Send a message to start.</p>
@@ -50,6 +83,27 @@ export function Chat({ turn, sending, onSend, onAbort, disabled }: Props) {
 			</div>
 
 			<footer className="composer">
+				{attachments.length > 0 ? (
+					<div className="attachments">
+						{attachments.map((attachment) => (
+							<span key={attachment.name} className="attachment">
+								{attachment.name}
+								<span className="attachment-size">
+									{formatBytes(attachment.bytes)}
+									{attachment.truncated ? " · truncated" : ""}
+								</span>
+								<button
+									type="button"
+									onClick={() => setAttachments((current) => current.filter((entry) => entry !== attachment))}
+									aria-label={`Remove ${attachment.name}`}
+								>
+									×
+								</button>
+							</span>
+						))}
+					</div>
+				) : null}
+				{attachError ? <p className="error">{attachError}</p> : null}
 				<textarea
 					value={draft}
 					onChange={(event) => setDraft(event.target.value)}
@@ -60,17 +114,37 @@ export function Chat({ turn, sending, onSend, onAbort, disabled }: Props) {
 							submit();
 						}
 					}}
-					placeholder={disabled ? "Select a session first" : "Message…  (Shift+Enter for a newline)"}
+					placeholder={
+						disabled ? "Select a session first" : "Message…  (Shift+Enter for a newline, or drop a file)"
+					}
 					rows={3}
 					disabled={disabled}
 				/>
 				<div className="composer-actions">
+					<input
+						ref={fileRef}
+						type="file"
+						multiple
+						hidden
+						onChange={(event) => {
+							void attach(event.target.files);
+							event.target.value = "";
+						}}
+					/>
+					<button type="button" onClick={() => fileRef.current?.click()} disabled={disabled} title="Attach a file">
+						Attach
+					</button>
 					{turn.active ? (
 						<button type="button" onClick={onAbort}>
 							Stop
 						</button>
 					) : null}
-					<button type="button" className="primary" onClick={submit} disabled={disabled || sending || !draft.trim()}>
+					<button
+						type="button"
+						className="primary"
+						onClick={submit}
+						disabled={disabled || sending || (!draft.trim() && attachments.length === 0)}
+					>
 						{sending ? "Sending…" : "Send"}
 					</button>
 				</div>

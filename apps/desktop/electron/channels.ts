@@ -22,6 +22,7 @@ export const INVOKE_CHANNELS = [
 	"subscribe_session",
 	"unsubscribe_session",
 	"session_rpc",
+	"rename_session",
 	// app-level
 	"auth_status",
 	"list_models",
@@ -42,6 +43,15 @@ export const INVOKE_CHANNELS = [
 	"cancel_run",
 	"step_runs",
 	"read_run_log",
+	// profile, capabilities, documents
+	"get_profile",
+	"save_profile",
+	"capabilities",
+	"add_extension",
+	"remove_extension",
+	"install_package",
+	"remove_package",
+	"extract_document",
 	// native capabilities, the only things that must live in the main process
 	"select_workspace",
 	"open_external",

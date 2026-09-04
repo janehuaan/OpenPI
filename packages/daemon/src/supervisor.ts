@@ -98,6 +98,26 @@ export class Supervisor {
 		process_.stop();
 	}
 
+	/**
+	 * Rename a session.
+	 *
+	 * Updates our record and, when the session is live, tells pi too - upstream
+	 * stores its own session name, and leaving the two to disagree means a resumed
+	 * session shows the old one.
+	 */
+	async rename(sessionId: string, name: string): Promise<SessionInfo> {
+		const record = this.records.get(sessionId);
+		if (!record) throw new Error(`unknown session ${sessionId}`);
+		record.name = name;
+		record.updatedAt = new Date().toISOString();
+		this.saveRecords();
+		const live = this.live.get(sessionId);
+		if (live?.running) {
+			await live.send({ type: "set_session_name", name }).catch(() => undefined);
+		}
+		return { ...record, running: live?.running === true };
+	}
+
 	delete(sessionId: string): void {
 		this.stop(sessionId);
 		this.records.delete(sessionId);

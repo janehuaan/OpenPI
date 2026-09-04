@@ -40,6 +40,29 @@ setup. Editing keys is deliberately absent: they live in the isolated agent dir'
 `models.json`, and a UI writing that file races the sessions reading it, so
 `pi auth` stays the supported path.
 
+**Extensions** — the extensions, skills, prompts and packages every session loads,
+from `settings.json` in the isolated agent dir. Local paths are written directly;
+npm and git sources go through `pi install`, which owns that format. Changes apply
+to new sessions — a running session has already loaded its extensions, and
+upstream exposes no way to reload them mid-turn.
+
+The old desktop read this through four custom pi RPC commands
+(`get_capabilities`, `reload_resources`, `install_package`, `remove_package`) that
+existed only because the fork patched them into upstream. 0.84.4 has none of them;
+`settings.json` plus the CLI is the supported path.
+
+## Attachments
+
+Dropping or picking a file appends its text to the prompt inside an
+`<attachment name="…">` block, rather than sending a provider attachment — that
+works with every model regardless of whether it accepts documents. Extraction runs
+in the daemon; the renderer only ships bytes.
+
+Plain text and `.docx` are supported. `.docx` is unzipped with the system `unzip`
+and its `word/document.xml` stripped of tags — the old desktop pulled in `mammoth`
+for exactly this. **PDF is refused rather than badly supported**: a text layer
+needs a font-aware parser, and a wrong extraction silently feeds the model garbage.
+
 ## Extension prompts
 
 An extension calling `ctx.ui.confirm`/`select`/`input` blocks its agent turn until
@@ -149,4 +172,6 @@ channel contract:
 - **markdown.ts** — an unterminated fence stays code (streamed output is cut
   mid-block), and a `javascript:` or `file:` link stays literal text.
 - **cron.ts** — every field's range, and that no preset uses minute 0.
+- **attachments.ts** — the `<attachment>` wrapper, and that a quote in a filename
+  cannot break out of the attribute.
 - **channels.ts** — no duplicates, and every allowlisted channel has a handler.

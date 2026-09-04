@@ -160,10 +160,18 @@ test("unsubscribing stops delivery", async () => {
 test("a prompt produces the full agent event sequence", async () => {
 	const process_ = spawn();
 	const types: string[] = [];
-	process_.onEvent((event) => types.push(event.type));
+	// The fake emits the sequence synchronously on receiving the prompt, so a
+	// subscription created after the send can miss it entirely. Resolve from the
+	// listener that is already attached.
+	const settled = new Promise<void>((resolve) => {
+		process_.onEvent((event) => {
+			types.push(event.type);
+			if (event.type === "agent_settled") resolve();
+		});
+	});
 
 	await process_.send({ type: "prompt", message: "hello" });
-	await waitForEvent(process_, (event) => event.type === "agent_settled");
+	await settled;
 
 	assert.deepEqual(types, ["ready", "agent_start", "message_end", "agent_end", "agent_settled"]);
 	process_.stop();
