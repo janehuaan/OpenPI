@@ -6,9 +6,11 @@ interface Props {
 	/** Set when the daemon deferred a restart because a session was live. */
 	restartDeferred: boolean;
 	onRestart: () => void;
+	/** Status text extensions set with ctx.ui.setStatus, keyed by extension. */
+	extensionStatus: Record<string, string>;
 }
 
-export function StatusBar({ restartDeferred, onRestart }: Props) {
+export function StatusBar({ restartDeferred, onRestart, extensionStatus }: Props) {
 	const [health, setHealth] = useState<HealthInfo>();
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const [error, setError] = useState<string>();
@@ -56,6 +58,12 @@ export function StatusBar({ restartDeferred, onRestart }: Props) {
 			) : (
 				<span className="status">connecting…</span>
 			)}
+
+			{Object.entries(extensionStatus).map(([key, text]) => (
+				<span key={key} className="status ext" title={key}>
+					{text}
+				</span>
+			))}
 
 			{restartDeferred ? (
 				<span className="status warn">

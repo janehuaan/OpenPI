@@ -28,6 +28,15 @@ var INVOKE_CHANNELS = [
   "read_memory_topic",
   "write_memory",
   "delete_memory",
+  // scheduled tasks
+  "list_tasks",
+  "create_task",
+  "set_task_paused",
+  "delete_task",
+  "run_task",
+  "cancel_run",
+  "step_runs",
+  "read_run_log",
   // native capabilities, the only things that must live in the main process
   "select_workspace",
   "open_external",

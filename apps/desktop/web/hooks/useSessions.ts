@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionInfo, SessionMode } from "@openpi/shared";
 import { api } from "../lib/api.ts";
 import { emptyTurnState, reduceTurn, type TurnState } from "../lib/turn.ts";
+import { parseUiRequest, stripAnsi, type UiRequest, uiResponseCommand } from "../lib/ui-request.ts";
 
 export interface SessionsState {
 	sessions: SessionInfo[];
@@ -19,6 +20,10 @@ export interface SessionsState {
 	loading: boolean;
 	error?: string;
 	sending: boolean;
+	/** Extension prompts awaiting an answer; the agent turn is blocked on the first. */
+	uiRequests: UiRequest[];
+	/** Latest status text per extension key, e.g. a usage meter. */
+	extensionStatus: Record<string, string>;
 }
 
 export function useSessions() {
@@ -27,6 +32,8 @@ export function useSessions() {
 		turn: emptyTurnState(),
 		loading: true,
 		sending: false,
+		uiRequests: [],
+		extensionStatus: {},
 	});
 	// The event handler must see the current selection without being torn down
 	// and re-subscribed on every change.
@@ -47,6 +54,24 @@ export function useSessions() {
 			// Events arrive for every subscribed session; only the visible one
 			// updates the transcript.
 			if (sessionId !== selectedRef.current) return;
+
+			// An extension prompt blocks the agent turn until answered, so it is
+			// surfaced as a dialog rather than folded into the transcript.
+			const parsed = parseUiRequest(event);
+			if (parsed.kind === "request") {
+				setState((current) => ({ ...current, uiRequests: [...current.uiRequests, parsed.request] }));
+				return;
+			}
+			if (parsed.kind === "status") {
+				setState((current) => ({
+					...current,
+					extensionStatus: parsed.status.text
+						? { ...current.extensionStatus, [parsed.status.key]: stripAnsi(parsed.status.text) }
+						: omit(current.extensionStatus, parsed.status.key),
+				}));
+				return;
+			}
+
 			setState((current) => ({ ...current, turn: reduceTurn(current.turn, event) }));
 		});
 		const stopRefresh = api.onRefresh(() => void refresh());
@@ -58,7 +83,14 @@ export function useSessions() {
 
 	const select = useCallback(async (sessionId: string) => {
 		selectedRef.current = sessionId;
-		setState((current) => ({ ...current, selectedId: sessionId, turn: emptyTurnState(), error: undefined }));
+		setState((current) => ({
+			...current,
+			selectedId: sessionId,
+			turn: emptyTurnState(),
+			uiRequests: [],
+			extensionStatus: {},
+			error: undefined,
+		}));
 		try {
 			await api.subscribe(sessionId);
 			// Replay history so a reopened session is not blank. get_messages is an
@@ -130,7 +162,29 @@ export function useSessions() {
 		[refresh],
 	);
 
-	return { ...state, refresh, select, create, send, abort, stop, remove };
+	/**
+	 * Answer an extension prompt. Always sends a reply, including on cancel: the
+	 * turn stays blocked until the subprocess hears something.
+	 */
+	const respondUi = useCallback(
+		async (request: UiRequest, outcome: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
+			const sessionId = selectedRef.current;
+			setState((current) => ({
+				...current,
+				uiRequests: current.uiRequests.filter((pending) => pending.id !== request.id),
+			}));
+			if (!sessionId) return;
+			await api.rpc(sessionId, uiResponseCommand(request, outcome)).catch(() => undefined);
+		},
+		[],
+	);
+
+	return { ...state, refresh, select, create, send, abort, stop, remove, respondUi };
+}
+
+function omit(record: Record<string, string>, key: string): Record<string, string> {
+	const { [key]: _removed, ...rest } = record;
+	return rest;
 }
 
 function describe(error: unknown): string {

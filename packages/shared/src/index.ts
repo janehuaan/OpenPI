@@ -77,7 +77,83 @@ export type AppOp =
 	| { name: "list_memory"; cwd: string; scope?: MemoryScope }
 	| { name: "read_memory_topic"; cwd: string; scope?: MemoryScope; type: string; key: string }
 	| { name: "write_memory"; cwd: string; scope?: MemoryScope; type: string; key: string; value: string; body?: string }
-	| { name: "delete_memory"; cwd: string; scope?: MemoryScope; type: string; key: string };
+	| { name: "delete_memory"; cwd: string; scope?: MemoryScope; type: string; key: string }
+	// Scheduled tasks. The scheduler is its own package but needs a long-lived
+	// process to tick in, so the daemon hosts it and forwards these.
+	| { name: "list_tasks" }
+	| { name: "create_task"; input: CreateTaskInput }
+	| { name: "set_task_paused"; taskId: string; paused: boolean }
+	| { name: "delete_task"; taskId: string }
+	| { name: "run_task"; taskId: string }
+	| { name: "cancel_run"; runId: string }
+	| { name: "step_runs"; runId: string }
+	| { name: "read_run_log"; runId: string; stream: "stdout" | "stderr" };
+
+/**
+ * Task shapes, mirrored from @openpi/scheduler.
+ *
+ * Duplicated rather than imported so the renderer - which must not depend on a
+ * Node package - still gets types. The daemon validates against the real ones.
+ */
+export type TaskSchedule =
+	| { kind: "once"; runAt: string }
+	| { kind: "cron"; expression: string; timezone?: string };
+
+export interface TaskStepInput {
+	id: string;
+	title: string;
+	prompt: string;
+	dependsOn?: string[];
+	tools?: string[];
+}
+
+export interface CreateTaskInput {
+	title: string;
+	prompt: string;
+	cwd?: string;
+	schedule: TaskSchedule;
+	model?: string;
+	tools?: string[];
+	steps?: TaskStepInput[];
+	maxConcurrentSteps?: number;
+	retry?: { maxAttempts: number; backoffMs?: number };
+}
+
+export type TaskStatus = "active" | "paused";
+export type TaskRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+export interface TaskSummary {
+	id: string;
+	title: string;
+	prompt: string;
+	cwd?: string;
+	schedule: TaskSchedule;
+	status: TaskStatus;
+	nextRunAt?: string;
+	createdAt: string;
+	updatedAt: string;
+	model?: string;
+	steps?: TaskStepInput[];
+}
+
+export interface TaskRunSummary {
+	id: string;
+	taskId: string;
+	status: TaskRunStatus;
+	trigger: "manual" | "scheduled" | "retry";
+	createdAt: string;
+	startedAt?: string;
+	finishedAt?: string;
+	exitCode?: number;
+	result?: string;
+	error?: string;
+	attempt?: number;
+}
+
+export interface TaskWithRuns {
+	task: TaskSummary;
+	runs: TaskRunSummary[];
+}
 
 export type MemoryScope = "project" | "global";
 

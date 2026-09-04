@@ -27,7 +27,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // 默认导出工厂函数。ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>
 export default function myExtension(pi: ExtensionAPI) {
-  pi.registerTool({ name, label, description, parameters, execute: async () => ({ output }) });
+  pi.registerTool({
+    name, label, description, parameters,
+    execute: async () => ({ content: [{ type: "text", text: "..." }], details: {} }),
+  });
   pi.on("context", async (event) => ({ messages: [...event.messages, extra] }));
   pi.on("session_start", async (_event, ctx) => { /* ctx 是 handler 第二参,不是 init 参数 */ });
 }
@@ -35,7 +38,10 @@ export default function myExtension(pi: ExtensionAPI) {
 
 踩过的坑:
 - `export const extension = { init, dispose }` **无效** → `Failed to load extension: does not export a valid factory function`
-- 工具定义字段是 `parameters` / `execute → { output }`,不是 `input` / `content`
+- 工具定义字段是 `parameters`,不是 `input`
+- **`execute` 必须返回 `{ content, details }`** —— 返回 `{ output }` 能通过类型检查(签名宽松),
+  但工具结果到模型那里是空的,模型会说"该工具调用没有返回任何输出内容"。这一条是后来接
+  `ctx.ui.confirm` 回路时才发现的,spike 当时没验证工具结果真的到达模型
 - `on("context")` 必须返回**完整**消息数组(`[...event.messages, extra]`),只返回新消息会丢掉历史
 
 ## 运行环境约束(新发现,影响 Phase 1 设计)

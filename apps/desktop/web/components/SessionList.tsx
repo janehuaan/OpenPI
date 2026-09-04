@@ -1,16 +1,29 @@
 import type { SessionInfo } from "@openpi/shared";
 import { basename } from "../lib/paths.ts";
 
-interface Props {
+interface Props<TView extends string> {
 	sessions: SessionInfo[];
 	selectedId?: string;
 	onSelect: (sessionId: string) => void;
 	onStop: (sessionId: string) => void;
 	onDelete: (sessionId: string) => void;
 	onNew: () => void;
+	views: Array<{ id: TView; label: string }>;
+	view: TView;
+	onView: (view: TView) => void;
 }
 
-export function SessionList({ sessions, selectedId, onSelect, onStop, onDelete, onNew }: Props) {
+export function SessionList<TView extends string>({
+	sessions,
+	selectedId,
+	onSelect,
+	onStop,
+	onDelete,
+	onNew,
+	views,
+	view,
+	onView,
+}: Props<TView>) {
 	return (
 		<aside className="sidebar">
 			<header className="sidebar-head">
@@ -19,6 +32,19 @@ export function SessionList({ sessions, selectedId, onSelect, onStop, onDelete, 
 					New
 				</button>
 			</header>
+
+			<nav className="view-tabs">
+				{views.map((entry) => (
+					<button
+						key={entry.id}
+						type="button"
+						className={entry.id === view ? "tab on" : "tab"}
+						onClick={() => onView(entry.id)}
+					>
+						{entry.label}
+					</button>
+				))}
+			</nav>
 
 			{sessions.length === 0 ? (
 				<p className="empty">No sessions yet.</p>

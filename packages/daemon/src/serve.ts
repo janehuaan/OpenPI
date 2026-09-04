@@ -24,6 +24,17 @@ import {
 import { bootstrapCredentials, listProviders } from "./bootstrap.ts";
 import { agentDir, openpiDir, piCliMtimeMs, piRpcEntry, pidPath, socketPath, VERSION } from "./config.ts";
 import { type Connection, startServer } from "./ipc/server.ts";
+import {
+	cancelRun,
+	createTask,
+	deleteTask,
+	listTasks,
+	readRunLog,
+	runTaskNow,
+	setTaskPaused,
+	stepRuns,
+	stopScheduler,
+} from "./scheduler-ops.ts";
 import { isDaemonLive } from "./ipc/client.ts";
 import { Supervisor } from "./supervisor.ts";
 
@@ -82,6 +93,24 @@ async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {
 			};
 		case "delete_memory":
 			return { entries: deleteMemory(op.cwd, op.scope ?? "project", op.type, op.key) };
+
+		case "list_tasks":
+			return { tasks: listTasks() };
+		case "create_task":
+			return createTask(op.input as Parameters<typeof createTask>[0]);
+		case "set_task_paused":
+			return setTaskPaused(op.taskId, op.paused) ?? null;
+		case "delete_task":
+			return { deleted: deleteTask(op.taskId) };
+		case "run_task":
+			return runTaskNow(op.taskId);
+		case "cancel_run":
+			return cancelRun(op.runId) ?? null;
+		case "step_runs":
+			return { stepRuns: stepRuns(op.runId) };
+		case "read_run_log":
+			return readRunLog(op.runId, op.stream);
+
 		default: {
 			const exhaustive: never = op;
 			throw new Error(`unknown app op: ${JSON.stringify(exhaustive)}`);
@@ -119,6 +148,7 @@ export async function serve(): Promise<void> {
 		shuttingDown = true;
 		process.stderr.write(`[daemon] shutting down (${reason})\n`);
 		supervisor.stopAll();
+		stopScheduler();
 		server?.close();
 		if (existsSync(pidPath())) unlinkSync(pidPath());
 		if (existsSync(socketPath())) unlinkSync(socketPath());

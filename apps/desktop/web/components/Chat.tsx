@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, TurnState } from "../lib/turn.ts";
+import { Markdown } from "./Markdown.tsx";
 
 interface Props {
 	turn: TurnState;
@@ -82,8 +83,13 @@ function Message({ message }: { message: ChatMessage }) {
 	return (
 		<article className={`message ${message.role}`}>
 			<header>{message.role === "user" ? "You" : "OpenPI"}</header>
-			{/* Plain text on purpose: rendering model output as HTML would execute it. */}
-			<div className="body">{message.text}</div>
+			{/* The user's own text stays literal; assistant output gets markdown, built
+			    as React elements so it never passes through innerHTML. */}
+			{message.role === "assistant" ? (
+				<Markdown text={message.text} />
+			) : (
+				<div className="body">{message.text}</div>
+			)}
 			{message.tools.length > 0 ? (
 				<div className="tools">
 					{message.tools.map((tool) => (

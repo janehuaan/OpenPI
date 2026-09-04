@@ -25,8 +25,12 @@ export default function spikeExtension(pi: ExtensionAPI) {
 			properties: {},
 			additionalProperties: false,
 		},
+		// AgentToolResult is { content, details }. An `output` field typechecks
+		// loosely but reaches the model as empty content - the model then says the
+		// tool returned nothing.
 		execute: async () => ({
-			output: "pong from openpi-next extension",
+			content: [{ type: "text" as const, text: "pong from openpi-next extension" }],
+			details: {},
 		}),
 	});
 

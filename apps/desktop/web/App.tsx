@@ -1,9 +1,10 @@
 /**
- * App shell: three panes and a status bar.
+ * App shell: a view switcher over three panes, plus the status bar.
  *
- * Composition only. Session state lives in `useSessions`, stream reduction in
- * `lib/turn.ts`, and each pane is presentational — the old App.tsx held ~60
- * useState calls and 1,880 lines, with the surfaces in one 7,180-line file.
+ * Composition only. Session state lives in `useSessions`, tasks in `useTasks`,
+ * stream reduction in `lib/turn.ts`, and each pane is presentational — the old
+ * App.tsx held ~60 `useState` calls in 1,880 lines, with every surface in one
+ * 7,180-line file.
  */
 
 import { useEffect, useState } from "react";
@@ -11,13 +12,25 @@ import type { SessionMode } from "@openpi/shared";
 import { Chat } from "./components/Chat.tsx";
 import { ContextPanel } from "./components/ContextPanel.tsx";
 import { NewSessionDialog } from "./components/NewSessionDialog.tsx";
+import { ProvidersView } from "./components/ProvidersView.tsx";
 import { SessionList } from "./components/SessionList.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
+import { TasksView } from "./components/TasksView.tsx";
+import { UiRequestDialog } from "./components/UiRequestDialog.tsx";
 import { api, isNative } from "./lib/api.ts";
 import { useSessions } from "./hooks/useSessions.ts";
 
+type View = "chat" | "tasks" | "providers";
+
+const VIEWS: Array<{ id: View; label: string }> = [
+	{ id: "chat", label: "Chat" },
+	{ id: "tasks", label: "Tasks" },
+	{ id: "providers", label: "Providers" },
+];
+
 export function App() {
 	const sessions = useSessions();
+	const [view, setView] = useState<View>("chat");
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [restartDeferred, setRestartDeferred] = useState(false);
 
@@ -38,6 +51,9 @@ export function App() {
 	}
 
 	const selected = sessions.sessions.find((session) => session.sessionId === sessions.selectedId);
+	// Only the first prompt matters: the turn is blocked on it, so later ones
+	// cannot have been produced yet.
+	const pendingUi = sessions.uiRequests[0];
 
 	const create = async (input: { cwd: string; mode: SessionMode; model?: string; name?: string }) => {
 		setDialogOpen(false);
@@ -51,32 +67,56 @@ export function App() {
 	};
 
 	return (
-		<div className="app">
+		<div className={view === "chat" ? "app" : "app single"}>
 			<SessionList
 				sessions={sessions.sessions}
 				selectedId={sessions.selectedId}
-				onSelect={(id) => void sessions.select(id)}
+				onSelect={(id) => {
+					setView("chat");
+					void sessions.select(id);
+				}}
 				onStop={(id) => void sessions.stop(id)}
 				onDelete={(id) => void sessions.remove(id)}
 				onNew={() => setDialogOpen(true)}
+				views={VIEWS}
+				view={view}
+				onView={setView}
 			/>
 
 			<main className="main">
 				{sessions.error ? <p className="error banner">{sessions.error}</p> : null}
-				<Chat
-					turn={sessions.turn}
-					sending={sessions.sending}
-					onSend={(message) => void sessions.send(message)}
-					onAbort={() => void sessions.abort()}
-					disabled={!sessions.selectedId}
-				/>
+
+				{view === "chat" ? (
+					<Chat
+						turn={sessions.turn}
+						sending={sessions.sending}
+						onSend={(message) => void sessions.send(message)}
+						onAbort={() => void sessions.abort()}
+						disabled={!sessions.selectedId}
+					/>
+				) : view === "tasks" ? (
+					<TasksView active={view === "tasks"} />
+				) : (
+					<ProvidersView active={view === "providers"} />
+				)}
 			</main>
 
-			<ContextPanel cwd={selected?.cwd} />
+			{view === "chat" ? <ContextPanel cwd={selected?.cwd} /> : null}
 
-			<StatusBar restartDeferred={restartDeferred} onRestart={() => void restart()} />
+			<StatusBar
+				restartDeferred={restartDeferred}
+				onRestart={() => void restart()}
+				extensionStatus={sessions.extensionStatus}
+			/>
 
 			<NewSessionDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onCreate={(input) => void create(input)} />
+
+			{pendingUi ? (
+				<UiRequestDialog
+					request={pendingUi}
+					onRespond={(outcome) => void sessions.respondUi(pendingUi, outcome)}
+				/>
+			) : null}
 		</div>
 	);
 }

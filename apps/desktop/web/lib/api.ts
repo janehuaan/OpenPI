@@ -11,6 +11,7 @@
  */
 
 import type {
+	CreateTaskInput,
 	HealthInfo,
 	MemoryEntry,
 	MemoryScope,
@@ -20,6 +21,9 @@ import type {
 	ProviderStatus,
 	SessionInfo,
 	SessionMode,
+	TaskRunSummary,
+	TaskSummary,
+	TaskWithRuns,
 	WorkspaceSummary,
 } from "@openpi/shared";
 
@@ -88,6 +92,18 @@ export const api = {
 	) => invoke<{ entries: MemoryEntry[] }>("write_memory", { cwd, scope, ...entry }),
 	deleteMemory: (cwd: string, type: string, key: string, scope: MemoryScope = "project") =>
 		invoke<{ entries: MemoryEntry[] }>("delete_memory", { cwd, type, key, scope }),
+
+	// scheduled tasks
+	listTasks: () => invoke<{ tasks: TaskWithRuns[] }>("list_tasks"),
+	createTask: (input: CreateTaskInput) => invoke<TaskSummary>("create_task", { input }),
+	setTaskPaused: (taskId: string, paused: boolean) =>
+		invoke<TaskSummary | null>("set_task_paused", { taskId, paused }),
+	deleteTask: (taskId: string) => invoke<{ deleted: boolean }>("delete_task", { taskId }),
+	runTask: (taskId: string) => invoke<TaskRunSummary>("run_task", { taskId }),
+	cancelRun: (runId: string) => invoke<TaskRunSummary | null>("cancel_run", { runId }),
+	stepRuns: (runId: string) => invoke<{ stepRuns: unknown[] }>("step_runs", { runId }),
+	readRunLog: (runId: string, stream: "stdout" | "stderr" = "stdout") =>
+		invoke<{ text: string; truncated: boolean }>("read_run_log", { runId, stream }),
 
 	// native
 	selectWorkspace: (defaultPath?: string) => invoke<{ cwd?: string }>("select_workspace", { defaultPath }),

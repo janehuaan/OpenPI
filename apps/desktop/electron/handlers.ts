@@ -11,7 +11,14 @@
  */
 
 import { type BrowserWindow, dialog, type IpcMain, shell } from "electron";
-import type { AppOp, ClientRequestInput, MemoryScope, PiRpcCommand, SessionMode } from "@openpi/shared";
+import type {
+	AppOp,
+	ClientRequestInput,
+	CreateTaskInput,
+	MemoryScope,
+	PiRpcCommand,
+	SessionMode,
+} from "@openpi/shared";
 import { INVOKE_CHANNELS, eventChannelName, invokeChannelName, type InvokeChannel } from "./channels.ts";
 import { currentClient, ensureDaemon, onRestartDeferred, restartDaemon, restartIfStale } from "./daemon.ts";
 
@@ -113,6 +120,21 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				scope: asScope(args),
 				type: asString(args, "type"),
 				key: asString(args, "key"),
+			}),
+
+		list_tasks: () => app({ name: "list_tasks" }),
+		create_task: (args) => app({ name: "create_task", input: args.input as CreateTaskInput }),
+		set_task_paused: (args) =>
+			app({ name: "set_task_paused", taskId: asString(args, "taskId"), paused: args.paused === true }),
+		delete_task: (args) => app({ name: "delete_task", taskId: asString(args, "taskId") }),
+		run_task: (args) => app({ name: "run_task", taskId: asString(args, "taskId") }),
+		cancel_run: (args) => app({ name: "cancel_run", runId: asString(args, "runId") }),
+		step_runs: (args) => app({ name: "step_runs", runId: asString(args, "runId") }),
+		read_run_log: (args) =>
+			app({
+				name: "read_run_log",
+				runId: asString(args, "runId"),
+				stream: args.stream === "stderr" ? "stderr" : "stdout",
 			}),
 
 		// Electron-only capabilities.

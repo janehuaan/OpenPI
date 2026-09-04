@@ -10,7 +10,8 @@
     "openpi-daemon": "./src/cli.ts"
   },
   "dependencies": {
-    "@openpi/shared": "*"
+    "@openpi/shared": "*",
+    "@openpi/scheduler": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.84.4"

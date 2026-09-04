@@ -30,5 +30,18 @@ export {
 export { DaemonClient, isDaemonLive } from "./ipc/client.ts";
 export { type Connection, startServer } from "./ipc/server.ts";
 export { buildRpcArgs, RpcProcess } from "./rpc-process.ts";
+export {
+	cancelRun,
+	createTask,
+	deleteTask,
+	ensureScheduler,
+	listTasks,
+	readRunLog,
+	runTaskNow,
+	setTaskPaused,
+	stepRuns,
+	stopScheduler,
+	type TaskWithRuns,
+} from "./scheduler-ops.ts";
 export { serve } from "./serve.ts";
 export { Supervisor } from "./supervisor.ts";
