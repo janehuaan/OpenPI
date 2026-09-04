@@ -73,13 +73,58 @@ Model output renders as text, never HTML. `open_external` accepts http(s) only:
 a `file://` or custom-scheme URL arriving from page content would otherwise be a
 local-execution path.
 
-## Build
+## Build and package
 
 ```bash
-npm run dev -w @openpi/desktop     # vite + electron, Fast Refresh
-npm run build -w @openpi/desktop   # esbuild main/preload + vite renderer
-npm start -w @openpi/desktop       # run the production build
+npm run dev -w @openpi/desktop           # vite + electron, Fast Refresh
+npm run build -w @openpi/desktop         # esbuild main/preload + vite renderer
+npm run build:runtime -w @openpi/desktop # stage runtime/ (daemon + extensions + pi)
+npm run pack:dir -w @openpi/desktop      # unpacked .app, for testing
+npm run pack:mac -w @openpi/desktop      # dmg + dir, arm64 and x64
+npm run install:local -w @openpi/desktop # pack, then install into /Applications
 ```
+
+### What ships
+
+`runtime/` is staged by `scripts/build-runtime.mjs` and copied into
+`Contents/Resources/openpi` by `scripts/after-pack.mjs`:
+
+| path | contents |
+|---|---|
+| `daemon.js` | the daemon, bundled — pulls in `@openpi/shared` and `@openpi/scheduler` |
+| `extensions/*.js` | one bundle per extension entry |
+| `node_modules/@earendil-works/pi-coding-agent/dist/` | the pinned pi |
+| `node_modules/jiti/` | pi's extension loader |
+
+**20 MB, and a 285 MB .app — against the old desktop's 190 MB runtime and 734 MB
+.app.** 264 MB of what remains is Electron itself.
+
+Three things had to be measured rather than assumed:
+
+- **pi ships as `dist/` only, not the whole package.** Its `node_modules` is
+  118 MB of provider SDKs that `dist/bundle/` already inlines. Verified by running
+  the RPC entry from a copy with no `node_modules` at all.
+- **`dist/bundle/` alone is not enough.** The bundle reads theme JSON at
+  `chunks/dist/modes/interactive/theme/dark.json`, so the `dist/` layout has to be
+  preserved. A bundle-only copy crashes on startup with ENOENT.
+- **`jiti` is required even for pre-bundled extensions.** pi loads any extension
+  file through it, so without it every extension fails with
+  "Cannot find module 'jiti'" — including a single-file esbuild bundle.
+
+### Deliberately not carried over
+
+The old pipeline ran `npm pack` on five workspace packages into a temp directory
+and `npm install`ed the tarballs, which wrote `file:/var/folders/...` paths into a
+**tracked** `runtime/package.json` and then deleted that temp directory — leaving
+a committed file that could never be reinstalled, and a diff on every build. Its
+`after-pack.cjs` was 291 lines pruning nine npm packages, 33 dylibs, Electron
+locales and GPU libraries back out, and carried two bugs while doing it:
+`pruneEmbeddingDylibs` was defined twice so the first never ran, and
+`copyPiStorageBinary` / `copyRustBinary` were never called at all — which is why
+the Rust binaries that fork built never actually shipped.
+
+Staging only what is needed means there is nothing to prune. `runtime/`, `dist/`,
+`dist-electron/` and `release/` are all gitignored.
 
 The main process is bundled with esbuild rather than emitted by `tsc`: it imports
 `@openpi/daemon`, a workspace package whose entry is TypeScript, and bundling

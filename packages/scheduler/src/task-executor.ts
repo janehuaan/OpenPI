@@ -44,9 +44,12 @@ function resolvePiEntry(): string {
 	if (configured) return resolve(configured);
 
 	const here = dirname(fileURLToPath(import.meta.url));
+	const entry = "@earendil-works/pi-coding-agent/dist/bundle/cli.js";
 	const candidates = [
-		join(here, "../../../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
-		join(here, "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
+		join(here, "../../../node_modules", entry),
+		// packaged: the daemon bundle (which embeds this) sits beside node_modules
+		join(here, "node_modules", entry),
+		join(here, "../node_modules", entry),
 	];
 	const found = candidates.find(existsSync);
 	if (found) return found;

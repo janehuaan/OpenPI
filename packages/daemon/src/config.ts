@@ -57,11 +57,14 @@ export function piRpcEntry(): string {
 	if (override) return override;
 
 	const here = dirname(fileURLToPath(import.meta.url));
+	const entry = "@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js";
 	const candidates = [
-		// workspace install: packages/daemon/src -> repo root node_modules
-		join(here, "../../../node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js"),
+		// dev, from source: packages/daemon/src -> repo root node_modules
+		join(here, "../../../node_modules", entry),
+		// packaged: the daemon bundle sits at the runtime root, beside node_modules
+		join(here, "node_modules", entry),
 		// package-local install
-		join(here, "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js"),
+		join(here, "../node_modules", entry),
 	];
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) return candidate;
@@ -81,9 +84,11 @@ export function piCli(): string {
 	if (override) return override;
 
 	const here = dirname(fileURLToPath(import.meta.url));
+	const entry = "@earendil-works/pi-coding-agent/dist/bundle/cli.js";
 	const candidates = [
-		join(here, "../../../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
-		join(here, "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
+		join(here, "../../../node_modules", entry),
+		join(here, "node_modules", entry),
+		join(here, "../node_modules", entry),
 	];
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) return candidate;

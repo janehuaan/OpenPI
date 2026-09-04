@@ -13,7 +13,11 @@
     "build": "npm run build:electron && npm run build:web",
     "start": "npm run build && OPENPI_DESKTOP_PROD=1 electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "pack:dir": "npm run build && npm run build:runtime && electron-builder --dir",
+    "pack:mac": "npm run build && npm run build:runtime && electron-builder --mac",
+    "install:local": "npm run pack:mac && node scripts/install-local.mjs"
   },
   "dependencies": {
     "@openpi/shared": "*"
@@ -29,6 +33,7 @@
     "react-dom": "19.2.0",
     "vite": "7.1.9",
     "vitest": "3.2.4",
-    "wait-on": "9.0.1"
+    "wait-on": "9.0.1",
+    "electron-builder": "26.0.12"
   }
 }

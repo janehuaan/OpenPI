@@ -1,0 +1,49 @@
+appId: works.earendil.openpi
+productName: OpenPI
+
+directories:
+  output: release
+  buildResources: build
+
+# The renderer bundle, the compiled main process, and package.json. The runtime
+# is copied in afterPack instead: electron-builder ignores `**/node_modules` by
+# default, and runtime/ deliberately contains one.
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+extraMetadata:
+  main: dist-electron/main.js
+
+afterPack: scripts/after-pack.mjs
+
+mac:
+  category: public.app-category.developer-tools
+  darkModeSupport: true
+  # Both architectures. The old desktop shipped x64 only, so every Apple Silicon
+  # machine ran the whole app under Rosetta.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: dir
+      arch:
+        - arm64
+        - x64
+  # Unsigned: there is no Developer ID for this build. `xattr -cr` in
+  # scripts/install-local.mjs clears the quarantine flag for local installs.
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+dmg:
+  title: OpenPI
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

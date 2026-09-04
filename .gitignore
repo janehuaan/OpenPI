@@ -4,9 +4,14 @@ release/
 *.log
 .DS_Store
 
-# Electron runtime bundle is a build product - never commit it (the old repo
-# tracked runtime/package.json and it accumulated dead file:/var/folders paths).
+# Electron runtime bundle and packaged output are build products. The old repo
+# tracked runtime/package.json, which accumulated dead file:/var/folders paths
+# from its npm-pack staging and produced a diff on every build.
 runtime/
+apps/desktop/runtime/
+apps/desktop/dist/
+apps/desktop/dist-electron/
+apps/desktop/release/
 .DS_Store
 spike/agent-dir/
 spike/agent-dir/auth.json

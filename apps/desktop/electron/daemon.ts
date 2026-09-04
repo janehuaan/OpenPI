@@ -26,10 +26,12 @@ function daemonCli(): string {
 
 	const here = dirname(fileURLToPath(import.meta.url));
 	const candidates = [
-		// dev: apps/desktop/dist-electron -> repo root
+		// packaged: Resources/openpi/daemon.js, a bundle beside its node_modules
+		join(process.resourcesPath ?? "", "openpi/daemon.js"),
+		// staged but unpackaged, e.g. after `npm run build:runtime`
+		join(here, "../runtime/daemon.js"),
+		// dev, from source
 		join(here, "../../../packages/daemon/src/cli.ts"),
-		// packaged: resources/openpi/packages/daemon/src/cli.ts
-		join(process.resourcesPath ?? "", "openpi/packages/daemon/src/cli.ts"),
 	];
 	const found = candidates.find(existsSync);
 	if (found) return found;
@@ -63,10 +65,14 @@ export function currentClient(): DaemonClient | undefined {
 
 function spawnDaemon(): void {
 	// process.execPath is the Electron binary; ELECTRON_RUN_AS_NODE makes it behave
-	// as plain Node so no separate runtime has to be shipped. The daemon entry is
-	// TypeScript, hence the strip-types flag - Electron 38 bundles Node 22, which
-	// supports it.
-	const child = spawn(process.execPath, ["--experimental-strip-types", daemonCli(), "serve"], {
+	// as plain Node, so no second runtime has to be shipped. A packaged daemon is a
+	// plain-JS bundle; only the dev path needs TS stripping, which Electron 38's
+	// Node 22 supports.
+	const entry = daemonCli();
+	const args = entry.endsWith(".ts")
+		? ["--experimental-strip-types", entry, "serve"]
+		: [entry, "serve"];
+	const child = spawn(process.execPath, args, {
 		detached: true,
 		stdio: "ignore",
 		env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
