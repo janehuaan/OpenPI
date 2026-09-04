@@ -124,11 +124,28 @@ function createWindow(): void {
 		return { action: "deny" };
 	});
 
+	// Surface renderer failures in the terminal. A blank window with a silent main
+	// process is otherwise indistinguishable from a load that simply never
+	// happened - which is exactly how a bad asset path presents.
+	window.webContents.on("did-fail-load", (_event, code, description, url) => {
+		process.stderr.write(`[renderer] load failed ${code} ${description} ${url}\n`);
+	});
+	window.webContents.on("console-message", (_event, level, message, line, source) => {
+		if (level >= 2) process.stderr.write(`[renderer] ${message} (${source}:${line})\n`);
+	});
+	window.webContents.on("render-process-gone", (_event, details) => {
+		process.stderr.write(`[renderer] gone: ${details.reason}\n`);
+	});
+
 	if (isDev) {
 		void window.loadURL(DEV_URL);
 		window.webContents.openDevTools({ mode: "detach" });
 	} else {
-		void window.loadFile(join(here, "../dist/index.html"));
+		const index = join(here, "../dist/index.html");
+		if (!existsSync(index)) {
+			process.stderr.write(`[main] missing ${index} - run \`npm run build:web\`\n`);
+		}
+		void window.loadFile(index);
 	}
 }
 
