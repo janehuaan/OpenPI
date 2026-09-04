@@ -73,6 +73,28 @@ export function piRpcEntry(): string {
 }
 
 /**
+ * Resolve the pi CLI entry (not the RPC one) for app-level subcommands like
+ * `pi auth`. Same pinned install, different entry point.
+ */
+export function piCli(): string {
+	const override = process.env.OPENPI_PI_CLI;
+	if (override) return override;
+
+	const here = dirname(fileURLToPath(import.meta.url));
+	const candidates = [
+		join(here, "../../../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
+		join(here, "../node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
+	];
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) return candidate;
+	}
+	throw new Error(
+		`pi CLI not found. Looked in:\n  ${candidates.join("\n  ")}\n` +
+			"Run `npm install` at the repo root, or set OPENPI_PI_CLI.",
+	);
+}
+
+/**
  * mtime of the pi entry, reported in health so a client can tell the daemon is
  * running older code than what is now on disk. The old OpenPI compared this to
  * decide when to restart the daemon after a rebuild; keeping the signal here

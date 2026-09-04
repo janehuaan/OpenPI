@@ -60,10 +60,56 @@ export type ClientRequest =
 	/** App-level operations that never reach a session (models, auth, packages). */
 	| { id: string; type: "app"; op: AppOp };
 
+/**
+ * App-level operations: not tied to a session, handled by the daemon directly.
+ *
+ * These are what the old fork needed 8 of its 12 custom pi RPC commands for.
+ * They never belonged in the session protocol - a model catalog or a provider
+ * login has nothing to do with a conversation.
+ */
 export type AppOp =
 	| { name: "list_models" }
 	| { name: "auth_status" }
-	| { name: "import_global_credentials" };
+	| { name: "import_global_credentials" }
+	| { name: "default_workspace" }
+	| { name: "recent_workspaces" }
+	| { name: "workspace_summary"; cwd: string }
+	| { name: "list_memory"; cwd: string; scope?: MemoryScope }
+	| { name: "read_memory_topic"; cwd: string; scope?: MemoryScope; type: string; key: string }
+	| { name: "write_memory"; cwd: string; scope?: MemoryScope; type: string; key: string; value: string; body?: string }
+	| { name: "delete_memory"; cwd: string; scope?: MemoryScope; type: string; key: string };
+
+export type MemoryScope = "project" | "global";
+
+export interface MemoryEntry {
+	type: string;
+	key: string;
+	value: string;
+}
+
+export interface WorkspaceSummary {
+	cwd: string;
+	exists: boolean;
+	isGitRepo: boolean;
+	branch?: string;
+	fileCount: number;
+	hasMemory: boolean;
+	memoryCount: number;
+}
+
+export interface ProviderStatus {
+	provider: string;
+	configured: boolean;
+	baseUrl?: string;
+	modelCount: number;
+}
+
+export interface ModelOption {
+	provider: string;
+	modelId: string;
+	/** `provider/modelId`, the form the CLI's --model flag needs. */
+	ref: string;
+}
 
 /** Responses and pushed events: daemon -> desktop. */
 export type ServerMessage =

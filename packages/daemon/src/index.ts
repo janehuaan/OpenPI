@@ -1,9 +1,27 @@
+export {
+	defaultWorkspace,
+	deleteMemory,
+	listMemory,
+	type MemoryEntry,
+	modelCatalog,
+	type ModelOption,
+	parseMemoryIndex,
+	providerStatus,
+	type ProviderStatus,
+	readMemoryTopic,
+	recentWorkspaces,
+	runPiCommand,
+	workspaceSummary,
+	type WorkspaceSummary,
+	writeMemory,
+} from "./app-ops.ts";
 export { bootstrapCredentials, listProviders, type BootstrapResult } from "./bootstrap.ts";
 export {
 	agentDir,
 	globalAgentDir,
 	openpiDir,
 	piCliMtimeMs,
+	piCli,
 	piRpcEntry,
 	sessionsDir,
 	socketPath,

@@ -10,6 +10,17 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import type { Server } from "node:net";
 import type { AppOp, ClientRequest, HealthInfo } from "@openpi/shared";
+import {
+	defaultWorkspace,
+	deleteMemory,
+	listMemory,
+	modelCatalog,
+	providerStatus,
+	readMemoryTopic,
+	recentWorkspaces,
+	workspaceSummary,
+	writeMemory,
+} from "./app-ops.ts";
 import { bootstrapCredentials, listProviders } from "./bootstrap.ts";
 import { agentDir, openpiDir, piCliMtimeMs, piRpcEntry, pidPath, socketPath, VERSION } from "./config.ts";
 import { type Connection, startServer } from "./ipc/server.ts";
@@ -42,16 +53,35 @@ function reapStaleDaemon(): void {
 	if (existsSync(path)) unlinkSync(path);
 }
 
-async function handleApp(op: AppOp): Promise<unknown> {
+async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {
 	switch (op.name) {
 		case "list_models":
-			return { providers: listProviders(agentDir()) };
-		case "auth_status": {
-			const providers = listProviders(agentDir());
-			return { configured: providers.length > 0, providers };
-		}
+			return { models: modelCatalog() };
+		case "auth_status":
+			return { providers: providerStatus() };
 		case "import_global_credentials":
 			return bootstrapCredentials({ force: true });
+		case "default_workspace":
+			return { cwd: defaultWorkspace() };
+		case "recent_workspaces":
+			return { cwds: recentWorkspaces(supervisor.list().map((session) => session.cwd)) };
+		case "workspace_summary":
+			return workspaceSummary(op.cwd);
+		case "list_memory":
+			return { entries: listMemory(op.cwd, op.scope ?? "project") };
+		case "read_memory_topic":
+			return { body: readMemoryTopic(op.cwd, op.scope ?? "project", op.type, op.key) };
+		case "write_memory":
+			return {
+				entries: writeMemory(op.cwd, op.scope ?? "project", {
+					type: op.type,
+					key: op.key,
+					value: op.value,
+					body: op.body,
+				}),
+			};
+		case "delete_memory":
+			return { entries: deleteMemory(op.cwd, op.scope ?? "project", op.type, op.key) };
 		default: {
 			const exhaustive: never = op;
 			throw new Error(`unknown app op: ${JSON.stringify(exhaustive)}`);
@@ -143,7 +173,7 @@ export async function serve(): Promise<void> {
 			case "rpc":
 				return supervisor.rpc(request.sessionId, request.command);
 			case "app":
-				return handleApp(request.op);
+				return handleApp(request.op, supervisor);
 			default: {
 				const exhaustive: never = request;
 				throw new Error(`unknown request: ${JSON.stringify(exhaustive)}`);
