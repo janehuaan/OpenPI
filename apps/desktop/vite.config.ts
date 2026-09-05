@@ -12,5 +12,5 @@ export default defineConfig({
 	// Refresh update.
 	plugins: [react()],
 	build: { outDir: "../dist", emptyOutDir: true },
-	server: { port: 5179, strictPort: true },
+	server: { host: "127.0.0.1", port: 5179, strictPort: true },
 });
