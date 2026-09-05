@@ -152,6 +152,99 @@ async function getAvailableModelsHelper(client: any, instanceId?: string) {
 	return out;
 }
 
+async function getConversationCapabilitiesHelper(instanceId?: string) {
+	let commands: any[] = [];
+	const client = await ensureDaemon();
+	if (instanceId) {
+		try {
+			const res = (await client.request({
+				type: "rpc",
+				sessionId: instanceId,
+				command: { type: "get_commands" },
+			})) as any;
+			commands = Array.isArray(res?.commands) ? res.commands : [];
+		} catch {}
+	}
+
+	const res = (await client.request({ type: "app", op: { name: "capabilities" } })) as any;
+	const entries = Array.isArray(res?.entries) ? res.entries : [];
+
+	const packages = entries
+		.filter((e: any) => e.kind === "package")
+		.map((e: any) => ({
+			source: e.source,
+			scope: "user",
+			filtered: false,
+			installedPath: e.resolved,
+		}));
+
+	const skills = commands
+		.filter((c: any) => c.source === "skill" || c.name?.startsWith("skill:"))
+		.map((c: any) => ({
+			name: c.name.replace(/^skill:/, ""),
+			description: c.description || "",
+			filePath: c.path || "",
+			disableModelInvocation: false,
+			sourceInfo: {
+				path: c.path || "",
+				source: c.name,
+				scope: "user",
+				origin: "top-level",
+			},
+		}));
+
+	const extensions = entries
+		.filter((e: any) => e.kind === "extension")
+		.map((e: any) => ({
+			path: e.resolved || e.source,
+			commands: [],
+			tools: [],
+			sourceInfo: {
+				path: e.resolved || e.source,
+				source: e.source,
+				scope: "user",
+				origin: "top-level",
+			},
+		}));
+
+	const tools = [
+		{ name: "read", description: "读取文件内容", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "bash", description: "执行命令", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "edit", description: "修改文件", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "write", description: "写入文件", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "grep", description: "搜索内容", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "find", description: "查找文件", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "ls", description: "列出目录", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "task", description: "任务状态追踪", active: true, sourceInfo: { path: "extension", source: "session-state", scope: "user", origin: "top-level" } },
+		{ name: "memory", description: "长期记忆管理", active: true, sourceInfo: { path: "extension", source: "memory", scope: "user", origin: "top-level" } },
+		{ name: "web_search", description: "网络搜索", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "web_fetch", description: "网页内容提取", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "code_search", description: "代码检索", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "kb_scan", description: "知识库扫描与索引", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "kb_query", description: "知识库查询", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "monitor", description: "RSS/网页更新监控", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "browser", description: "无头浏览器 CDP 操作", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+		{ name: "github", description: "GitHub 操作与检查", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
+	];
+
+	return {
+		skills,
+		extensions,
+		tools,
+		packages,
+		diagnostics: [],
+		mcp: {
+			configured: false,
+			loaded: false,
+			packageSources: [],
+			extensionPaths: [],
+			commands: [],
+			tools: [],
+			servers: [],
+		},
+	};
+}
+
 export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindow | undefined): void {
 	const send = (channel: "conversation-event" | "refresh-data" | "daemon-restart-deferred", payload?: unknown) => {
 		const win = getWindow();
@@ -474,46 +567,22 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			};
 		},
 
-		get_conversation_capabilities: async () => {
-			const res = (await app({ name: "capabilities" })) as any;
-			return {
-				packages: res?.entries ?? [],
-				skills: [],
-				extensions: [],
-				prompts: [],
-			};
+		get_conversation_capabilities: async ({ instanceId }: any = {}) => {
+			return getConversationCapabilitiesHelper(instanceId);
 		},
 
-		reload_conversation_capabilities: async () => {
-			const res = (await app({ name: "capabilities" })) as any;
-			return {
-				packages: res?.entries ?? [],
-				skills: [],
-				extensions: [],
-				prompts: [],
-			};
+		reload_conversation_capabilities: async ({ instanceId }: any = {}) => {
+			return getConversationCapabilitiesHelper(instanceId);
 		},
 
-		install_conversation_package: async ({ source }: { source: string }) => {
+		install_conversation_package: async ({ source, instanceId }: any) => {
 			await app({ name: "install_package", source });
-			const res = (await app({ name: "capabilities" })) as any;
-			return {
-				packages: res?.entries ?? [],
-				skills: [],
-				extensions: [],
-				prompts: [],
-			};
+			return getConversationCapabilitiesHelper(instanceId);
 		},
 
-		remove_conversation_package: async ({ source }: { source: string }) => {
+		remove_conversation_package: async ({ source, instanceId }: any) => {
 			await app({ name: "remove_package", source });
-			const res = (await app({ name: "capabilities" })) as any;
-			return {
-				packages: res?.entries ?? [],
-				skills: [],
-				extensions: [],
-				prompts: [],
-			};
+			return getConversationCapabilitiesHelper(instanceId);
 		},
 
 		get_conversation_commands: async ({ instanceId }: { instanceId: string }) => {

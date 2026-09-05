@@ -4682,7 +4682,7 @@ export function ContextPanel({
 	const changeEntries = extractChangeSnippets(conversation?.messages);
 	const fileCount = fileEntries.length;
 	const changeCount = changeEntries.length;
-	const activeTools = capabilities?.tools.filter((tool) => tool.active).slice(0, 5) ?? [];
+	const activeTools = (capabilities?.tools ?? []).filter((tool) => tool.active).slice(0, 5);
 
 	return (
 		<aside className="context-panel">
@@ -5786,6 +5786,23 @@ export function CapabilitiesSurface({
 	const [marketQuery, setMarketQuery] = useState("");
 	const [modelProviderCount, setModelProviderCount] = useState(0);
 
+	const safeCaps: ConversationCapabilities = useMemo(() => ({
+		skills: capabilities?.skills ?? [],
+		extensions: capabilities?.extensions ?? [],
+		tools: capabilities?.tools ?? [],
+		packages: capabilities?.packages ?? [],
+		diagnostics: capabilities?.diagnostics ?? [],
+		mcp: {
+			configured: Boolean(capabilities?.mcp?.configured),
+			loaded: Boolean(capabilities?.mcp?.loaded),
+			packageSources: capabilities?.mcp?.packageSources ?? [],
+			extensionPaths: capabilities?.mcp?.extensionPaths ?? [],
+			commands: capabilities?.mcp?.commands ?? [],
+			tools: capabilities?.mcp?.tools ?? [],
+			servers: capabilities?.mcp?.servers ?? [],
+		},
+	}), [capabilities]);
+
 	// Load model provider count for tab badge
 	useEffect(() => {
 		desktopApi
@@ -5798,7 +5815,7 @@ export function CapabilitiesSurface({
 			});
 	}, [tab]);
 	const mcpPackages =
-		capabilities?.packages.filter((entry) => capabilities.mcp.packageSources.includes(entry.source)) ?? [];
+		safeCaps.packages.filter((entry) => safeCaps.mcp.packageSources.includes(entry.source)) ?? [];
 	const mutationDisabled = !conversation || conversation.state.isStreaming || loading || Boolean(busy);
 	const normalizedMarketQuery = marketQuery.trim().toLowerCase();
 	const marketplacePackages = MARKETPLACE_PACKAGES.filter((marketPackage) => {
@@ -5818,7 +5835,7 @@ export function CapabilitiesSurface({
 			? `git:github.com/${marketPackage.packageName}`
 			: `npm:${marketPackage.packageName}`;
 		return (
-			capabilities?.packages.some(
+			safeCaps.packages.some(
 				(entry) => entry.source === sourceIdentity || entry.source.startsWith(`${sourceIdentity}@`),
 			) ?? false
 		);
@@ -5842,35 +5859,35 @@ export function CapabilitiesSurface({
 			id: "skills",
 			label: "技能",
 			description: "当前会话可调用的能力",
-			count: capabilities?.skills.length ?? 0,
+			count: safeCaps.skills.length ?? 0,
 			icon: BookOpen,
 		},
 		{
 			id: "mcp",
 			label: "MCP",
 			description: "外部服务与工具连接",
-			count: capabilities?.mcp.tools.length ?? 0,
+			count: safeCaps.mcp.tools.length ?? 0,
 			icon: Cable,
 		},
 		{
 			id: "extensions",
 			label: "扩展",
 			description: "已加载的本地扩展",
-			count: capabilities?.extensions.length ?? 0,
+			count: safeCaps.extensions.length ?? 0,
 			icon: Blocks,
 		},
 		{
 			id: "tools",
 			label: "工具",
 			description: "当前会话已注册的工具",
-			count: capabilities?.tools.length ?? 0,
+			count: safeCaps.tools.length ?? 0,
 			icon: Wrench,
 		},
 		{
 			id: "packages",
 			label: "已安装包",
 			description: "项目与用户级依赖",
-			count: capabilities?.packages.length ?? 0,
+			count: safeCaps.packages.length ?? 0,
 			icon: Package,
 		},
 	];
@@ -5939,16 +5956,16 @@ export function CapabilitiesSurface({
 							<strong>还没有选中对话</strong>
 							<span>能力（技能、MCP、工具）挂在具体会话上。左侧新建或点开一个对话即可管理。</span>
 						</div>
-					) : loading && !capabilities ? (
+					) : loading && !safeCaps ? (
 						<div className="product-empty">
 							<RefreshCw size={24} className="spin" />
 							<strong>加载能力中…</strong>
 						</div>
-					) : capabilities ? (
+					) : safeCaps ? (
 						<>
-							{capabilities.diagnostics.length > 0 && (
+							{safeCaps.diagnostics.length > 0 && (
 								<div className="capability-diagnostics">
-									{capabilities.diagnostics.map((diagnostic, index) => (
+									{safeCaps.diagnostics.map((diagnostic, index) => (
 										<div
 											className={diagnostic.type}
 											key={`${diagnostic.path ?? diagnostic.message}-${index}`}
@@ -5981,7 +5998,7 @@ export function CapabilitiesSurface({
 										</div>
 										<div className="settings-market-summary">
 											<span>
-												<strong>{capabilities.packages.length}</strong>
+												<strong>{safeCaps.packages.length}</strong>
 												已安装
 											</span>
 											<span>
@@ -6112,7 +6129,7 @@ export function CapabilitiesSurface({
 										</button>
 									</section>
 									<div className="capability-list">
-										{capabilities.skills.map((skill) => (
+										{safeCaps.skills.map((skill) => (
 											<article className="capability-row" key={skill.filePath}>
 												<span className="capability-icon skill">
 													<BookOpen size={17} />
@@ -6133,7 +6150,7 @@ export function CapabilitiesSurface({
 												</button>
 											</article>
 										))}
-										{capabilities.skills.length === 0 && (
+										{safeCaps.skills.length === 0 && (
 											<div className="capability-empty">
 												<BookOpen size={25} />
 												<strong>还没有技能</strong>
@@ -6146,21 +6163,21 @@ export function CapabilitiesSurface({
 							{tab === "mcp" && (
 								<div className="mcp-workspace">
 									<section className="mcp-status-band">
-										<span className={`capability-icon mcp ${capabilities.mcp.loaded ? "online" : ""}`}>
+										<span className={`capability-icon mcp ${safeCaps.mcp.loaded ? "online" : ""}`}>
 											<Cable size={19} />
 										</span>
 										<div>
 											<strong>Pi MCP Adapter</strong>
 											<span>
-												{capabilities.mcp.loaded
+												{safeCaps.mcp.loaded
 													? "Loaded"
-													: capabilities.mcp.configured
+													: safeCaps.mcp.configured
 														? "Configured"
 														: "Not installed"}
 											</span>
 										</div>
 										<div className="capability-actions">
-											{capabilities.mcp.loaded && (
+											{safeCaps.mcp.loaded && (
 												<button
 													className="button"
 													disabled={conversation.state.isStreaming}
@@ -6180,7 +6197,7 @@ export function CapabilitiesSurface({
 											>
 												<Store size={14} /> MCP 市场
 											</button>
-											{!capabilities.mcp.configured && (
+											{!safeCaps.mcp.configured && (
 												<button
 													className="button primary"
 													disabled={mutationDisabled}
@@ -6218,24 +6235,24 @@ export function CapabilitiesSurface({
 									<div className="capability-metrics">
 										<div>
 											<span>Packages</span>
-											<strong>{capabilities.mcp.packageSources.length}</strong>
+											<strong>{safeCaps.mcp.packageSources.length}</strong>
 										</div>
 										<div>
 											<span>Extensions</span>
-											<strong>{capabilities.mcp.extensionPaths.length}</strong>
+											<strong>{safeCaps.mcp.extensionPaths.length}</strong>
 										</div>
 										<div>
 											<span>Commands</span>
-											<strong>{capabilities.mcp.commands.length}</strong>
+											<strong>{safeCaps.mcp.commands.length}</strong>
 										</div>
 										<div>
 											<span>Tools</span>
-											<strong>{capabilities.mcp.tools.length}</strong>
+											<strong>{safeCaps.mcp.tools.length}</strong>
 										</div>
 									</div>
-									{(capabilities.mcp.servers?.length ?? 0) > 0 && (
+									{(safeCaps.mcp.servers?.length ?? 0) > 0 && (
 										<div className="capability-list compact">
-											{capabilities.mcp.servers?.map((server) => (
+											{safeCaps.mcp.servers?.map((server) => (
 												<div className="capability-row" key={server?.name ?? "unknown"}>
 													<span
 														className={`capability-icon mcp ${
@@ -6259,9 +6276,9 @@ export function CapabilitiesSurface({
 											))}
 										</div>
 									)}
-									{capabilities.mcp.tools.length > 0 && (
+									{safeCaps.mcp.tools.length > 0 && (
 										<div className="capability-list compact">
-											{capabilities.mcp.tools.map((tool) => (
+											{safeCaps.mcp.tools.map((tool) => (
 												<div className="capability-row" key={tool}>
 													<span className="capability-icon tool">
 														<Wrench size={16} />
@@ -6280,7 +6297,7 @@ export function CapabilitiesSurface({
 
 							{tab === "extensions" && (
 								<div className="capability-list">
-									{capabilities.extensions.map((extension) => (
+									{safeCaps.extensions.map((extension) => (
 										<article className="capability-row" key={extension.path}>
 											<span className="capability-icon extension">
 												<Blocks size={17} />
@@ -6297,7 +6314,7 @@ export function CapabilitiesSurface({
 											</div>
 										</article>
 									))}
-									{capabilities.extensions.length === 0 && (
+									{safeCaps.extensions.length === 0 && (
 										<div className="capability-empty">
 											<Blocks size={25} />
 											<strong>还没有扩展</strong>
@@ -6308,7 +6325,7 @@ export function CapabilitiesSurface({
 
 							{tab === "tools" && (
 								<div className="capability-list compact">
-									{capabilities.tools.map((tool) => (
+									{safeCaps.tools.map((tool) => (
 										<article className="capability-row" key={`${tool.sourceInfo.path}:${tool.name}`}>
 											<span className="capability-icon tool">
 												<Wrench size={16} />
@@ -6330,7 +6347,7 @@ export function CapabilitiesSurface({
 
 							{tab === "packages" && (
 								<div className="capability-list compact">
-									{capabilities.packages.map((entry) => (
+									{safeCaps.packages.map((entry) => (
 										<article className="capability-row" key={`${entry.scope}:${entry.source}`}>
 											<span className="capability-icon package">
 												<Package size={17} />
@@ -6345,7 +6362,7 @@ export function CapabilitiesSurface({
 											</div>
 										</article>
 									))}
-									{capabilities.packages.length === 0 && (
+									{safeCaps.packages.length === 0 && (
 										<div className="capability-empty">
 											<Package size={25} />
 											<strong>还没有配置包</strong>
