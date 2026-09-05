@@ -129,6 +129,13 @@ function createWindow(): void {
 	// happened - which is exactly how a bad asset path presents.
 	window.webContents.on("did-fail-load", (_event, code, description, url) => {
 		process.stderr.write(`[renderer] load failed ${code} ${description} ${url}\n`);
+		if (isDev && url.startsWith("http://")) {
+			setTimeout(() => {
+				if (!window.isDestroyed()) {
+					void window.loadURL(DEV_URL);
+				}
+			}, 800);
+		}
 	});
 	window.webContents.on("console-message", (_event, level, message, line, source) => {
 		if (level >= 2) process.stderr.write(`[renderer] ${message} (${source}:${line})\n`);
