@@ -52,10 +52,16 @@ export const INVOKE_CHANNELS = [
 	"install_package",
 	"remove_package",
 	"extract_document",
+	// media generation
+	"media_capabilities",
+	"generate_image",
+	"create_video",
+	"get_video",
 	// native capabilities, the only things that must live in the main process
 	"select_workspace",
 	"open_external",
 	"show_item_in_folder",
+	"save_media",
 ] as const;
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number];

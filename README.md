@@ -18,13 +18,13 @@ spike/                    Phase 0 路线验证
 | 包 | 测试 | 说明 |
 |---|---|---|
 | `packages/shared` | 8 | 线协议 + 帧编解码 |
-| `packages/daemon` | 65 | 会话池、app 级操作、定时任务转发 |
+| `packages/daemon` | 98 | 会话池、app 级操作、定时任务转发 |
 | `packages/scheduler` | 73 | cron/一次性、DAG 步骤、重试 |
 | `extensions/memory` | 100 | 本地记忆 + 混合检索 |
 | `extensions/session-state` | 79 | 任务状态/检查点/结构化压缩/事件账本 |
 | `extensions/tools` | 85 | 8 个零依赖工具入口 |
-| `apps/desktop` | 89 | 流式归约、扩展提示、markdown、cron、IPC 契约 |
-| **合计** | **499** | |
+| `apps/desktop` | 98 | 流式归约、扩展提示、markdown、cron、IPC 契约 |
+| **合计** | **541** | |
 
 `npm run check` = typecheck + 全部测试。
 

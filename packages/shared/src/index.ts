@@ -98,7 +98,73 @@ export type AppOp =
 	| { name: "install_package"; source: string }
 	| { name: "remove_package"; source: string }
 	/** Extract text from an attached document, for prompt inclusion. */
-	| { name: "extract_document"; fileName: string; dataBase64: string };
+	| { name: "extract_document"; fileName: string; dataBase64: string }
+	// Media generation (image / video).
+	| { name: "media_capabilities" }
+	| { name: "generate_image"; input: GenerateImageInput }
+	| { name: "create_video"; input: CreateVideoInput }
+	| { name: "get_video"; id: string };
+
+export interface GenerateImageInput {
+	prompt: string;
+	size?: "1K" | "2K" | "3K" | "4K";
+	ratio?: "1:1" | "3:4" | "4:3" | "16:9" | "9:16" | "2:3" | "3:2" | "21:9";
+	images?: string[];
+	returnBase64?: boolean;
+}
+
+export interface GeneratedImageItem {
+	url?: string;
+	data?: string;
+	mimeType?: string;
+	revisedPrompt?: string;
+}
+
+export interface GenerateImageResult {
+	model: string;
+	created?: number;
+	images: GeneratedImageItem[];
+}
+
+export interface CreateVideoInput {
+	prompt: string;
+	width?: number;
+	height?: number;
+	numFrames?: number;
+	frameRate?: number;
+	image?: string;
+	negativePrompt?: string;
+	seed?: number;
+}
+
+export interface VideoStatusResult {
+	model: string;
+	taskId?: string;
+	videoId: string;
+	status: "queued" | "in_progress" | "completed" | "succeeded" | "failed" | string;
+	progress: number;
+	createdAt?: number;
+	completedAt?: number;
+	seconds?: string;
+	size?: string;
+	url?: string;
+	error?: string;
+}
+
+export interface MediaCapabilities {
+	configured: boolean;
+	imageModel: string;
+	videoModel: string;
+	sizes: string[];
+	ratios: string[];
+}
+
+export interface SaveMediaInput {
+	url?: string;
+	data?: string;
+	mimeType?: string;
+	filename?: string;
+}
 
 export interface UserProfile {
 	nickname?: string;

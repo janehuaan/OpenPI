@@ -25,6 +25,12 @@ import { bootstrapCredentials, listProviders } from "./bootstrap.ts";
 import { agentDir, openpiDir, piCliMtimeMs, piRpcEntry, pidPath, socketPath, VERSION } from "./config.ts";
 import { type Connection, startServer } from "./ipc/server.ts";
 import {
+	createVideo,
+	generateImage,
+	getVideo,
+	mediaCapabilities,
+} from "./media-ops.ts";
+import {
 	addExtension,
 	capabilities,
 	extractDocument,
@@ -137,6 +143,15 @@ async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {
 			return removePackage(op.source);
 		case "extract_document":
 			return extractDocument(op.fileName, op.dataBase64);
+
+		case "media_capabilities":
+			return mediaCapabilities();
+		case "generate_image":
+			return generateImage(op.input);
+		case "create_video":
+			return createVideo(op.input);
+		case "get_video":
+			return getVideo(op.id);
 
 		default: {
 			const exhaustive: never = op;

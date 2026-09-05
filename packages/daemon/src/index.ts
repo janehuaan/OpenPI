@@ -39,6 +39,17 @@ export {
 	removePackage,
 	saveProfile,
 } from "./profile-ops.ts";
+export {
+	AGNES_IMAGE_MODEL,
+	AGNES_IMAGE_RATIOS,
+	AGNES_IMAGE_SIZES,
+	AGNES_VIDEO_MODEL,
+	createVideo,
+	generateImage,
+	getVideo,
+	mediaCapabilities,
+	resolveAgnesConfig,
+} from "./media-ops.ts";
 export { buildRpcArgs, RpcProcess } from "./rpc-process.ts";
 export {
 	cancelRun,

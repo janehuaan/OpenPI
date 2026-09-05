@@ -40,6 +40,11 @@ setup. Editing keys is deliberately absent: they live in the isolated agent dir'
 `models.json`, and a UI writing that file races the sessions reading it, so
 `pi auth` stays the supported path.
 
+**Media** — AI image and video generation powered by Agnes. Resolves API keys
+dynamically from `~/.openpi/agent/models.json` (such as `agnes-cn`) or environment variables.
+Supports 1K-4K resolution, multiple aspect ratios, video generation (8n + 1 frame rule),
+and native OS file save dialogs.
+
 **Extensions** — the extensions, skills, prompts and packages every session loads,
 from `settings.json` in the isolated agent dir. Local paths are written directly;
 npm and git sources go through `pi install`, which owns that format. Changes apply

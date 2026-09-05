@@ -15,6 +15,8 @@ import type {
 	AppOp,
 	ClientRequestInput,
 	CreateTaskInput,
+	CreateVideoInput,
+	GenerateImageInput,
 	MemoryScope,
 	PiRpcCommand,
 	SessionMode,
@@ -154,6 +156,42 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				runId: asString(args, "runId"),
 				stream: args.stream === "stderr" ? "stderr" : "stdout",
 			}),
+
+		// media generation
+		media_capabilities: () => app({ name: "media_capabilities" }),
+		generate_image: (args) => app({ name: "generate_image", input: args.input as GenerateImageInput }),
+		create_video: (args) => app({ name: "create_video", input: args.input as CreateVideoInput }),
+		get_video: (args) => app({ name: "get_video", id: asString(args, "id") }),
+
+		save_media: async (args) => {
+			const window = getWindow();
+			let bytes: Buffer;
+			let mime = typeof args.mimeType === "string" ? args.mimeType : undefined;
+
+			if (typeof args.data === "string" && args.data) {
+				bytes = Buffer.from(args.data, "base64");
+			} else if (typeof args.url === "string" && args.url) {
+				const res = await fetch(args.url);
+				if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+				mime = mime ?? res.headers.get("content-type")?.split(";")[0];
+				bytes = Buffer.from(await res.arrayBuffer());
+			} else {
+				throw new Error("Missing data or url to save");
+			}
+
+			const ext = mime?.includes("video") || String(args.url).endsWith(".mp4") ? "mp4" : "png";
+			const rawName = typeof args.filename === "string" && args.filename.trim() ? args.filename.trim() : `openpi-${Date.now()}.${ext}`;
+			const defaultPath = rawName.endsWith(`.${ext}`) ? rawName : `${rawName}.${ext}`;
+
+			const result = await dialog.showSaveDialog(window ?? undefined!, {
+				title: "Save generated media",
+				defaultPath,
+			});
+			if (result.canceled || !result.filePath) return { filePath: undefined };
+			const { writeFileSync } = await import("node:fs");
+			writeFileSync(result.filePath, bytes);
+			return { filePath: result.filePath };
+		},
 
 		// Electron-only capabilities.
 		select_workspace: async (args) => {

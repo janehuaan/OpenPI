@@ -13,6 +13,7 @@ import { Chat } from "./components/Chat.tsx";
 import { ContextPanel } from "./components/ContextPanel.tsx";
 import { NewSessionDialog } from "./components/NewSessionDialog.tsx";
 import { CapabilitiesView } from "./components/CapabilitiesView.tsx";
+import { MediaView } from "./components/MediaView.tsx";
 import { ProfileDialog } from "./components/ProfileDialog.tsx";
 import { ProvidersView } from "./components/ProvidersView.tsx";
 import { SessionList } from "./components/SessionList.tsx";
@@ -22,13 +23,14 @@ import { UiRequestDialog } from "./components/UiRequestDialog.tsx";
 import { api, isNative } from "./lib/api.ts";
 import { useSessions } from "./hooks/useSessions.ts";
 
-type View = "chat" | "tasks" | "providers" | "capabilities";
+type View = "chat" | "tasks" | "providers" | "capabilities" | "media";
 
 const VIEWS: Array<{ id: View; label: string }> = [
 	{ id: "chat", label: "Chat" },
 	{ id: "tasks", label: "Tasks" },
 	{ id: "providers", label: "Providers" },
 	{ id: "capabilities", label: "Extensions" },
+	{ id: "media", label: "Media" },
 ];
 
 export function App() {
@@ -104,8 +106,10 @@ export function App() {
 					<TasksView active={view === "tasks"} />
 				) : view === "providers" ? (
 					<ProvidersView active={view === "providers"} />
-				) : (
+				) : view === "capabilities" ? (
 					<CapabilitiesView active={view === "capabilities"} />
+				) : (
+					<MediaView active={view === "media"} />
 				)}
 			</main>
 

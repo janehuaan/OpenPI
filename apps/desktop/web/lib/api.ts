@@ -12,6 +12,12 @@
 
 import type {
 	Capabilities,
+	CreateVideoInput,
+	GenerateImageInput,
+	GenerateImageResult,
+	MediaCapabilities,
+	SaveMediaInput,
+	VideoStatusResult,
 	CreateTaskInput,
 	DocumentText,
 	HealthInfo,
@@ -121,6 +127,13 @@ export const api = {
 	stepRuns: (runId: string) => invoke<{ stepRuns: unknown[] }>("step_runs", { runId }),
 	readRunLog: (runId: string, stream: "stdout" | "stderr" = "stdout") =>
 		invoke<{ text: string; truncated: boolean }>("read_run_log", { runId, stream }),
+
+	// media generation
+	mediaCapabilities: () => invoke<MediaCapabilities>("media_capabilities"),
+	generateImage: (input: GenerateImageInput) => invoke<GenerateImageResult>("generate_image", { input }),
+	createVideo: (input: CreateVideoInput) => invoke<VideoStatusResult>("create_video", { input }),
+	getVideo: (id: string) => invoke<VideoStatusResult>("get_video", { id }),
+	saveMedia: (input: SaveMediaInput) => invoke<{ filePath?: string }>("save_media", input),
 
 	// native
 	selectWorkspace: (defaultPath?: string) => invoke<{ cwd?: string }>("select_workspace", { defaultPath }),
