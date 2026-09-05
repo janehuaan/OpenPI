@@ -1,3 +1,5 @@
+import { TodoPanel } from "../todo-panel";
+import type { TodoState } from "../../types";
 import {
 	type ClipboardEvent,
 	type DragEvent,
@@ -395,6 +397,7 @@ export function ReferenceWorkspacePreview({
 	workspaceSummary,
 	runningTools,
 	turnProgress,
+	todoState,
 	optimisticMessage,
 	memoryEntries,
 	memoryCount,
@@ -432,6 +435,7 @@ export function ReferenceWorkspacePreview({
 	workspaceSummary?: WorkspaceSummary;
 	runningTools: RunningTool[];
 	turnProgress?: TurnProgress;
+	todoState?: TodoState;
 	optimisticMessage?: ConversationMessage;
 	memoryEntries: string[];
 	memoryCount: number;
@@ -992,6 +996,7 @@ export function ReferenceWorkspacePreview({
 						</Popover>
 					</div>
 				</header>
+				<TodoPanel state={todoState} />
 				<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
 					<div className="reference-chat-view">
 						{messages

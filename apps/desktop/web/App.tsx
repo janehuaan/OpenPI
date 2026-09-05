@@ -1582,6 +1582,7 @@ export function App() {
 				workspaceSummary={workspaceSummary}
 				runningTools={runningTools}
 				turnProgress={turnProgress}
+				todoState={todoState}
 				optimisticMessage={
 					optimisticMessage &&
 					(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
