@@ -43,6 +43,7 @@ function daemonCli(): string {
 }
 
 let client: DaemonClient | undefined;
+let connectingPromise: Promise<DaemonClient> | undefined;
 let deferredRestartNotice: (() => void) | undefined;
 
 export function onRestartDeferred(notify: () => void): void {
@@ -52,12 +53,21 @@ export function onRestartDeferred(notify: () => void): void {
 /** Connect, starting the daemon first if nothing is listening. */
 export async function ensureDaemon(): Promise<DaemonClient> {
 	if (client) return client;
-	if (!(await isDaemonLive())) await startDaemon();
+	if (connectingPromise) return connectingPromise;
 
-	const connected = new DaemonClient();
-	await connected.connect();
-	client = connected;
-	return connected;
+	connectingPromise = (async () => {
+		try {
+			if (!(await isDaemonLive())) await startDaemon();
+			const connected = new DaemonClient();
+			await connected.connect();
+			client = connected;
+			return connected;
+		} finally {
+			connectingPromise = undefined;
+		}
+	})();
+
+	return connectingPromise;
 }
 
 export function currentClient(): DaemonClient | undefined {
