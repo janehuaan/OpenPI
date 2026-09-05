@@ -567,7 +567,7 @@ export function ReferenceWorkspacePreview({
 	);
 	const slashItems = useMemo(() => {
 		const combined = [...localSlashItems, ...agentSlash];
-		if (!slashQuery) return combined.slice(0, 12);
+		if (!slashQuery) return combined.slice(0, 30);
 		return combined
 			.filter(
 				(item) =>
@@ -575,7 +575,7 @@ export function ReferenceWorkspacePreview({
 					item.hint.toLowerCase().includes(slashQuery) ||
 					item.id.toLowerCase().includes(slashQuery),
 			)
-			.slice(0, 12);
+			.slice(0, 30);
 	}, [agentSlash, localSlashItems, slashQuery]);
 
 	useEffect(() => {
@@ -739,16 +739,96 @@ export function ReferenceWorkspacePreview({
 			return true;
 		}
 		if (lowerCmd === "/model" || lowerCmd === "/模型") {
+			if (args) {
+				const match = modelOptions.find(
+					(m) =>
+						m.id.toLowerCase().includes(args.toLowerCase()) ||
+						m.name.toLowerCase().includes(args.toLowerCase()) ||
+						m.provider.toLowerCase().includes(args.toLowerCase()),
+				);
+				if (match) {
+					onModelChange(match);
+					setAttachmentNotice(`已切换模型为：${match.name} (${match.provider})`);
+					return true;
+				}
+			}
 			setModelMenuOpen(true);
 			return true;
 		}
 		if (lowerCmd === "/thinking" || lowerCmd === "/思考") {
 			const levels: ThinkingLevel[] = ["off", "low", "medium", "high"];
 			const cur = conversation?.state.thinkingLevel ?? "off";
+			if (args && (levels as string[]).includes(args.toLowerCase())) {
+				const target = args.toLowerCase() as ThinkingLevel;
+				onThinkingLevelChange(target);
+				setAttachmentNotice(`思考强度已切换为：${target}`);
+				return true;
+			}
 			const nextIdx = (levels.indexOf(cur as any) + 1) % levels.length;
 			const nextLevel = levels[nextIdx];
 			onThinkingLevelChange(nextLevel);
 			setAttachmentNotice(`思考强度已切换为：${nextLevel}`);
+			return true;
+		}
+		if (lowerCmd === "/fast" || lowerCmd === "/快速") {
+			onThinkingLevelChange("off");
+			setAttachmentNotice("已切换至快速模式（关闭深度思考）");
+			return true;
+		}
+		if (lowerCmd === "/deep" || lowerCmd === "/深度") {
+			onThinkingLevelChange("high");
+			setAttachmentNotice("已切换至深度推理模式（Thinking: high）");
+			return true;
+		}
+		if (lowerCmd === "/mode" || lowerCmd === "/模式") {
+			if (args.includes("code") || args.includes("cwork") || args.includes("编程")) {
+				onAppModeChange("code");
+				setAttachmentNotice("已切换至 CWork 编程工作区模式");
+				return true;
+			}
+			if (args.includes("personal") || args.includes("助理")) {
+				onAppModeChange("personal");
+				setAttachmentNotice("已切换至 Personal 助理模式");
+				return true;
+			}
+			if (args.includes("chat") || args.includes("对话")) {
+				onAppModeChange("chat");
+				setAttachmentNotice("已切换至 Chat 对话模式");
+				return true;
+			}
+			const nextMode = appMode === "chat" ? "personal" : appMode === "personal" ? "code" : "chat";
+			onAppModeChange(nextMode);
+			setAttachmentNotice(`已切换应用模式为：${nextMode.toUpperCase()}`);
+			return true;
+		}
+		if (lowerCmd === "/rename" || lowerCmd === "/重命名") {
+			if (args && conversation?.instance.id) {
+				desktopApi.renameConversation(conversation.instance.id, args).then(() => {
+					setAttachmentNotice(`会话已重命名为：${args}`);
+				}).catch(() => {});
+				return true;
+			}
+			onRenameConversation();
+			return true;
+		}
+		if (lowerCmd === "/copy" || lowerCmd === "/复制") {
+			const msgs = conversation?.messages ?? [];
+			const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+			if (lastAssistant) {
+				const txt = contentText(lastAssistant.content);
+				navigator.clipboard.writeText(txt).catch(() => {});
+				setAttachmentNotice("已复制最后一条回复内容");
+			} else {
+				setAttachmentNotice("暂无可复制的回复内容");
+			}
+			return true;
+		}
+		if (lowerCmd === "/stats" || lowerCmd === "/统计") {
+			const inTokens = stats?.tokens.input ?? 0;
+			const outTokens = stats?.tokens.output ?? 0;
+			const cacheR = stats?.tokens.cacheRead ?? 0;
+			const toolsUsed = stats?.toolCalls ?? 0;
+			setAttachmentNotice(`会话统计：输入 ${inTokens} | 输出 ${outTokens} | 缓存命中 ${cacheR} | 工具调用 ${toolsUsed} 次`);
 			return true;
 		}
 		if (lowerCmd === "/export" || lowerCmd === "/导出") {
@@ -760,7 +840,7 @@ export function ReferenceWorkspacePreview({
 			return true;
 		}
 		if (lowerCmd === "/help" || lowerCmd === "/帮助") {
-			setSlashOpen(true);
+			setAttachmentNotice("快捷命令：/清屏 /压缩 /模型 /思考 /快速 /深度 /模式 /重命名 /导出 /复制 /统计 /记住 /任务 /能力 /技能 /mcp /市场 /运行时");
 			return true;
 		}
 		if (lowerCmd === "/remember" || lowerCmd === "/记住") {
@@ -769,11 +849,69 @@ export function ReferenceWorkspacePreview({
 				return true;
 			}
 			await onRemember(args);
-			setAttachmentNotice("已写入记忆");
+			setAttachmentNotice("已写入长期记忆库");
 			return true;
 		}
 		if (lowerCmd === "/task" || lowerCmd === "/任务") {
 			onCreateTaskFromChat(args || "定期检查并汇报工作区进展");
+			return true;
+		}
+		if (lowerCmd === "/web" || lowerCmd === "/搜索") {
+			if (args) {
+				await onSend(`使用 web_search 搜索：${args}`, [], []);
+			} else {
+				setDraft("/搜索 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/fetch" || lowerCmd === "/抓取") {
+			if (args) {
+				await onSend(`使用 web_fetch 抓取网页：${args}`, [], []);
+			} else {
+				setDraft("/抓取 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/code" || lowerCmd === "/代码搜索") {
+			if (args) {
+				await onSend(`使用 code_search 检索代码：${args}`, [], []);
+			} else {
+				setDraft("/代码搜索 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/kb" || lowerCmd === "/知识库") {
+			if (args) {
+				await onSend(`使用 kb_query 查询知识库：${args}`, [], []);
+			} else {
+				setDraft("/知识库 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/browser" || lowerCmd === "/浏览器") {
+			if (args) {
+				await onSend(`使用 browser 工具访问：${args}`, [], []);
+			} else {
+				setDraft("/浏览器 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/github" || lowerCmd === "/仓库") {
+			if (args) {
+				await onSend(`使用 github 工具查询：${args}`, [], []);
+			} else {
+				setDraft("/仓库 ");
+				draftInput.current?.focus();
+			}
+			return true;
+		}
+		if (lowerCmd === "/skills" || lowerCmd === "/技能" || lowerCmd === "/mcp" || lowerCmd === "/market" || lowerCmd === "/市场" || lowerCmd === "/settings" || lowerCmd === "/设置") {
+			onNavigate("capabilities");
 			return true;
 		}
 
@@ -788,8 +926,8 @@ export function ReferenceWorkspacePreview({
 					intelligence: "intelligence",
 					daemon: "daemon",
 				};
-				const target = navMap[item.id];
-				if (target) onNavigate(target);
+				const target = navMap[item.id] || "capabilities";
+				onNavigate(target);
 				return true;
 			}
 		}
@@ -811,6 +949,11 @@ export function ReferenceWorkspacePreview({
 			local?.id === "new" ||
 			local?.id === "model" ||
 			local?.id === "thinking" ||
+			local?.id === "fast" ||
+			local?.id === "deep" ||
+			local?.id === "mode" ||
+			local?.id === "copy" ||
+			local?.id === "stats" ||
 			local?.id === "help"
 		) {
 			void handleLocalSlash(item.label);
@@ -824,8 +967,22 @@ export function ReferenceWorkspacePreview({
 			setSlashOpen(false);
 			return;
 		}
-		if (local?.id === "remember") {
+		if (local?.id === "rename") {
+			setDraft("/重命名 ");
+		} else if (local?.id === "remember") {
 			setDraft("/记住 ");
+		} else if (local?.id === "web") {
+			setDraft("/搜索 ");
+		} else if (local?.id === "fetch") {
+			setDraft("/抓取 ");
+		} else if (local?.id === "code") {
+			setDraft("/代码搜索 ");
+		} else if (local?.id === "kb") {
+			setDraft("/知识库 ");
+		} else if (local?.id === "browser") {
+			setDraft("/浏览器 ");
+		} else if (local?.id === "github") {
+			setDraft("/仓库 ");
 		} else {
 			setDraft(item.insert);
 		}
@@ -1822,19 +1979,45 @@ const LOCAL_SLASH: Array<{
 	hint: string;
 	kind: "action" | "nav" | "insert";
 }> = [
+	// 会话与控制
 	{ id: "clear", match: /^\/(clear|清屏|清空)\s*$/i, label: "/清屏", hint: "清空当前屏幕并开启新会话", kind: "action" },
-	{ id: "compact", match: /^\/(compact|压缩)\s*$/i, label: "/压缩", hint: "压缩上下文并生成检查点", kind: "action" },
-	{ id: "model", match: /^\/(model|模型)\s*$/i, label: "/模型", hint: "快速选择当前大模型及服务商", kind: "action" },
-	{ id: "thinking", match: /^\/(thinking|思考)\s*$/i, label: "/思考", hint: "切换思考深度（off / low / medium / high）", kind: "action" },
+	{ id: "compact", match: /^\/(compact|压缩)\s*$/i, label: "/压缩", hint: "压缩上下文并保存结构化检查点", kind: "action" },
 	{ id: "new", match: /^\/(new|新建)\s*$/i, label: "/新建", hint: "新建对话会话", kind: "action" },
+	{ id: "rename", match: /^\/(rename|重命名)(?:\s+([\s\S]+))?$/i, label: "/重命名", hint: "重命名当前会话标题 [/重命名 新名字]", kind: "action" },
 	{ id: "export", match: /^\/(export|导出)\s*$/i, label: "/导出", hint: "导出当前对话为 Markdown 文档", kind: "action" },
-	{ id: "remember", match: /^\/(remember|记住)(?:\s+([\s\S]+))?$/i, label: "/记住", hint: "把关键信息保存到长期记忆库", kind: "action" },
-	{ id: "task", match: /^\/(task|任务)(?:\s+([\s\S]+))?$/i, label: "/任务", hint: "根据对话内容创建定时任务", kind: "action" },
+	{ id: "copy", match: /^\/(copy|复制)\s*$/i, label: "/复制", hint: "复制最后一条回复内容到剪贴板", kind: "action" },
+	{ id: "stats", match: /^\/(stats|统计)\s*$/i, label: "/统计", hint: "查看会话 Token 消耗、缓存命中与工具调用", kind: "action" },
+
+	// 模型与思考配置
+	{ id: "model", match: /^\/(model|模型)(?:\s+([\s\S]+))?$/i, label: "/模型", hint: "切换大模型 [/模型 模型名] 或弹出选择器", kind: "action" },
+	{ id: "thinking", match: /^\/(thinking|思考)(?:\s+([\s\S]+))?$/i, label: "/思考", hint: "调整思考强度（off / low / medium / high）", kind: "action" },
+	{ id: "fast", match: /^\/(fast|快速)\s*$/i, label: "/快速", hint: "快速响应模式：关闭深度思考", kind: "action" },
+	{ id: "deep", match: /^\/(deep|深度)\s*$/i, label: "/深度", hint: "深度推理模式：开启最大深度思考", kind: "action" },
+	{ id: "mode", match: /^\/(mode|模式)(?:\s+([\s\S]+))?$/i, label: "/模式", hint: "切换工作区模式：Chat / Personal / CWork", kind: "action" },
+
+	// 长期记忆与知识
+	{ id: "remember", match: /^\/(remember|记住)(?:\s+([\s\S]+))?$/i, label: "/记住", hint: "提取关键信息写入长期记忆知识库", kind: "action" },
+	{ id: "memory", match: /^\/(memory|记忆)\s*$/i, label: "/记忆", hint: "打开长期记忆全景库与检索面板", kind: "nav" },
+
+	// 任务与后台自动化
+	{ id: "task", match: /^\/(task|任务)(?:\s+([\s\S]+))?$/i, label: "/任务", hint: "根据对话内容创建定时自动化任务", kind: "action" },
 	{ id: "tasks", match: /^\/(tasks|任务列表)\s*$/i, label: "/任务列表", hint: "查看与管理后台定时自动化任务", kind: "nav" },
-	{ id: "memory", match: /^\/(memory|记忆)\s*$/i, label: "/记忆", hint: "查看与检索长期记忆知识库", kind: "nav" },
-	{ id: "capabilities", match: /^\/(capabilities|能力|设置|skills|mcp)\s*$/i, label: "/能力", hint: "模型服务商、技能市场与 MCP 扩展", kind: "nav" },
-	{ id: "daemon", match: /^\/(daemon|runtime|运行时)\s*$/i, label: "/运行时", hint: "查看后台守护进程状态", kind: "nav" },
-	{ id: "help", match: /^\/(help|帮助)\s*$/i, label: "/帮助", hint: "查看所有快捷斜杠命令与操作提示", kind: "action" },
+
+	// 智能工具直调
+	{ id: "web", match: /^\/(web|搜索)(?:\s+([\s\S]+))?$/i, label: "/搜索", hint: "执行网络检索并汇总资讯 [/搜索 关键词]", kind: "insert" },
+	{ id: "fetch", match: /^\/(fetch|抓取)(?:\s+([\s\S]+))?$/i, label: "/抓取", hint: "抓取指定 URL 网页核心正文 [/抓取 网址]", kind: "insert" },
+	{ id: "code", match: /^\/(code|代码搜索)(?:\s+([\s\S]+))?$/i, label: "/代码搜索", hint: "在工作区检索代码符号定义 [/代码搜索 符号]", kind: "insert" },
+	{ id: "kb", match: /^\/(kb|知识库)(?:\s+([\s\S]+))?$/i, label: "/知识库", hint: "查询工作区本地知识库索引 [/知识库 关键词]", kind: "insert" },
+	{ id: "browser", match: /^\/(browser|浏览器)(?:\s+([\s\S]+))?$/i, label: "/浏览器", hint: "唤起无头浏览器进行页面渲染或操作", kind: "insert" },
+	{ id: "github", match: /^\/(github|仓库)(?:\s+([\s\S]+))?$/i, label: "/仓库", hint: "检查 GitHub 仓库 PR / Issue / CI 状态", kind: "insert" },
+
+	// 系统与导航
+	{ id: "capabilities", match: /^\/(capabilities|能力|设置|settings)\s*$/i, label: "/能力", hint: "模型服务商、技能市场与 MCP 扩展", kind: "nav" },
+	{ id: "skills", match: /^\/(skills|技能)\s*$/i, label: "/技能", hint: "浏览所有已安装的 Slash 技能", kind: "nav" },
+	{ id: "mcp", match: /^\/mcp\s*$/i, label: "/mcp", hint: "配置外部 MCP 服务与连接适配器", kind: "nav" },
+	{ id: "market", match: /^\/(market|市场)\s*$/i, label: "/市场", hint: "浏览技能市场与预置包", kind: "nav" },
+	{ id: "daemon", match: /^\/(daemon|runtime|运行时)\s*$/i, label: "/运行时", hint: "查看后台守护进程与连接状态", kind: "nav" },
+	{ id: "help", match: /^\/(help|帮助)\s*$/i, label: "/帮助", hint: "查看快捷斜杠命令列表与使用说明", kind: "action" },
 ];
 
 type ChatNavView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
@@ -2823,7 +3006,7 @@ export function ChatSurface({
 	);
 	const slashItems = useMemo(() => {
 		const combined = [...localSlashItems, ...agentSlash];
-		if (!slashQuery) return combined.slice(0, 12);
+		if (!slashQuery) return combined.slice(0, 30);
 		return combined
 			.filter(
 				(item) =>
@@ -2831,7 +3014,7 @@ export function ChatSurface({
 					item.hint.toLowerCase().includes(slashQuery) ||
 					item.id.toLowerCase().includes(slashQuery),
 			)
-			.slice(0, 12);
+			.slice(0, 30);
 	}, [agentSlash, localSlashItems, slashQuery]);
 
 	useEffect(() => {
