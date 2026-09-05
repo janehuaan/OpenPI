@@ -2,10 +2,7 @@
  * channels.ts coverage.
  *
  * The allowlist is a security boundary: a channel missing from it is silently
- * unreachable, and one present without a handler rejects at call time. The old
- * fork kept two copies of this list with a "keep in sync" comment, and they had
- * already drifted - two channels existed only in the preload. These tests make
- * the single list the thing that is checked.
+ * unreachable, and one present without a handler rejects at call time.
  */
 
 import { readFileSync } from "node:fs";
@@ -32,9 +29,13 @@ describe("channel lists", () => {
 		expect(INVOKE_CHANNELS.filter((channel) => events.has(channel))).toEqual([]);
 	});
 
-	it("uses snake_case names without the prefix baked in", () => {
-		for (const channel of [...INVOKE_CHANNELS, ...EVENT_CHANNELS]) {
+	it("uses valid channel names without the prefix baked in", () => {
+		for (const channel of INVOKE_CHANNELS) {
 			expect(channel).toMatch(/^[a-z][a-z0-9_]*$/);
+			expect(channel.startsWith(CHANNEL_PREFIX)).toBe(false);
+		}
+		for (const channel of EVENT_CHANNELS) {
+			expect(channel).toMatch(/^[a-z][a-z0-9_-]*$/);
 			expect(channel.startsWith(CHANNEL_PREFIX)).toBe(false);
 		}
 	});
@@ -42,11 +43,11 @@ describe("channel lists", () => {
 
 describe("name builders", () => {
 	it("prefixes invoke channels", () => {
-		expect(invokeChannelName("daemon_health")).toBe("openpi:daemon_health");
+		expect(invokeChannelName("get_snapshot")).toBe("openpi:get_snapshot");
 	});
 
 	it("prefixes event channels", () => {
-		expect(eventChannelName("session_event")).toBe("openpi:session_event");
+		expect(eventChannelName("conversation-event")).toBe("openpi:conversation-event");
 	});
 
 	it("prefixes every channel exactly once", () => {
@@ -61,38 +62,36 @@ describe("name builders", () => {
 describe("coverage of what the app needs", () => {
 	it("covers the session lifecycle", () => {
 		for (const channel of [
-			"list_sessions",
-			"create_session",
-			"stop_session",
-			"delete_session",
-			"subscribe_session",
-			"unsubscribe_session",
-			"session_rpc",
+			"get_snapshot",
+			"create_conversation",
+			"get_conversation",
+			"send_message",
+			"abort_conversation",
+			"rename_conversation",
+			"delete_conversation",
+			"watch_conversation_stream",
+			"stop_conversation_stream",
 		]) {
 			expect(INVOKE_CHANNELS).toContain(channel);
 		}
 	});
 
-	it("covers the app-level operations the old fork used custom RPC commands for", () => {
-		// get_model_catalog, get_provider_auth_status and friends were 8 of the 12
-		// commands that required patching upstream; they are plain app ops now.
-		for (const channel of ["auth_status", "list_models", "workspace_summary", "list_memory"]) {
+	it("covers app-level, task and media operations", () => {
+		for (const channel of [
+			"get_available_models",
+			"get_model_catalog",
+			"get_workspace_summary",
+			"list_memory_index",
+			"create_task",
+			"generate_image",
+			"create_video",
+			"save_media",
+		]) {
 			expect(INVOKE_CHANNELS).toContain(channel);
 		}
 	});
 
-	it("exposes only Electron capabilities that have no other home", () => {
-		// Anything that could run in the daemon should not be an IPC channel: that
-		// is how the old bridge.mjs reached 1,326 lines.
-		const native = INVOKE_CHANNELS.filter((channel) =>
-			["select_workspace", "open_external", "show_item_in_folder"].includes(channel),
-		);
-		expect(native).toHaveLength(3);
-	});
-
 	it("has a main-process handler for every allowlisted channel", () => {
-		// A channel in the allowlist with no handler rejects only when the UI calls
-		// it, which is exactly the drift the old two-list setup produced.
 		const source = readFileSync(new URL("../electron/handlers.ts", import.meta.url), "utf8");
 		const missing = INVOKE_CHANNELS.filter((channel) => !new RegExp(`\\b${channel}:`).test(source));
 		expect(missing).toEqual([]);

@@ -1,42 +1,48 @@
 /**
- * Preload: the renderer's only route to the outside.
- *
- * `contextIsolation` is on and `nodeIntegration` off, so the renderer sees
- * exactly what is exposed here and nothing else. The channel allowlist comes
- * from `channels.ts`, the same list the main process registers handlers from.
+ * Preload: exposes the openpi bridge matching the complete desktop contract.
  */
 
 import { contextBridge, ipcRenderer } from "electron";
 import {
-	EVENT_CHANNELS,
-	eventChannelName,
 	INVOKE_CHANNELS,
 	invokeChannelName,
-	type EventChannel,
 	type InvokeChannel,
 } from "./channels.ts";
 
 const allowedInvoke = new Set<string>(INVOKE_CHANNELS);
-const allowedEvents = new Set<string>(EVENT_CHANNELS);
 
 contextBridge.exposeInMainWorld("openpi", {
 	isNative: true,
 
 	invoke(channel: string, args?: unknown): Promise<unknown> {
-		if (!allowedInvoke.has(channel)) {
-			return Promise.reject(new Error(`Blocked IPC channel: ${channel}`));
+		if (typeof channel !== "string" || !allowedInvoke.has(channel)) {
+			return Promise.reject(new Error(`Blocked IPC channel: ${String(channel)}`));
 		}
 		return ipcRenderer.invoke(invokeChannelName(channel as InvokeChannel), args);
 	},
 
-	/** Subscribe to a push channel; returns the unsubscribe function. */
-	on(channel: string, handler: (payload: unknown) => void): () => void {
-		if (!allowedEvents.has(channel)) {
-			throw new Error(`Blocked IPC event channel: ${channel}`);
-		}
+	onConversationEvent(handler: (payload: { instanceId: string; event: unknown }) => void): () => void {
+		const listener = (_event: unknown, payload: unknown) =>
+			handler(payload as { instanceId: string; event: unknown });
+		ipcRenderer.on("openpi:conversation-event", listener);
+		return () => ipcRenderer.removeListener("openpi:conversation-event", listener);
+	},
+
+	onRefreshData(handler: () => void): () => void {
+		const listener = () => handler();
+		ipcRenderer.on("openpi:refresh-data", listener);
+		return () => ipcRenderer.removeListener("openpi:refresh-data", listener);
+	},
+
+	onSpeechEvent(handler: (event: unknown) => void): () => void {
 		const listener = (_event: unknown, payload: unknown) => handler(payload);
-		const name = eventChannelName(channel as EventChannel);
-		ipcRenderer.on(name, listener);
-		return () => ipcRenderer.removeListener(name, listener);
+		ipcRenderer.on("openpi:speech-event", listener);
+		return () => ipcRenderer.removeListener("openpi:speech-event", listener);
+	},
+
+	onDaemonRestartDeferred(handler: () => void): () => void {
+		const listener = () => handler();
+		ipcRenderer.on("openpi:daemon-restart-deferred", listener);
+		return () => ipcRenderer.removeListener("openpi:daemon-restart-deferred", listener);
 	},
 });

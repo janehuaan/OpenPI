@@ -1,12 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
+import { App } from "./App";
 import "./styles.css";
+import "./media.css";
+import "./speech.css";
 
-const root = document.getElementById("root");
-if (!root) throw new Error("missing #root");
-
-createRoot(root).render(
+createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<App />
 	</StrictMode>,

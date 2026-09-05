@@ -58,6 +58,21 @@ export function bootstrapCredentials(options: { force?: boolean } = {}): Bootstr
 	const imported: string[] = [];
 	const skipped: string[] = [];
 
+	// Import default provider and model from settings.json if present
+	const sourceSettings = join(source, "settings.json");
+	const targetSettings = join(target, "settings.json");
+	if (existsSync(sourceSettings) && (!existsSync(targetSettings) || options.force)) {
+		try {
+			const parsed = JSON.parse(readFileSync(sourceSettings, "utf8"));
+			const out: Record<string, unknown> = {};
+			if (parsed.defaultProvider) out.defaultProvider = parsed.defaultProvider;
+			if (parsed.defaultModel) out.defaultModel = parsed.defaultModel;
+			if (parsed.defaultThinkingLevel) out.defaultThinkingLevel = parsed.defaultThinkingLevel;
+			writeFileSync(targetSettings, JSON.stringify(out, null, 2) + "\n", "utf8");
+			imported.push("settings.json");
+		} catch {}
+	}
+
 	for (const name of IMPORT_FILES) {
 		const from = join(source, name);
 		const to = join(target, name);
