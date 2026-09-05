@@ -1,3 +1,4 @@
+import { ClaudeCodeRecapCard } from "../recap-card";
 import { TodoPanel } from "../todo-panel";
 import type { TodoState } from "../../types";
 import {
@@ -1210,9 +1211,10 @@ export function ReferenceWorkspacePreview({
 										message.errorMessage,
 								);
 							})
-							.map((message, index) => {
+							.map((message, index, arr) => {
 								const text = visibleMessageText(contentText(message.content));
 								const isUser = message.role === "user";
+								const isLatestAssistant = !isUser && !isWorking && (index === arr.length - 1 || arr.slice(index + 1).every((m) => m.role !== "assistant"));
 								return (
 									<div
 										className={`${isUser ? "reference-user-card" : "reference-assistant-card"} ${message === optimisticMessage ? "pending" : ""}`}
@@ -1241,6 +1243,19 @@ export function ReferenceWorkspacePreview({
 														/>
 													))}
 												</div>
+											)}
+											{isLatestAssistant && (
+												<ClaudeCodeRecapCard
+													message={message}
+													todoState={todoState}
+													onApplySuggestion={(suggestion) => {
+														setDraft(suggestion);
+														draftInput.current?.focus();
+													}}
+													onSendSuggestion={(suggestion) => {
+														void onSend(suggestion, [], []);
+													}}
+												/>
 											)}
 										</div>
 									</div>

@@ -1,3 +1,10 @@
+export function visibleMessageText(text: string): string {
+	return text
+		.replace(/\n*<openpi-attachments>[\s\S]*?<\/openpi-attachments>/g, "")
+		.replace(/\n*<openpi-vision-context[\s\S]*?<\/openpi-vision-context>/g, "")
+		.trim();
+}
+
 import type {
 	AgentInstance,
 	ConversationMessage,

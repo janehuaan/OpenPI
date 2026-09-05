@@ -7245,3 +7245,128 @@ input.ui-command-input:focus-visible {
 .activity-inline.activity-bot .activity-summary {
 	color: #c7d2fe;
 }
+
+/* ── Claude Code-style Recap & Suggestions ── */
+.claude-recap-card {
+	margin: 12px 0 4px;
+	padding: 10px 14px;
+	border-radius: 9px;
+	border: 1px solid #d8e2f3;
+	background: #f8faff;
+	font-size: 12px;
+	line-height: 1.5;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	box-shadow: 0 2px 8px rgba(35, 55, 90, 0.04);
+}
+
+.claude-recap-header {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	color: #2c3852;
+}
+
+.claude-recap-badge {
+	font-family: var(--mono, monospace);
+	font-size: 11px;
+	font-weight: 700;
+	color: #2563eb;
+	flex-shrink: 0;
+	letter-spacing: -0.2px;
+}
+
+.claude-recap-text {
+	font-size: 12px;
+	color: #3b4861;
+}
+
+.claude-recap-suggestions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 8px;
+	padding-top: 6px;
+	border-top: 1px dashed #e1e7f5;
+}
+
+.claude-recap-label {
+	color: #718096;
+	font-size: 11px;
+	font-weight: 500;
+}
+
+.claude-recap-chips {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.claude-recap-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 9px 3px 8px;
+	border-radius: 6px;
+	border: 1px solid #d2dcee;
+	background: #ffffff;
+	color: #2d3748;
+	font-size: 11px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 140ms ease;
+}
+
+.claude-recap-chip:hover {
+	border-color: #3182ce;
+	background: #ebf8ff;
+	color: #2b6cb0;
+	transform: translateY(-1px);
+	box-shadow: 0 2px 6px rgba(49, 130, 206, 0.15);
+}
+
+.claude-recap-chip .chip-arrow {
+	color: #a0aec0;
+	transition: transform 140ms ease;
+}
+
+.claude-recap-chip:hover .chip-arrow {
+	color: #3182ce;
+	transform: translateX(2px);
+}
+
+@media (prefers-color-scheme: dark) {
+	.claude-recap-card {
+		border-color: #2b3648;
+		background: #141923;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+	}
+	.claude-recap-header {
+		color: #e2e8f0;
+	}
+	.claude-recap-badge {
+		color: #60a5fa;
+	}
+	.claude-recap-text {
+		color: #cbd5e0;
+	}
+	.claude-recap-suggestions {
+		border-top-color: #263142;
+	}
+	.claude-recap-label {
+		color: #94a3b8;
+	}
+	.claude-recap-chip {
+		border-color: #2a3444;
+		background: #1a202c;
+		color: #e2e8f0;
+	}
+	.claude-recap-chip:hover {
+		border-color: #60a5fa;
+		background: #253347;
+		color: #93c5fd;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+	}
+}
