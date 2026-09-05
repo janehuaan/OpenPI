@@ -602,8 +602,50 @@ export function App() {
 				}
 				return;
 			}
+			if (eventType === "message_update") {
+				const amEvent = (payload.event as Record<string, any>).assistantMessageEvent;
+				if (amEvent && (amEvent.type === "text_delta" || amEvent.type === "thinking_delta")) {
+					setConversation((current) => {
+						if (!current || current.instance.id !== payload.instanceId) return current;
+						const messages = [...current.messages];
+						let last = messages[messages.length - 1];
+						if (!last || last.role !== "assistant" || last.timestamp !== undefined) {
+							last = { role: "assistant", content: [] };
+							messages.push(last);
+						} else {
+							last = { ...last };
+							messages[messages.length - 1] = last;
+						}
+						const content = Array.isArray(last.content) ? [...last.content] : [];
+						const idx = typeof amEvent.contentIndex === "number" ? amEvent.contentIndex : 0;
+						while (content.length <= idx) {
+							content.push(
+								amEvent.type === "thinking_delta"
+									? { type: "thinking", thinking: "" }
+									: { type: "text", text: "" },
+							);
+						}
+						const block = { ...(content[idx] as Record<string, any>) };
+						if (amEvent.type === "text_delta" && typeof amEvent.delta === "string") {
+							block.type = "text";
+							block.text = (block.text || "") + amEvent.delta;
+						} else if (amEvent.type === "thinking_delta" && typeof amEvent.delta === "string") {
+							block.type = "thinking";
+							block.thinking = (block.thinking || "") + amEvent.delta;
+						}
+						content[idx] = block;
+						last.content = content;
+						return {
+							...current,
+							state: { ...current.state, isStreaming: true, messageCount: messages.length },
+							messages,
+						};
+					});
+				}
+				return;
+			}
 			if (
-				(eventType !== "message_start" && eventType !== "message_update" && eventType !== "message_end") ||
+				(eventType !== "message_start" && eventType !== "message_end") ||
 				!isConversationMessage(payload.event.message)
 			) {
 				return;
