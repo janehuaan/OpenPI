@@ -848,11 +848,11 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 					command: { type: "get_commands" },
 				})) as any;
 				const list = Array.isArray(res?.commands) ? res.commands : [];
-				return list.map((c: any) =>
-					typeof c === "string"
-						? c
-						: `${c.name || ""}${c.description ? ` — ${c.description}` : ""}`
-				);
+				return list.map((c: any) => {
+					if (typeof c === "string") return c.startsWith("/") ? c : `/${c}`;
+					const name = typeof c?.name === "string" ? (c.name.startsWith("/") ? c.name : `/${c.name}`) : "";
+					return `${name}${c?.description ? ` — ${c.description}` : ""}`;
+				});
 			} catch {
 				return [];
 			}

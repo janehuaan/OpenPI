@@ -4,7 +4,6 @@ import { ArrowLeft, Bell, RefreshCw, X } from "./components/icons.tsx";
 import {
 	type AppMode,
 	CapabilitiesSurface,
-	ConversationSidebar,
 	ConversationUiDialog,
 	CreateTaskDialog,
 	DaemonSurface,
@@ -1670,60 +1669,7 @@ export function App() {
 	}
 
 	return (
-		<div
-			className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""} ${sidebarOpen ? "sidebar-open" : ""} ${contextOpen ? "context-open" : ""}`}
-		>
-			<ConversationSidebar
-				conversations={conversations}
-				projects={conversationList.projects}
-				conversationTitles={conversationTitles}
-				selectedInstanceId={selectedInstanceId}
-				streamingInstances={streamingInstances}
-				query={chatQuery}
-				onQueryChange={setChatQuery}
-				onSelect={(instanceId) => {
-					setOptimisticMessage(undefined);
-					setTurnProgress(undefined);
-					setTurnMeta(undefined);
-					selectedInstanceIdRef.current = instanceId;
-					setSelectedInstanceId(instanceId);
-					setView("chat");
-					setSidebarOpen(false);
-				}}
-				onNew={() => {
-					if (appMode === "code" && !codeWorkspace) {
-						void changeCodeWorkspace();
-					} else {
-						void createConversation(
-							appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work",
-							appMode === "code" ? codeWorkspace : undefined,
-						);
-					}
-				}}
-				creating={busy === "new-conversation"}
-				onRename={setRenamingConversation}
-				onDelete={setDeletingConversation}
-				includeStopped={includeStopped}
-				onIncludeStoppedChange={setIncludeStopped}
-				stoppedCount={snapshot.instanceStats?.stopped ?? 0}
-				pruning={busy === "prune-stopped"}
-				onPruneStopped={() => void perform("prune-stopped", desktopApi.pruneStoppedInstances)}
-				totalCount={conversationList.totalCount}
-				truncated={conversationList.truncated}
-				showAll={showAllConversations}
-				onShowAllChange={setShowAllConversations}
-				activeView={view}
-				tasks={snapshot.tasks}
-				runs={snapshot.runs}
-				daemonRunning={snapshot.daemonRunning}
-				onNavigate={(next) => {
-					setView(next);
-					setSidebarOpen(false);
-				}}
-				userProfile={userProfile}
-				onEditProfile={() => setEditingProfile(true)}
-			/>
-
+		<div className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""}`}>
 			<div className="main-column">
 				<div className="secondary-bar">
 					<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
@@ -1843,12 +1789,7 @@ export function App() {
 				)}
 			</div>
 
-			{sidebarOpen && (
-				<button className="mobile-scrim" aria-label="Close conversations" onClick={() => setSidebarOpen(false)} />
-			)}
-			{contextOpen && (
-				<button className="context-scrim" aria-label="Close context" onClick={() => setContextOpen(false)} />
-			)}
+
 
 			{showCreateTask && (
 				<CreateTaskDialog

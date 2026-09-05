@@ -479,7 +479,6 @@ export function ReferenceWorkspacePreview({
 	const [chatsOverflow, setChatsOverflow] = useState(false);
 	const [showAllFiles, setShowAllFiles] = useState(false);
 	const [memoryQuery, setMemoryQuery] = useState("");
-	const [leftCollapsed, setLeftCollapsed] = useState(false);
 	const attachmentInput = useRef<HTMLInputElement>(null);
 	const draftInput = useRef<HTMLTextAreaElement>(null);
 	const feedScroll = useRef<HTMLElement>(null);
@@ -723,23 +722,64 @@ export function ReferenceWorkspacePreview({
 
 	async function handleLocalSlash(raw: string): Promise<boolean> {
 		const message = raw.trim();
+		const [cmd, ...argsArr] = message.split(/\s+/);
+		const args = argsArr.join(" ").trim();
+		const lowerCmd = cmd.toLowerCase();
+
+		if (lowerCmd === "/clear" || lowerCmd === "/清屏" || lowerCmd === "/清空") {
+			onNewConversation();
+			setAttachmentNotice("已开启新会话");
+			return true;
+		}
+		if (lowerCmd === "/compact" || lowerCmd === "/压缩") {
+			setAttachmentNotice("正在压缩上下文…");
+			if (conversation?.instance.id) {
+				desktopApi.abortConversation(conversation.instance.id).catch(() => {});
+			}
+			return true;
+		}
+		if (lowerCmd === "/model" || lowerCmd === "/模型") {
+			setModelMenuOpen(true);
+			return true;
+		}
+		if (lowerCmd === "/thinking" || lowerCmd === "/思考") {
+			const levels: ThinkingLevel[] = ["off", "low", "medium", "high"];
+			const cur = conversation?.state.thinkingLevel ?? "off";
+			const nextIdx = (levels.indexOf(cur as any) + 1) % levels.length;
+			const nextLevel = levels[nextIdx];
+			onThinkingLevelChange(nextLevel);
+			setAttachmentNotice(`思考强度已切换为：${nextLevel}`);
+			return true;
+		}
+		if (lowerCmd === "/export" || lowerCmd === "/导出") {
+			onExportConversation();
+			return true;
+		}
+		if (lowerCmd === "/new" || lowerCmd === "/新建") {
+			onNewConversation();
+			return true;
+		}
+		if (lowerCmd === "/help" || lowerCmd === "/帮助") {
+			setSlashOpen(true);
+			return true;
+		}
+		if (lowerCmd === "/remember" || lowerCmd === "/记住") {
+			if (!args) {
+				setAttachmentNotice("用法：/记住 要记住的内容");
+				return true;
+			}
+			await onRemember(args);
+			setAttachmentNotice("已写入记忆");
+			return true;
+		}
+		if (lowerCmd === "/task" || lowerCmd === "/任务") {
+			onCreateTaskFromChat(args || "定期检查并汇报工作区进展");
+			return true;
+		}
+
 		for (const item of LOCAL_SLASH) {
 			const match = message.match(item.match);
 			if (!match) continue;
-			if (item.id === "remember") {
-				const body = (match[2] ?? "").trim();
-				if (!body) {
-					setAttachmentNotice("用法：/记住 要记住的内容");
-					return true;
-				}
-				await onRemember(body);
-				setAttachmentNotice("已写入记忆");
-				return true;
-			}
-			if (item.id === "task") {
-				onCreateTaskFromChat((match[2] ?? "").trim() || "定期检查并汇报工作区进展");
-				return true;
-			}
 			if (item.kind === "nav") {
 				const navMap: Record<string, ChatNavView> = {
 					memory: "memory",
@@ -759,6 +799,20 @@ export function ReferenceWorkspacePreview({
 	function applySlashItem(item: { id: string; label: string; insert: string }): void {
 		const local = LOCAL_SLASH.find((entry) => entry.id === item.id);
 		if (local?.kind === "nav") {
+			void handleLocalSlash(item.label);
+			setDraft("");
+			setSlashOpen(false);
+			return;
+		}
+		if (
+			local?.id === "clear" ||
+			local?.id === "compact" ||
+			local?.id === "export" ||
+			local?.id === "new" ||
+			local?.id === "model" ||
+			local?.id === "thinking" ||
+			local?.id === "help"
+		) {
 			void handleLocalSlash(item.label);
 			setDraft("");
 			setSlashOpen(false);
@@ -795,20 +849,11 @@ export function ReferenceWorkspacePreview({
 	};
 
 	return (
-		<div className={`reference-workspace ${leftCollapsed ? "left-collapsed" : ""}`}>
+		<div className="reference-workspace">
 			<aside className="reference-leftbar">
 				<header className="reference-brand">
 					<img className="reference-brand-mark" src="./openpi-mark.svg" alt="" />
 					<strong>OpenPI</strong>
-					<button
-						type="button"
-						className="reference-sidebar-toggle"
-						title={leftCollapsed ? "展开侧栏" : "收起侧栏"}
-						aria-label={leftCollapsed ? "展开侧栏" : "收起侧栏"}
-						onClick={() => setLeftCollapsed((value) => !value)}
-					>
-						{leftCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-					</button>
 				</header>
 				<label className="reference-search">
 					<Search size={14} />
@@ -1777,37 +1822,19 @@ const LOCAL_SLASH: Array<{
 	hint: string;
 	kind: "action" | "nav" | "insert";
 }> = [
-	{
-		id: "remember",
-		match: /^\/(remember|记住)(?:\s+([\s\S]+))?$/i,
-		label: "/记住",
-		hint: "把内容写入记忆",
-		kind: "action",
-	},
-	{
-		id: "task",
-		match: /^\/(task|任务)(?:\s+([\s\S]+))?$/i,
-		label: "/任务",
-		hint: "从对话创建定时任务",
-		kind: "action",
-	},
-	{ id: "memory", match: /^\/(memory|记忆)\s*$/i, label: "/记忆", hint: "打开记忆页", kind: "nav" },
-	{ id: "tasks", match: /^\/(tasks|任务列表)\s*$/i, label: "/任务列表", hint: "打开定时任务", kind: "nav" },
-	{
-		id: "capabilities",
-		match: /^\/(capabilities|能力|skills|mcp)\s*$/i,
-		label: "/能力",
-		hint: "打开能力与扩展",
-		kind: "nav",
-	},
-	{
-		id: "intelligence",
-		match: /^\/(intelligence|智能|intel)\s*$/i,
-		label: "/智能",
-		hint: "打开规划记录",
-		kind: "nav",
-	},
-	{ id: "daemon", match: /^\/(daemon|runtime|运行时)\s*$/i, label: "/运行时", hint: "打开本地服务", kind: "nav" },
+	{ id: "clear", match: /^\/(clear|清屏|清空)\s*$/i, label: "/清屏", hint: "清空当前屏幕并开启新会话", kind: "action" },
+	{ id: "compact", match: /^\/(compact|压缩)\s*$/i, label: "/压缩", hint: "压缩上下文并生成检查点", kind: "action" },
+	{ id: "model", match: /^\/(model|模型)\s*$/i, label: "/模型", hint: "快速选择当前大模型及服务商", kind: "action" },
+	{ id: "thinking", match: /^\/(thinking|思考)\s*$/i, label: "/思考", hint: "切换思考深度（off / low / medium / high）", kind: "action" },
+	{ id: "new", match: /^\/(new|新建)\s*$/i, label: "/新建", hint: "新建对话会话", kind: "action" },
+	{ id: "export", match: /^\/(export|导出)\s*$/i, label: "/导出", hint: "导出当前对话为 Markdown 文档", kind: "action" },
+	{ id: "remember", match: /^\/(remember|记住)(?:\s+([\s\S]+))?$/i, label: "/记住", hint: "把关键信息保存到长期记忆库", kind: "action" },
+	{ id: "task", match: /^\/(task|任务)(?:\s+([\s\S]+))?$/i, label: "/任务", hint: "根据对话内容创建定时任务", kind: "action" },
+	{ id: "tasks", match: /^\/(tasks|任务列表)\s*$/i, label: "/任务列表", hint: "查看与管理后台定时自动化任务", kind: "nav" },
+	{ id: "memory", match: /^\/(memory|记忆)\s*$/i, label: "/记忆", hint: "查看与检索长期记忆知识库", kind: "nav" },
+	{ id: "capabilities", match: /^\/(capabilities|能力|设置|skills|mcp)\s*$/i, label: "/能力", hint: "模型服务商、技能市场与 MCP 扩展", kind: "nav" },
+	{ id: "daemon", match: /^\/(daemon|runtime|运行时)\s*$/i, label: "/运行时", hint: "查看后台守护进程状态", kind: "nav" },
+	{ id: "help", match: /^\/(help|帮助)\s*$/i, label: "/帮助", hint: "查看所有快捷斜杠命令与操作提示", kind: "action" },
 ];
 
 type ChatNavView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
