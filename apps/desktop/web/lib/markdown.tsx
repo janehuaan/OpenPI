@@ -4,19 +4,35 @@ import { nextStreamingTextOffset } from "./smooth-stream";
 const STREAM_FRAME_INTERVAL_MS = 24;
 const AUTO_FOLLOW_THRESHOLD_PX = 96;
 
-/** Lightweight markdown for chat (no raw HTML). */
-export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
-	const { displayedText, rootRef } = useSmoothText(text);
-	const blocks = useMemo(() => splitBlocks(displayedText), [displayedText]);
+function CodeBlock({ code, lang }: { code: string; lang?: string }) {
+	const [copied, setCopied] = useState(false);
+	const handleCopy = () => {
+		void navigator.clipboard.writeText(code).then(() => {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		});
+	};
 	return (
-		<div className="md" ref={rootRef}>
+		<div className="md-code-block">
+			<div className="md-code-header">
+				<span className="md-code-lang">{lang || "code"}</span>
+				<button type="button" className="md-code-copy-btn" onClick={handleCopy} title="复制代码">
+					{copied ? "已复制 ✓" : "复制"}
+				</button>
+			</div>
+			<pre className="md-code">
+				<code>{code}</code>
+			</pre>
+		</div>
+	);
+}
+
+function MarkdownBlocks({ blocks }: { blocks: Block[] }) {
+	return (
+		<>
 			{blocks.map((block, index) => {
 				if (block.type === "code") {
-					return (
-						<pre className="md-code" key={index}>
-							<code>{block.value}</code>
-						</pre>
-					);
+					return <CodeBlock code={block.value} lang={block.lang} key={index} />;
 				}
 				if (block.type === "list") {
 					if (block.ordered) {
@@ -88,8 +104,41 @@ export const MarkdownText = memo(function MarkdownText({ text }: { text: string 
 					</p>
 				);
 			})}
+		</>
+	);
+}
+
+function StreamingMarkdown({ text }: { text: string }) {
+	const { displayedText, rootRef } = useSmoothText(text);
+	const blocks = useMemo(() => splitBlocks(displayedText), [displayedText]);
+	return (
+		<div className="md" ref={rootRef}>
+			<MarkdownBlocks blocks={blocks} />
 		</div>
 	);
+}
+
+function StaticMarkdown({ text }: { text: string }) {
+	const blocks = useMemo(() => splitBlocks(text), [text]);
+	return (
+		<div className="md">
+			<MarkdownBlocks blocks={blocks} />
+		</div>
+	);
+}
+
+/** Lightweight markdown for chat (no raw HTML). */
+export const MarkdownText = memo(function MarkdownText({
+	text,
+	streaming = false,
+}: {
+	text: string;
+	streaming?: boolean;
+}) {
+	if (streaming) {
+		return <StreamingMarkdown text={text} />;
+	}
+	return <StaticMarkdown text={text} />;
 });
 
 function useSmoothText(text: string): { displayedText: string; rootRef: RefObject<HTMLDivElement | null> } {
@@ -165,7 +214,7 @@ function useSmoothText(text: string): { displayedText: string; rootRef: RefObjec
 
 type Block =
 	| { type: "paragraph"; value: string }
-	| { type: "code"; value: string }
+	| { type: "code"; value: string; lang?: string }
 	| { type: "list"; items: string[]; ordered: boolean; start?: number }
 	| { type: "heading"; level: number; value: string }
 	| { type: "hr" }
@@ -183,7 +232,6 @@ function splitBlocks(text: string): Block[] {
 		if (trimmed.startsWith("```")) {
 			const fence = line.trimStart();
 			const lang = fence.slice(3).trim();
-			void lang;
 			i += 1;
 			const body: string[] = [];
 			while (i < lines.length && !(lines[i] ?? "").trimStart().startsWith("```")) {
@@ -191,7 +239,7 @@ function splitBlocks(text: string): Block[] {
 				i += 1;
 			}
 			if (i < lines.length) i += 1;
-			blocks.push({ type: "code", value: body.join("\n") });
+			blocks.push({ type: "code", value: body.join("\n"), lang: lang || undefined });
 			continue;
 		}
 

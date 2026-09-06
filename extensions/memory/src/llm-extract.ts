@@ -85,3 +85,53 @@ export function parseLlmExtractResponse(text: string): ExtractCandidate[] {
 		source: "structured" as const,
 	}));
 }
+
+/**
+ * Execute background LLM extraction using the active model registry.
+ * Graceful: returns empty array on any failure or missing model.
+ */
+export async function executeLlmExtract(
+	ctx: { modelRegistry?: any; model?: any },
+	turns: TranscriptTurn[],
+	existing: MemoryIndexEntry[],
+	signal?: AbortSignal,
+): Promise<ExtractCandidate[]> {
+	if (!ctx.modelRegistry || !ctx.model || typeof ctx.modelRegistry.complete !== "function") {
+		return [];
+	}
+
+	const pending: PendingLlmExtract = {
+		at: new Date().toISOString(),
+		turns: turns.slice(-40),
+		existingSummary: existing.map((e) => `${e.type}:${e.key}`).slice(-80).join("\n"),
+	};
+
+	if (pending.turns.length === 0) return [];
+
+	const promptText = buildLlmExtractPrompt(pending);
+
+	try {
+		const response = await ctx.modelRegistry.complete(
+			ctx.model,
+			{
+				messages: [
+					{
+						role: "user",
+						content: [{ type: "text", text: promptText }],
+						timestamp: Date.now(),
+					},
+				],
+			},
+			{ maxTokens: 1024, signal, cacheRetention: "none" },
+		);
+
+		const text = (response?.content ?? [])
+			.filter((part: any) => part && part.type === "text")
+			.map((part: any) => part.text)
+			.join("\n");
+
+		return parseLlmExtractResponse(text);
+	} catch {
+		return [];
+	}
+}

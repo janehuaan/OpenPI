@@ -16,6 +16,10 @@ import {
 	defaultWorkspace,
 	deleteMemory,
 	listMemory,
+	listArchivedMemory,
+	restoreArchivedMemory,
+	maintainMemory,
+	memoryMeta,
 	modelCatalog,
 	parseMemoryIndex,
 	providerStatus,
@@ -254,3 +258,63 @@ test("defaultWorkspace honors OPENPI_WORKSPACE", () => {
 		else process.env.OPENPI_WORKSPACE = previous;
 	}
 });
+
+test("maintainMemory deduplicates records and updates meta.json", () => {
+	const cwd = makeWorkspace();
+	const dir = join(cwd, ".pi", "memory");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		join(dir, "MEMORY.md"),
+		"# Memory Index\n\n## project\n- [style] short\n- [style] longer description\n",
+		"utf8",
+	);
+
+	const result = maintainMemory(cwd);
+	assert.equal(result.project.before, 2);
+	assert.equal(result.project.after, 1);
+	assert.equal(result.project.merged, 1);
+
+	const data = memoryMeta(cwd);
+	assert.equal(typeof data.meta.lastMaintainAt, "string");
+	assert.equal(data.projectCount, 1);
+});
+
+test("memoryMeta returns memory metadata including files and archive status", () => {
+	const cwd = makeWorkspace();
+	const meta = memoryMeta(cwd);
+	assert.equal(meta.hasVectors, false);
+	assert.equal(meta.hasLexicon, false);
+	assert.equal(typeof meta.digestCount, "number");
+});
+
+test("listArchivedMemory and restoreArchivedMemory roundtrip", () => {
+	const cwd = makeWorkspace();
+	const archiveDayDir = join(cwd, ".pi", "memory", "archive", "2026-09-06");
+	mkdirSync(archiveDayDir, { recursive: true });
+	writeFileSync(
+		join(archiveDayDir, "project-style-17000000.json"),
+		JSON.stringify({
+			type: "project",
+			key: "style",
+			value: "old coding style",
+			reason: "superseded",
+			at: "2026-09-06T10:00:00.000Z",
+		}),
+		"utf8",
+	);
+	writeFileSync(join(archiveDayDir, "project-style-17000000.md"), "Detailed old style rules", "utf8");
+
+	const archived = listArchivedMemory(cwd, "project");
+	assert.equal(archived.length, 1);
+	assert.equal(archived[0].key, "style");
+	assert.equal(archived[0].value, "old coding style");
+	assert.equal(archived[0].body, "Detailed old style rules");
+	assert.equal(archived[0].reason, "superseded");
+
+	// Now restore into active memory
+	const active = restoreArchivedMemory(cwd, "project", archived[0]);
+	assert.equal(active.some((e) => e.key === "style" && e.value === "old coding style"), true);
+	const readBack = readMemoryTopic(cwd, "project", "project", "style");
+	assert.equal(readBack, "Detailed old style rules");
+});
+

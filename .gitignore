@@ -17,3 +17,4 @@ spike/agent-dir/
 spike/agent-dir/auth.json
 spike/agent-dir/models.json
 spike/agent-dir/models-store.json
+.pi/

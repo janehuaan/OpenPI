@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialTurnProgress, reduceTurnProgress, toolLabel } from "./turn-progress";
+import { initialTurnProgress, reduceTurnProgress, toolLabel, type TurnProgress } from "./turn-progress";
 
 describe("turn progress", () => {
 	it("starts submitted and maps lifecycle", () => {
@@ -36,5 +36,35 @@ describe("turn progress", () => {
 
 	it("has a readable fallback tool label", () => {
 		expect(toolLabel("custom_tool")).toBe("使用 custom_tool");
+	});
+
+	it("provides contextual progress labels across multi-step tool execution", () => {
+		let progress: TurnProgress | undefined = initialTurnProgress("test", 100);
+		progress = reduceTurnProgress(progress, { instanceId: "test", type: "turn_start" }, 110);
+		expect(progress?.label).toBe("正在思考…");
+
+		// Tool 1 starts (bash)
+		progress = reduceTurnProgress(progress, { instanceId: "test", type: "tool_execution_start", toolName: "bash" }, 120);
+		expect(progress?.label).toBe("运行命令");
+
+		// Tool 1 ends
+		progress = reduceTurnProgress(progress, { instanceId: "test", type: "tool_execution_end" }, 130);
+		expect(progress?.label).toBe("已完成运行命令，分析结果中…");
+
+		// Model thinks about tool 1 results
+		progress = reduceTurnProgress(progress, {
+			instanceId: "test",
+			type: "message_update",
+			assistantMessageEvent: { type: "thinking_delta" },
+		}, 140);
+		expect(progress?.label).toBe("结合执行结果深入思考中…");
+
+		// Prepares next tool
+		progress = reduceTurnProgress(progress, {
+			instanceId: "test",
+			type: "message_update",
+			assistantMessageEvent: { type: "toolcall_delta" },
+		}, 150);
+		expect(progress?.label).toBe("正在准备下一步操作…");
 	});
 });

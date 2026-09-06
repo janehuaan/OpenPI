@@ -6,6 +6,13 @@ export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhi
 
 export type TaskSchedule = { kind: "once"; runAt: string } | { kind: "cron"; expression: string; timezone?: string };
 
+export interface TaskStepDefinition {
+	id: string;
+	title?: string;
+	prompt: string;
+	dependsOn?: string[];
+}
+
 export interface TaskDefinition {
 	id: string;
 	title: string;
@@ -16,6 +23,8 @@ export interface TaskDefinition {
 	createdAt: string;
 	updatedAt: string;
 	nextRunAt?: string;
+	steps?: TaskStepDefinition[];
+	maxConcurrentSteps?: number;
 }
 
 export interface TaskRun {
@@ -121,6 +130,7 @@ export interface ConversationMessage {
 	content: unknown;
 	timestamp?: number;
 	toolName?: string;
+	toolCallId?: string;
 	isError?: boolean;
 	errorMessage?: string;
 	reasoning?: string;
@@ -135,6 +145,8 @@ export interface ConversationMessage {
 		cacheWrite: number;
 		cost?: { total: number };
 	};
+	/** Long-term memory notes recalled for this turn. */
+	recalledMemories?: Array<{ type: string; key: string; value: string }>;
 }
 
 export interface ConversationStats {
@@ -200,6 +212,7 @@ export interface ConversationState {
 		id?: string;
 		name?: string;
 		contextWindow?: number;
+		maxTokens?: number;
 		reasoning?: boolean;
 	};
 	thinkingLevel: ThinkingLevel;
@@ -487,3 +500,82 @@ export interface GeneratedMediaItem {
 	video?: AgnesVideoResult;
 	error?: string;
 }
+
+export type GitFileStatus = "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+
+export interface GitFileChange {
+	path: string;
+	status: GitFileStatus;
+	staged: boolean;
+	oldPath?: string;
+}
+
+export interface GitStatusResult {
+	isRepo: boolean;
+	branch: string;
+	upstream?: string;
+	ahead: number;
+	behind: number;
+	files: GitFileChange[];
+	error?: string;
+}
+
+export interface GitBranch {
+	name: string;
+	current: boolean;
+}
+
+export interface ArchivedMemoryEntry {
+	type: string;
+	key: string;
+	value: string;
+	body?: string;
+	reason?: string;
+	archivedAt: string;
+	scope: "project" | "global";
+}
+
+export interface ProviderPingResult {
+	ok: boolean;
+	latencyMs: number;
+	status: number;
+	message: string;
+	modelCount?: number;
+	resolvedBaseUrl?: string;
+}
+
+export interface SystemTelemetryData {
+	cpu: {
+		model: string;
+		cores: number;
+		loadAvg: number[];
+	};
+	memory: {
+		totalGb: number;
+		usedGb: number;
+		freeGb: number;
+		usagePercent: number;
+	};
+	disk?: {
+		totalGb: number;
+		usedGb: number;
+		freeGb: number;
+		usagePercent: number;
+	};
+	battery?: {
+		hasBattery: boolean;
+		percentage?: number;
+		charging?: boolean;
+		source?: string;
+	};
+}
+
+export interface PortProcessInfo {
+	command: string;
+	pid: number;
+	user: string;
+	node: string;
+	port: number;
+}
+
+

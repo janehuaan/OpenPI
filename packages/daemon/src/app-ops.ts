@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync,
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { agentDir, piCli } from "./config.ts";
+import { agentDir, getDarwinDockSuppressArgs, piCli } from "./config.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -144,6 +144,195 @@ function atomicWrite(file: string, content: string): void {
 	renameSync(temporary, file);
 }
 
+export interface MaintainResult {
+	before: number;
+	after: number;
+	merged: number;
+	pruned: number;
+}
+
+export interface MaintainMemoryResult {
+	project: MaintainResult;
+	global: MaintainResult;
+}
+
+export interface MemoryMetaResult {
+	meta: {
+		lastMaintainAt?: string;
+		sessionCountSinceMaintain?: number;
+		lastLlmExtractAt?: string;
+		lastIdleOrganizeAt?: string;
+		lastBackupAt?: string;
+		lastDigestAt?: string;
+	};
+	projectCount: number;
+	globalCount: number;
+	archiveCount: number;
+	digestCount: number;
+	latestDigest: string | null;
+	hasVectors: boolean;
+	hasLexicon: boolean;
+}
+
+function countFilesInDir(dir: string): number {
+	if (!existsSync(dir)) return 0;
+	let count = 0;
+	try {
+		const items = readdirSync(dir, { withFileTypes: true });
+		for (const item of items) {
+			if (item.isDirectory()) count += countFilesInDir(join(dir, item.name));
+			else if (item.isFile() && !item.name.startsWith(".")) count += 1;
+		}
+	} catch {
+		return 0;
+	}
+	return count;
+}
+
+export function memoryMeta(cwd: string): MemoryMetaResult {
+	const projDir = resolveMemoryDir(cwd, "project");
+	const globDir = resolveMemoryDir(cwd, "global");
+
+	const projEntries = listMemory(cwd, "project");
+	const globEntries = listMemory(cwd, "global");
+
+	let meta: Record<string, any> = {};
+	const metaFile = join(projDir, "meta.json");
+	if (existsSync(metaFile)) {
+		try {
+			meta = JSON.parse(readFileSync(metaFile, "utf8")) ?? {};
+		} catch {}
+	}
+
+	const digests = projEntries.filter((e) => e.key.startsWith("session-"));
+	const archiveCount = countFilesInDir(join(projDir, "archive")) + countFilesInDir(join(globDir, "archive"));
+	const hasVectors = existsSync(join(projDir, "vectors.bin")) || existsSync(join(globDir, "vectors.bin"));
+	const hasLexicon = existsSync(join(projDir, "lexicon.bin")) || existsSync(join(globDir, "lexicon.bin"));
+
+	return {
+		meta,
+		projectCount: projEntries.length,
+		globalCount: globEntries.length,
+		archiveCount,
+		digestCount: digests.length,
+		latestDigest: digests.at(-1)?.value ?? null,
+		hasVectors,
+		hasLexicon,
+	};
+}
+
+function maintainScope(dir: string, entries: MemoryEntry[]): MaintainResult {
+	const before = entries.length;
+	if (!existsSync(dir) || before === 0) {
+		return { before: 0, after: 0, merged: 0, pruned: 0 };
+	}
+
+	const seenKeys = new Map<string, MemoryEntry>();
+	let merged = 0;
+	for (const entry of entries) {
+		const existing = seenKeys.get(entry.key);
+		if (existing) {
+			merged += 1;
+			if (entry.value.length > existing.value.length) {
+				seenKeys.set(entry.key, entry);
+			}
+		} else {
+			seenKeys.set(entry.key, entry);
+		}
+	}
+
+	const kept = Array.from(seenKeys.values());
+	const after = kept.length;
+	const pruned = Math.max(0, before - after - merged);
+
+	atomicWrite(join(dir, "MEMORY.md"), renderMemoryIndex(kept));
+
+	const metaFile = join(dir, "meta.json");
+	let meta: Record<string, any> = {};
+	if (existsSync(metaFile)) {
+		try {
+			meta = JSON.parse(readFileSync(metaFile, "utf8")) ?? {};
+		} catch {}
+	}
+	meta.lastMaintainAt = new Date().toISOString();
+	atomicWrite(metaFile, JSON.stringify(meta, null, 2) + "\n");
+
+	return { before, after, merged, pruned };
+}
+
+export function maintainMemory(cwd: string): MaintainMemoryResult {
+	const projDir = resolveMemoryDir(cwd, "project");
+	const globDir = resolveMemoryDir(cwd, "global");
+
+	const project = maintainScope(projDir, listMemory(cwd, "project"));
+	const global = maintainScope(globDir, listMemory(cwd, "global"));
+
+	return { project, global };
+}
+
+export interface ArchivedMemoryRecord {
+	type: string;
+	key: string;
+	value: string;
+	body?: string;
+	reason?: string;
+	archivedAt: string;
+	scope: "project" | "global";
+}
+
+export function listArchivedMemory(cwd: string, scope: "project" | "global"): ArchivedMemoryRecord[] {
+	const dir = resolveMemoryDir(cwd, scope);
+	const archiveRoot = join(dir, "archive");
+	if (!existsSync(archiveRoot)) return [];
+	const results: ArchivedMemoryRecord[] = [];
+	try {
+		const days = readdirSync(archiveRoot, { withFileTypes: true })
+			.filter((d) => d.isDirectory())
+			.map((d) => d.name)
+			.sort((a, b) => b.localeCompare(a));
+
+		for (const day of days) {
+			const dayDir = join(archiveRoot, day);
+			let files: string[] = [];
+			try {
+				files = readdirSync(dayDir).filter((f) => f.endsWith(".json"));
+			} catch {
+				continue;
+			}
+			for (const file of files) {
+				try {
+					const meta = JSON.parse(readFileSync(join(dayDir, file), "utf8"));
+					const mdFile = join(dayDir, file.replace(/\.json$/, ".md"));
+					const body = existsSync(mdFile) ? readFileSync(mdFile, "utf8") : meta.value;
+					results.push({
+						type: meta.type || "context",
+						key: meta.key || file.replace(/\.json$/, ""),
+						value: meta.value || "",
+						body,
+						reason: meta.reason || "superseded",
+						archivedAt: meta.at || day,
+						scope,
+					});
+				} catch {}
+			}
+		}
+	} catch {}
+	return results;
+}
+
+export function restoreArchivedMemory(
+	cwd: string,
+	scope: "project" | "global",
+	entry: { type: string; key: string; value: string; body?: string },
+): MemoryEntry[] {
+	return writeMemory(cwd, scope, {
+		type: entry.type as any,
+		key: entry.key,
+		value: entry.value,
+		body: entry.body,
+	});
+}
+
 /**
  * Summarize a workspace for the sidebar. Deliberately shallow: this runs on
  * every workspace switch, and walking a large tree would stall the UI.
@@ -248,8 +437,8 @@ export function modelCatalog(): ModelOption[] {
 
 /** Run a `pi` subcommand in the isolated agent dir. Used for auth flows. */
 export async function runPiCommand(args: string[], timeoutMs = 60_000): Promise<{ stdout: string; stderr: string }> {
-	const { stdout, stderr } = await execFileAsync(process.execPath, [piCli(), ...args], {
-		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir() },
+	const { stdout, stderr } = await execFileAsync(process.execPath, [...getDarwinDockSuppressArgs(), piCli(), ...args], {
+		env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PI_CODING_AGENT_DIR: agentDir() },
 		timeout: timeoutMs,
 		maxBuffer: 4 * 1024 * 1024,
 	});

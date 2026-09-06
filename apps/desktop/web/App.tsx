@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { desktopApi } from "./api";
 import { ArrowLeft, Bell, RefreshCw, X } from "./components/icons.tsx";
 import {
@@ -8,13 +8,18 @@ import {
 	CreateTaskDialog,
 	DaemonSurface,
 	DeleteConversationDialog,
+	DeleteProjectDialog,
+	type DeleteProjectTarget,
 	EditProfileDialog,
 	IntelligenceSurface,
 	MemorySurface,
 	ProviderAuthDialog,
+	QuickSaveMemoryDialog,
 	ReferenceWorkspacePreview,
 	RenameConversationDialog,
 	TasksSurface,
+	GitSurface,
+	FloatingHud,
 } from "./components/surfaces";
 import {
 	type CapabilityTab,
@@ -30,14 +35,21 @@ import {
 	blockingConversationUiRequest,
 	contentText,
 	conversationContentMatches,
+	detectRepetitionLoop,
 	instanceTitle,
 	isConversationMessage,
 	isRecord,
 	mergeConversationMessage,
+	messageReasoning,
+	modelSupportsReasoning,
 	normalizeConversationModels,
+	getHighestThinkingLevel,
 } from "./lib/helpers";
 import { reduceTurnProgress, submittedTurnProgress, type TurnProgress } from "./lib/turn-progress";
-import { hashForView, initialView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
+import { hashForView, initialView, isView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
+import { draftStore } from "./lib/draft-store";
+import { exportAndDownloadConversation } from "./lib/export-markdown";
+import { useGlobalKeybindings } from "./lib/keybindings";
 
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
 
@@ -51,6 +63,7 @@ import type {
 	ConversationStats,
 	ConversationUiResponse,
 	CreateTaskInput,
+	GitStatusResult,
 	ImageContent,
 	RunningTool,
 	TaskRun,
@@ -101,7 +114,7 @@ export function App() {
 	const [extensionNotice, setExtensionNotice] = useState<ExtensionNotice>();
 	/** info notify (e.g. TPS) shown under the latest assistant reply, not the top bar */
 	const [turnMeta, setTurnMeta] = useState<{ instanceId: string; message: string }>();
-	const [composerDraftRequest, setComposerDraftRequest] = useState<{ id: string; text: string }>();
+	const [composerDraftRequest, setComposerDraftRequest] = useState<{ id: string; text: string; images?: string[] }>();
 	const [selectedInstanceId, setSelectedInstanceId] = useState<string>();
 	const [selectedTaskId, setSelectedTaskId] = useState<string>();
 	const [selectedRunId, setSelectedRunId] = useState<string>();
@@ -124,13 +137,17 @@ export function App() {
 	const [taskPrefill, setTaskPrefill] = useState<{ title?: string; prompt?: string }>({});
 	const [renamingConversation, setRenamingConversation] = useState<AgentInstance>();
 	const [deletingConversation, setDeletingConversation] = useState<AgentInstance>();
-	const [sidebarOpen, setSidebarOpen] = useState(false);
+	const [removingProject, setRemovingProject] = useState<DeleteProjectTarget>();
+	const [quickSaveMemoryText, setQuickSaveMemoryText] = useState<string | null>(null);
+	const [sidebarOpen, setSidebarOpen] = useState(true);
 	const [contextOpen, setContextOpen] = useState(false);
-	const [chatTab, setChatTab] = useState<"chat" | "activity">("chat");
 	const [log, setLog] = useState<string>();
 	const [workspaceMemory, setWorkspaceMemory] = useState<string[]>([]);
 	const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceSummary>();
+	const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null);
+	const [gitLoading, setGitLoading] = useState(false);
 	const [runningTools, setRunningTools] = useState<RunningTool[]>([]);
+	const [toolDurations, setToolDurations] = useState<Record<string, number>>({});
 	const [visionFallback, setVisionFallback] = useState<VisionFallbackConfig>();
 	const [workspaceIntelligenceRuns, setWorkspaceIntelligenceRuns] = useState<string[]>([]);
 	const [intelligenceDetail, setIntelligenceDetail] = useState<string>("");
@@ -190,6 +207,7 @@ export function App() {
 	const conversationCacheRef = useRef<Record<string, ConversationSnapshot>>({});
 	const routeInitializedRef = useRef(false);
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
+	const turnStartTimesRef = useRef<Record<string, number>>({});
 	selectedInstanceIdRef.current = selectedInstanceId;
 	const clearRunningTools = useCallback((instanceId?: string): void => {
 		if (instanceId !== undefined && runningToolsInstanceIdRef.current !== instanceId) return;
@@ -198,7 +216,12 @@ export function App() {
 	}, []);
 
 	const activeConversationUiRequest = pendingConversationUiRequests[0];
-	const isStreaming = Boolean(conversation?.state.isStreaming || optimisticMessage);
+	const isStreaming = Boolean(
+		conversation?.state.isStreaming ||
+		optimisticMessage ||
+		(selectedInstanceId && streamingInstances.has(selectedInstanceId)),
+	);
+	const isWorking = Boolean(isStreaming || busy === "send-message" || runningTools.length > 0);
 
 	useEffect(() => {
 		if (conversation) conversationCacheRef.current[conversation.instance.id] = conversation;
@@ -536,8 +559,14 @@ export function App() {
 				}
 				return;
 			}
+			if (eventType === "rpc_ready") {
+				setStreamConnectedInstanceId(payload.instanceId);
+				return;
+			}
 			if (eventType === "agent_start") {
+				turnStartTimesRef.current[payload.instanceId] = Date.now();
 				clearRunningTools();
+				setStreamConnectedInstanceId(payload.instanceId);
 				setStreamingInstances((prev) => new Set(prev).add(payload.instanceId));
 				setConversation((current) =>
 					current?.instance.id === payload.instanceId
@@ -558,6 +587,16 @@ export function App() {
 						? { ...current, state: { ...current.state, isStreaming: false } }
 						: current,
 				);
+				const startTime = turnStartTimesRef.current[payload.instanceId];
+				delete turnStartTimesRef.current[payload.instanceId];
+				const duration = startTime ? Date.now() - startTime : 0;
+				const isUnfocused = typeof document !== "undefined" && (document.hidden || !document.hasFocus());
+				if (duration >= 5000 || isUnfocused) {
+					void desktopApi.notifyTaskCompleted?.({
+						message: "任务执行完成",
+						durationMs: duration,
+					});
+				}
 				void desktopApi
 					.getConversation(payload.instanceId)
 					.then((next) => {
@@ -597,18 +636,25 @@ export function App() {
 			if (eventType === "tool_execution_end") {
 				const toolCallId = typeof payload.event.toolCallId === "string" ? payload.event.toolCallId : undefined;
 				if (toolCallId && selectedInstanceIdRef.current === payload.instanceId) {
-					setRunningTools((current) => current.filter((tool) => tool.toolCallId !== toolCallId));
+					setRunningTools((current) => {
+						const existing = current.find((tool) => tool.toolCallId === toolCallId);
+						if (existing) {
+							const duration = Math.max(1, Date.now() - existing.startedAt);
+							setToolDurations((prev) => ({ ...prev, [toolCallId]: duration }));
+						}
+						return current.filter((tool) => tool.toolCallId !== toolCallId);
+					});
 				}
 				return;
 			}
 			if (eventType === "message_update") {
 				const amEvent = (payload.event as Record<string, any>).assistantMessageEvent;
-				if (amEvent && (amEvent.type === "text_delta" || amEvent.type === "thinking_delta")) {
+				if (amEvent) {
 					setConversation((current) => {
 						if (!current || current.instance.id !== payload.instanceId) return current;
 						const messages = [...current.messages];
 						let last = messages[messages.length - 1];
-						if (!last || last.role !== "assistant" || last.timestamp !== undefined) {
+						if (!last || last.role !== "assistant") {
 							last = { role: "assistant", content: [] };
 							messages.push(last);
 						} else {
@@ -619,8 +665,10 @@ export function App() {
 						const idx = typeof amEvent.contentIndex === "number" ? amEvent.contentIndex : 0;
 						while (content.length <= idx) {
 							content.push(
-								amEvent.type === "thinking_delta"
+								amEvent.type === "thinking_delta" || amEvent.type === "thinking_start" || amEvent.type === "reasoning_delta" || amEvent.type === "reasoning_start"
 									? { type: "thinking", thinking: "" }
+									: amEvent.type === "toolcall_start" || amEvent.type === "toolcall_delta" || amEvent.type === "toolcall_end"
+									? { type: "toolCall", id: amEvent.id ?? "", name: amEvent.toolName ?? "", arguments: {} }
 									: { type: "text", text: "" },
 							);
 						}
@@ -628,12 +676,62 @@ export function App() {
 						if (amEvent.type === "text_delta" && typeof amEvent.delta === "string") {
 							block.type = "text";
 							block.text = (block.text || "") + amEvent.delta;
-						} else if (amEvent.type === "thinking_delta" && typeof amEvent.delta === "string") {
+						} else if (
+							(amEvent.type === "thinking_delta" || amEvent.type === "reasoning_delta") &&
+							(typeof amEvent.delta === "string" || typeof amEvent.reasoning_delta === "string")
+						) {
 							block.type = "thinking";
-							block.thinking = (block.thinking || "") + amEvent.delta;
+							const chunk = typeof amEvent.delta === "string" ? amEvent.delta : amEvent.reasoning_delta;
+							block.thinking = (block.thinking || "") + chunk;
+						} else if (amEvent.type === "thinking_end" || amEvent.type === "reasoning_end") {
+							block.type = "thinking";
+							if (typeof amEvent.content === "string") {
+								block.thinking = amEvent.content;
+							}
+						} else if (amEvent.type === "toolcall_start") {
+							block.type = "toolCall";
+							block.id = amEvent.id || block.id;
+							block.name = amEvent.toolName || block.name;
+							block.arguments = amEvent.arguments ?? block.arguments ?? {};
+						} else if (amEvent.type === "toolcall_delta" && typeof amEvent.delta === "string") {
+							block.type = "toolCall";
+							block.rawDelta = (block.rawDelta || "") + amEvent.delta;
+							try {
+								block.arguments = JSON.parse(block.rawDelta);
+							} catch {}
+						} else if (amEvent.type === "toolcall_end" && amEvent.toolCall) {
+							block.type = "toolCall";
+							block.id = amEvent.toolCall.id || block.id;
+							block.name = amEvent.toolCall.name || block.name;
+							block.arguments = amEvent.toolCall.arguments ?? block.arguments ?? {};
 						}
 						content[idx] = block;
 						last.content = content;
+
+						// Circuit Breaker: detect repetitive degeneration loop (only on final text output)
+						const textToCheck = block.type === "text" ? block.text : "";
+						const loop = detectRepetitionLoop(textToCheck || "");
+						if (loop.isLoop && loop.repeatedPattern) {
+							void desktopApi.abortConversation(payload.instanceId);
+							setError(
+								`⚠️ 检测到模型输出陷入重复死循环（“${loop.repeatedPattern}” 连续重复出现），已自动为您熔断截停！已阻止不必要的 Token 消耗。建议切换至 medium 思考档位或选用 Pro 模型。`,
+							);
+							setStreamingInstances((prev) => {
+								const next = new Set(prev);
+								next.delete(payload.instanceId);
+								return next;
+							});
+							clearRunningTools(payload.instanceId);
+							if (block.type === "text") {
+								block.text = `${block.text}\n\n> ⚠️ *[OpenPI 智能熔断]* 检测到模型输出陷入自回归复读死循环，已自动终止生成，保护您的 Token 与上下文。`;
+							}
+							return {
+								...current,
+								state: { ...current.state, isStreaming: false },
+								messages,
+							};
+						}
+
 						return {
 							...current,
 							state: { ...current.state, isStreaming: true, messageCount: messages.length },
@@ -689,12 +787,20 @@ export function App() {
 	useEffect(() => {
 		if (!desktopApi.isNative || !selectedInstanceId) return;
 		let disposed = false;
-		void desktopApi.watchConversation(selectedInstanceId).catch((caught: unknown) => {
-			if (!disposed) {
-				clearRunningTools(selectedInstanceId);
-				setError(caught instanceof Error ? caught.message : String(caught));
-			}
-		});
+		void desktopApi
+			.watchConversation(selectedInstanceId)
+			.then(() => {
+				if (!disposed) {
+					setStreamConnectedInstanceId(selectedInstanceId);
+				}
+			})
+			.catch((caught: unknown) => {
+				if (!disposed) {
+					setStreamConnectedInstanceId((current) => (current === selectedInstanceId ? undefined : current));
+					clearRunningTools(selectedInstanceId);
+					setError(caught instanceof Error ? caught.message : String(caught));
+				}
+			});
 		return () => {
 			disposed = true;
 			setStreamConnectedInstanceId((current) => (current === selectedInstanceId ? undefined : current));
@@ -731,8 +837,53 @@ export function App() {
 				const streamConnected = streamConnectedInstanceId === instanceId;
 				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 4_000;
 				if (!disposed) {
-					setConversation(next);
-					if (!next.state.isStreaming) clearRunningTools(instanceId);
+					setConversation((current) => {
+						if (!current || current.instance.id !== next.instance.id) {
+							return next;
+						}
+						const isActivelyStreaming = Boolean(
+							current.state?.isStreaming ||
+							next.state?.isStreaming ||
+							streamingInstances.has(instanceId),
+						);
+						if (isActivelyStreaming) {
+							if (current.messages.length > next.messages.length) {
+								return {
+									...next,
+									state: { ...next.state, isStreaming: true },
+									messages: [
+										...next.messages,
+										...current.messages.slice(next.messages.length),
+									],
+								};
+							}
+							const lastCurrent = current.messages[current.messages.length - 1];
+							const lastNext = next.messages[next.messages.length - 1];
+							if (lastCurrent?.role === "assistant" && lastNext?.role === "assistant") {
+								const currentText = contentText(lastCurrent.content);
+								const nextText = contentText(lastNext.content);
+								const currentReasoning = messageReasoning(lastCurrent);
+								const nextReasoning = messageReasoning(lastNext);
+								if (currentText.length > nextText.length || currentReasoning.length > nextReasoning.length) {
+									const merged = [...next.messages];
+									merged[merged.length - 1] = lastCurrent;
+									return {
+										...next,
+										state: { ...next.state, isStreaming: true },
+										messages: merged,
+									};
+								}
+							}
+							return {
+								...next,
+								state: { ...next.state, isStreaming: true },
+							};
+						}
+						return next;
+					});
+					if (!next.state.isStreaming && !streamingInstances.has(instanceId)) {
+						clearRunningTools(instanceId);
+					}
 					if (messageAccepted) {
 						setOptimisticMessage((current) => (current === pending ? undefined : current));
 					}
@@ -765,8 +916,11 @@ export function App() {
 		return () => {
 			disposed = true;
 			if (timer !== undefined) window.clearTimeout(timer);
+			if (instanceId) {
+				void desktopApi.stopConversationStream(instanceId).catch(() => {});
+			}
 		};
-	}, [selectedInstanceId, optimisticMessage, streamConnectedInstanceId]);
+	}, [selectedInstanceId, optimisticMessage, streamConnectedInstanceId, streamingInstances]);
 
 	useEffect(() => {
 		clearRunningTools();
@@ -909,8 +1063,34 @@ export function App() {
 		selectedAgentInstance?.mode === "code" ? selectedAgentInstance.cwd : (codeWorkspace ?? setup.workspace);
 	const selectedWorkspace =
 		activeConversation?.instance.cwd ??
-		snapshot.instances.find((instance) => instance.id === selectedInstanceId)?.cwd;
-	const operationView = view === "memory" || view === "intelligence" || view === "daemon";
+		snapshot.instances.find((instance) => instance.id === selectedInstanceId)?.cwd ??
+		setup.workspace;
+	const operationView =
+		view === "memory" || view === "intelligence" || view === "daemon" || view === "git";
+
+	const loadGitStatus = useCallback(
+		async (cwd?: string) => {
+			const targetCwd = cwd ?? selectedWorkspace ?? setup.workspace;
+			if (!targetCwd) {
+				setGitStatus(null);
+				return;
+			}
+			setGitLoading(true);
+			try {
+				const res = await desktopApi.getGitStatus(targetCwd);
+				setGitStatus(res);
+			} catch {
+				setGitStatus(null);
+			} finally {
+				setGitLoading(false);
+			}
+		},
+		[selectedWorkspace, setup.workspace],
+	);
+
+	useEffect(() => {
+		void loadGitStatus();
+	}, [loadGitStatus]);
 
 	useEffect(() => {
 		if (!selectedWorkspace) {
@@ -1143,15 +1323,33 @@ export function App() {
 			const activeInstanceId = instanceId;
 			const sessionName =
 				pending.baselineMessageCount === 0
-					? (message.replace(/\s+/g, " ").trim() || documents[0]?.name || "Image conversation").slice(0, 48)
+					? (message.replace(/^[/@#*\s]+/, "").replace(/\s+/g, " ").trim() || documents[0]?.name || "Image conversation").slice(0, 32)
 					: undefined;
 			if (sessionName) {
 				setConversationTitles((current) => ({ ...current, [activeInstanceId]: sessionName }));
+				setSnapshot((current) => ({
+					...current,
+					instances: current.instances.map((inst) =>
+						inst.id === activeInstanceId ? { ...inst, label: sessionName } : inst,
+					),
+				}));
 			}
-			if (desktopApi.isNative) await desktopApi.watchConversation(activeInstanceId);
+			if (desktopApi.isNative) {
+				await desktopApi.watchConversation(activeInstanceId);
+				setStreamConnectedInstanceId(activeInstanceId);
+			}
+			setStreamingInstances((prev) => new Set(prev).add(activeInstanceId));
 			await desktopApi.sendMessage(activeInstanceId, prompt, images, sessionName);
 		} catch (caught) {
-			clearRunningTools(instanceId);
+			if (instanceId) {
+				const targetId = instanceId;
+				setStreamingInstances((prev) => {
+					const next = new Set(prev);
+					next.delete(targetId);
+					return next;
+				});
+				clearRunningTools(targetId);
+			}
 			setTurnProgress(undefined);
 			setOptimisticMessage((current) =>
 				current === pending || current?.message === pending.message ? undefined : current,
@@ -1162,6 +1360,30 @@ export function App() {
 			throw caught;
 		} finally {
 			setBusy(undefined);
+		}
+	}
+
+	async function steerMessage(message: string, images: ImageContent[] = []): Promise<void> {
+		const instanceId = selectedInstanceIdRef.current ?? selectedInstanceId;
+		if (!instanceId) return;
+		try {
+			await desktopApi.steerConversation(instanceId, message, images);
+		} catch (caught) {
+			const messageText = caught instanceof Error ? caught.message : String(caught);
+			setError(messageText);
+			throw caught;
+		}
+	}
+
+	async function followUpMessage(message: string, images: ImageContent[] = []): Promise<void> {
+		const instanceId = selectedInstanceIdRef.current ?? selectedInstanceId;
+		if (!instanceId) return;
+		try {
+			await desktopApi.followUpConversation(instanceId, message, images);
+		} catch (caught) {
+			const messageText = caught instanceof Error ? caught.message : String(caught);
+			setError(messageText);
+			throw caught;
 		}
 	}
 
@@ -1179,6 +1401,11 @@ export function App() {
 	function abortConversation(): void {
 		const instanceId = selectedInstanceIdRef.current;
 		if (!instanceId) return;
+		setStreamingInstances((prev) => {
+			const next = new Set(prev);
+			next.delete(instanceId);
+			return next;
+		});
 		setOptimisticMessage(undefined);
 		setTurnProgress(undefined);
 		clearRunningTools(instanceId);
@@ -1246,19 +1473,25 @@ export function App() {
 	async function renameSelectedConversation(name: string): Promise<void> {
 		if (!renamingConversation) return;
 		const instance = renamingConversation;
-		if (await perform("rename-conversation", () => desktopApi.renameConversation(instance.id, name))) {
-			setConversationTitles((current) => ({ ...current, [instance.id]: name.trim() }));
-			setConversation((current) =>
-				current?.instance.id === instance.id
-					? {
-							...current,
-							instance: { ...current.instance, label: name.trim() },
-							state: { ...current.state, sessionName: name.trim() },
-						}
-					: current,
-			);
-			setRenamingConversation(undefined);
-		}
+		const trimmedName = name.trim();
+		setRenamingConversation(undefined);
+		setConversationTitles((current) => ({ ...current, [instance.id]: trimmedName }));
+		setSnapshot((prev) => ({
+			...prev,
+			instances: prev.instances.map((inst) =>
+				inst.id === instance.id ? { ...inst, label: trimmedName } : inst,
+			),
+		}));
+		setConversation((current) =>
+			current?.instance.id === instance.id
+				? {
+						...current,
+						instance: { ...current.instance, label: trimmedName },
+						state: { ...current.state, sessionName: trimmedName },
+					}
+				: current,
+		);
+		await perform("rename-conversation", () => desktopApi.renameConversation(instance.id, trimmedName));
 	}
 
 	function exportSelectedConversation(): void {
@@ -1266,38 +1499,157 @@ export function App() {
 			setError("没有可导出的对话。");
 			return;
 		}
-		const title = instanceTitle(conversation.instance, conversation.state.sessionName);
-		const body = conversation.messages
-			.filter((message) => message.role === "user" || message.role === "assistant" || message.role === "toolResult")
-			.map((message) => {
-				const role = message.role === "user" ? "You" : message.role === "assistant" ? "OpenPI" : message.toolName;
-				return `## ${role ?? "Tool"}\n\n${contentText(message.content)}`;
-			})
-			.join("\n\n");
-		const blob = new Blob([`# ${title}\n\n${body}\n`], { type: "text/markdown;charset=utf-8" });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement("a");
-		link.href = url;
-		link.download = "openpi-conversation.md";
-		link.click();
-		URL.revokeObjectURL(url);
+		exportAndDownloadConversation(conversation);
 	}
+
+	const handleNewConversation = useCallback(() => {
+		const isCode = appMode === "code";
+		const targetAgentMode: AgentMode = isCode ? "code" : "work";
+		const targetAppMode: AppMode = isCode ? "code" : "chat";
+		const targetWorkspace = isCode ? (codeWorkspace ?? selectedWorkspace) : undefined;
+		setAppMode(targetAppMode);
+		setPreferredMode(targetAgentMode);
+		clearRunningTools();
+		void createConversation(targetAgentMode, targetWorkspace);
+	}, [appMode, codeWorkspace, selectedWorkspace, clearRunningTools, createConversation]);
+
+	const handleAbort = useCallback(() => {
+		abortConversation();
+	}, []);
+
+	useGlobalKeybindings({
+		onNewConversation: handleNewConversation,
+		onToggleSidebar: () => setSidebarOpen((prev) => !prev),
+		onAbort: handleAbort,
+		onOpenSettings: () => setView("capabilities"),
+		onExportMarkdown: exportSelectedConversation,
+		onToggleGit: () => setView((prev) => (prev === "git" ? "chat" : "git")),
+		isWorking,
+	});
+
+	useEffect(() => {
+		const unsubNavigate = desktopApi.onNavigate((targetView) => {
+			if (isView(targetView)) {
+				setView(targetView);
+			}
+		});
+		const unsubNew = desktopApi.onNewConversation(() => {
+			handleNewConversation();
+			setView("chat");
+		});
+		const unsubPrefill = desktopApi.onComposerPrefill?.((draft) => {
+			setView("chat");
+			setComposerDraftRequest({
+				id: Date.now().toString(),
+				text: draft.text,
+				images: draft.images,
+			});
+		});
+		return () => {
+			unsubNavigate();
+			unsubNew();
+			unsubPrefill?.();
+		};
+	}, [handleNewConversation]);
 
 	async function deleteSelectedConversation(): Promise<void> {
 		if (!deletingConversation) return;
 		const instanceId = deletingConversation.id;
-		if (await perform("delete-conversation", () => desktopApi.deleteConversation(instanceId))) {
-			setConversationTitles((current) => {
-				const next = { ...current };
-				delete next[instanceId];
-				return next;
+		const targetToDelete = deletingConversation;
+
+		// Immediately dismiss dialog and optimistically remove conversation from state
+		setDeletingConversation(undefined);
+		draftStore.clearDraft(instanceId);
+		setConversationTitles((current) => {
+			const next = { ...current };
+			delete next[instanceId];
+			return next;
+		});
+		setPendingConversationUiRequests((current) => current.filter((pending) => pending.instanceId !== instanceId));
+		setSnapshot((prev) => ({
+			...prev,
+			instances: prev.instances.filter((inst) => inst.id !== instanceId),
+		}));
+		if (selectedInstanceId === instanceId) {
+			setConversation(undefined);
+			setOptimisticMessage(undefined);
+			setSelectedInstanceId((current) => {
+				if (current !== instanceId) return current;
+				const remaining = snapshot.instances.filter((inst) => inst.id !== instanceId);
+				return remaining[0]?.id;
 			});
-			setPendingConversationUiRequests((current) => current.filter((pending) => pending.instanceId !== instanceId));
-			if (selectedInstanceId === instanceId) {
-				setConversation(undefined);
-				setOptimisticMessage(undefined);
+		}
+
+		const success = await perform("delete-conversation", () => desktopApi.deleteConversation(instanceId));
+		if (!success) {
+			// Rollback on failure
+			setSnapshot((prev) => ({
+				...prev,
+				instances: [...prev.instances, targetToDelete],
+			}));
+		}
+	}
+
+	async function removeSelectedProject(): Promise<void> {
+		if (!removingProject) return;
+		const target = removingProject;
+		const targetIds = new Set(target.instances.map((i) => i.id));
+		const backupInstances = [...target.instances];
+
+		// Immediately dismiss dialog and optimistically clean up state
+		setRemovingProject(undefined);
+
+		// Clear drafts for all project sessions
+		for (const inst of target.instances) {
+			draftStore.clearDraft(inst.id);
+		}
+
+		// Clean up titles and pending conversation UI requests
+		setConversationTitles((current) => {
+			const next = { ...current };
+			for (const inst of target.instances) {
+				delete next[inst.id];
 			}
-			setDeletingConversation(undefined);
+			return next;
+		});
+		setPendingConversationUiRequests((current) =>
+			current.filter((pending) => !targetIds.has(pending.instanceId)),
+		);
+
+		// Optimistically filter instances from snapshot
+		setSnapshot((prev) => ({
+			...prev,
+			instances: prev.instances.filter((inst) => !targetIds.has(inst.id)),
+		}));
+
+		// If active session belonged to this project, switch away cleanly
+		if (selectedInstanceId && targetIds.has(selectedInstanceId)) {
+			setConversation(undefined);
+			setOptimisticMessage(undefined);
+			setSelectedInstanceId((current) => {
+				if (!current || !targetIds.has(current)) return current;
+				const remaining = snapshot.instances.filter((inst) => !targetIds.has(inst.id));
+				return remaining[0]?.id;
+			});
+		}
+
+		// Reset codeWorkspace if it pointed to the removed project
+		if (codeWorkspace === target.cwd) {
+			setCodeWorkspace(undefined);
+			window.localStorage.removeItem("openpi-code-workspace");
+		}
+
+		// Concurrently remove each conversation from daemon
+		const results = await perform("remove-project", () =>
+			Promise.allSettled(target.instances.map((inst) => desktopApi.deleteConversation(inst.id))),
+		);
+
+		// If completely failed, rollback
+		if (!results) {
+			setSnapshot((prev) => ({
+				...prev,
+				instances: [...prev.instances, ...backupInstances],
+			}));
 		}
 	}
 
@@ -1439,23 +1791,13 @@ export function App() {
 		}
 	}
 
-	async function rememberFromChat(text: string): Promise<void> {
+	function rememberFromChat(text: string): void {
 		const body = text.trim();
 		if (!body) {
 			setError("没有可记住的内容。");
 			return;
 		}
-		if (!selectedWorkspace) {
-			setError("先选中一个对话，再写入记忆。");
-			return;
-		}
-		const key =
-			body
-				.toLowerCase()
-				.replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
-				.replace(/^-|-$/g, "")
-				.slice(0, 32) || `note-${Date.now().toString(36)}`;
-		await saveMemoryEntry("project", key, body.slice(0, 500));
+		setQuickSaveMemoryText(body);
 	}
 
 	function openTaskFromChat(prompt: string): void {
@@ -1550,9 +1892,18 @@ export function App() {
 	refreshCurrentViewRef.current = refreshCurrentViewData;
 
 	useEffect(() => {
-		return desktopApi.onRefreshData(() => {
+		const unsubRefresh = desktopApi.onRefreshData(() => {
 			void refreshCurrentViewRef.current();
 		});
+		const unsubDaemonStatus = desktopApi.onDaemonStatus?.((status) => {
+			if (status === "connected") {
+				void refreshCurrentViewRef.current();
+			}
+		});
+		return () => {
+			unsubRefresh();
+			unsubDaemonStatus?.();
+		};
 	}, []);
 
 	if (!startupReady) {
@@ -1570,8 +1921,10 @@ export function App() {
 		);
 	}
 
+	let mainContent: ReactNode;
+
 	if (view === "chat") {
-		return (
+		mainContent = (
 			<ReferenceWorkspacePreview
 				projectInstances={conversationList.projects}
 				chatInstances={conversations}
@@ -1580,6 +1933,7 @@ export function App() {
 				conversationTitles={conversationTitles}
 				workspaceSummary={workspaceSummary}
 				runningTools={runningTools}
+				toolDurations={toolDurations}
 				turnProgress={turnProgress}
 				todoState={todoState}
 				optimisticMessage={
@@ -1598,6 +1952,8 @@ export function App() {
 				configuring={busy === "set-model" || busy === "set-thinking"}
 				sending={busy === "send-message"}
 				appMode={appMode}
+				sidebarOpen={sidebarOpen}
+				onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
 				onSelectConversation={(instanceId) => {
 					setAppMode("chat");
 					setPreferredMode("work");
@@ -1610,26 +1966,47 @@ export function App() {
 					if (project?.cwd) setCodeWorkspace(project.cwd);
 					selectConversation(instanceId);
 				}}
-				onNewProjectSession={(workspace) => void createConversation("code", workspace)}
-				onNewConversation={() =>
-					void createConversation(preferredMode, preferredMode === "code" ? codeWorkspace : undefined)
-				}
+				onNewProjectSession={(workspace) => {
+					setAppMode("code");
+					setPreferredMode("code");
+					setCodeWorkspace(workspace);
+					clearRunningTools();
+					void createConversation("code", workspace);
+				}}
+				onNewConversation={() => {
+					setAppMode("chat");
+					setPreferredMode("work");
+					clearRunningTools();
+					void createConversation("work", undefined);
+				}}
 				onOpenSettings={() => setView("capabilities")}
 				onSend={sendMessage}
-				onAbort={abortConversation}
-				onRenameConversation={() => {
-					if (selectedAgentInstance) setRenamingConversation(selectedAgentInstance);
+				onSteer={steerMessage}
+				onFollowUp={followUpMessage}
+				onAbort={handleAbort}
+				onRenameConversation={(target) => {
+					const inst = target ?? selectedAgentInstance;
+					if (inst) setRenamingConversation(inst);
 				}}
 				onExportConversation={exportSelectedConversation}
-				onDeleteConversation={() => {
-					if (selectedAgentInstance) setDeletingConversation(selectedAgentInstance);
+				onDeleteConversation={(target) => {
+					const inst = target ?? selectedAgentInstance;
+					if (inst) setDeletingConversation(inst);
+				}}
+				onRemoveProject={(target) => {
+					setRemovingProject(target);
 				}}
 				onRemember={(text) => rememberFromChat(text)}
 				onCreateTaskFromChat={openTaskFromChat}
 				onModelChange={(model) =>
-					void updateConversationConfiguration("set-model", (instanceId) =>
-						desktopApi.setConversationModel(instanceId, model.provider, model.id),
-					)
+					void updateConversationConfiguration("set-model", async (instanceId) => {
+						const res = await desktopApi.setConversationModel(instanceId, model.provider, model.id);
+						if (modelSupportsReasoning(model)) {
+							const highest = getHighestThinkingLevel(model);
+							await desktopApi.setConversationThinkingLevel(instanceId, highest).catch(() => {});
+						}
+						return res;
+					})
 				}
 				onThinkingLevelChange={(level) =>
 					void updateConversationConfiguration("set-thinking", (instanceId) =>
@@ -1638,20 +2015,28 @@ export function App() {
 				}
 				onAppModeChange={handleModeChange}
 				slashCommands={conversationCommands}
+				gitStatus={gitStatus}
+				gitLoading={gitLoading}
+				onRefreshGit={loadGitStatus}
+				onOpenGit={() => setView("git")}
 				onNavigate={(next) => setView(next)}
+				prefillDraft={composerDraftRequest}
 			/>
 		);
-	}
-
-	if (view === "capabilities") {
-		return (
+	} else if (view === "capabilities") {
+		mainContent = (
 			<CapabilitiesSurface
 				conversation={conversation}
 				capabilities={capabilities}
 				loading={loadingCapabilities}
 				busy={busy}
 				onClose={() => setView("chat")}
-				onReload={() => selectedInstanceId && void loadCapabilities(selectedInstanceId, true)}
+				onReload={async () => {
+					if (selectedInstanceId) {
+						await loadCapabilities(selectedInstanceId, true);
+					}
+					await desktopApi.getSnapshot().then(setSnapshot).catch(() => {});
+				}}
 				onUseSkill={(name) => openCapabilityPrompt(`/skill:${name} `)}
 				onConfigureMcp={() => openCapabilityPrompt("/mcp setup")}
 				onInstallPackage={(marketPackage) =>
@@ -1666,10 +2051,17 @@ export function App() {
 				}
 			/>
 		);
-	}
-
-	return (
-		<div className={`app-shell chat-first ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""}`}>
+	} else if (typeof window !== "undefined" && window.location.hash.includes("hud")) {
+		return (
+			<FloatingHud
+				onOpenMainWithPrompt={(prompt) => {
+					void desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
+				}}
+			/>
+		);
+	} else {
+		mainContent = (
+		<div className={`app-shell chat-first ${sidebarOpen ? "sidebar-open" : ""} ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""}`}>
 			<div className="main-column">
 				<div className="secondary-bar">
 					<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
@@ -1773,6 +2165,14 @@ export function App() {
 						onRefresh={() => void refreshIntelligence()}
 						onSelectRun={(runId) => void loadIntelligenceRun(runId)}
 					/>
+				) : view === "git" ? (
+					<GitSurface
+						cwd={selectedWorkspace ?? setup.workspace}
+						gitStatus={gitStatus}
+						loading={gitLoading}
+						onRefresh={() => void loadGitStatus()}
+						onClose={() => setView("chat")}
+					/>
 				) : (
 					<DaemonSurface
 						snapshot={snapshot}
@@ -1788,8 +2188,13 @@ export function App() {
 					/>
 				)}
 			</div>
+		</div>
+		);
+	}
 
-
+	return (
+		<>
+			{mainContent}
 
 			{showCreateTask && (
 				<CreateTaskDialog
@@ -1805,6 +2210,39 @@ export function App() {
 						if (await perform("create-task", () => desktopApi.createTask(input))) {
 							setShowCreateTask(false);
 							setTaskPrefill({});
+						}
+					}}
+				/>
+			)}
+
+			{quickSaveMemoryText !== null && (
+				<QuickSaveMemoryDialog
+					initialText={quickSaveMemoryText}
+					workspace={selectedWorkspace}
+					busy={busy === "write-memory"}
+					onClose={() => setQuickSaveMemoryText(null)}
+					onSave={async (entry) => {
+						const cwd =
+							(entry.scope === "project" ? selectedWorkspace : undefined) ||
+							(await desktopApi.defaultWorkspace().catch(() => ""));
+						if (
+							await perform("write-memory", () =>
+								desktopApi.writeMemoryEntry(
+									cwd,
+									entry.type,
+									entry.key,
+									entry.value,
+									entry.body,
+									entry.scope,
+								),
+							)
+						) {
+							await refreshMemory();
+							setExtensionNotice({
+								id: `mem-${Date.now()}`,
+								type: "info",
+								message: `已记入长期记忆 [${entry.scope === "global" ? "全局" : "项目"}]: ${entry.key}`,
+							});
 						}
 					}}
 				/>
@@ -1851,6 +2289,15 @@ export function App() {
 				/>
 			)}
 
+			{removingProject && (
+				<DeleteProjectDialog
+					target={removingProject}
+					busy={busy === "remove-project"}
+					onClose={() => setRemovingProject(undefined)}
+					onDelete={removeSelectedProject}
+				/>
+			)}
+
 			{activeConversationUiRequest && (
 				<ConversationUiDialog
 					key={activeConversationUiRequest.request.id}
@@ -1859,6 +2306,6 @@ export function App() {
 					onRespond={respondToConversationUi}
 				/>
 			)}
-		</div>
+		</>
 	);
 }

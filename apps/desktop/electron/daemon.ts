@@ -17,8 +17,33 @@ import { app } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HealthInfo } from "@openpi/shared";
+import type { ClientRequestInput, HealthInfo } from "@openpi/shared";
 import { DaemonClient, isDaemonLive } from "@openpi/daemon";
+
+export type DaemonStatus = "connected" | "reconnecting" | "disconnected";
+
+let currentStatus: DaemonStatus = "disconnected";
+const statusListeners = new Set<(status: DaemonStatus) => void>();
+
+export function getDaemonStatus(): DaemonStatus {
+	return currentStatus;
+}
+
+export function onDaemonStatusChange(listener: (status: DaemonStatus) => void): () => void {
+	statusListeners.add(listener);
+	listener(currentStatus);
+	return () => statusListeners.delete(listener);
+}
+
+function setDaemonStatus(status: DaemonStatus): void {
+	if (currentStatus === status) return;
+	currentStatus = status;
+	for (const listener of statusListeners) {
+		try {
+			listener(status);
+		} catch {}
+	}
+}
 
 /** Resolve the daemon CLI inside this repo or the packaged runtime. */
 function daemonCli(): string {
@@ -45,23 +70,80 @@ function daemonCli(): string {
 let client: DaemonClient | undefined;
 let connectingPromise: Promise<DaemonClient> | undefined;
 let deferredRestartNotice: (() => void) | undefined;
+let intentionalDisconnect = false;
+let reconnectTimer: NodeJS.Timeout | undefined;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 15;
+const BASE_RECONNECT_DELAY_MS = 400;
+const MAX_RECONNECT_DELAY_MS = 6000;
 
 export function onRestartDeferred(notify: () => void): void {
 	deferredRestartNotice = notify;
 }
 
+export function scheduleReconnect(): void {
+	if (intentionalDisconnect) return;
+	if (reconnectTimer) return;
+	if (connectingPromise) return;
+
+	setDaemonStatus("reconnecting");
+	const delay = Math.min(
+		BASE_RECONNECT_DELAY_MS * Math.pow(1.6, reconnectAttempts),
+		MAX_RECONNECT_DELAY_MS,
+	);
+	reconnectAttempts++;
+
+	reconnectTimer = setTimeout(async () => {
+		reconnectTimer = undefined;
+		if (intentionalDisconnect) return;
+		try {
+			await ensureDaemon();
+			reconnectAttempts = 0;
+		} catch {
+			if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+				scheduleReconnect();
+			} else {
+				setDaemonStatus("disconnected");
+			}
+		}
+	}, delay);
+}
+
 /** Connect, starting the daemon first if nothing is listening. */
 export async function ensureDaemon(): Promise<DaemonClient> {
-	if (client) return client;
+	if (client && client.isConnected()) return client;
 	if (connectingPromise) return connectingPromise;
 
+	intentionalDisconnect = false;
 	connectingPromise = (async () => {
 		try {
 			if (!(await isDaemonLive())) await startDaemon();
 			const connected = new DaemonClient();
 			await connected.connect();
+
+			connected.onClose(() => {
+				if (client === connected) {
+					client = undefined;
+					if (!intentionalDisconnect) {
+						setDaemonStatus("reconnecting");
+						scheduleReconnect();
+					}
+				}
+			});
+
 			client = connected;
+			reconnectAttempts = 0;
+			if (reconnectTimer) {
+				clearTimeout(reconnectTimer);
+				reconnectTimer = undefined;
+			}
+			setDaemonStatus("connected");
 			return connected;
+		} catch (error) {
+			if (!intentionalDisconnect && currentStatus !== "connected") {
+				setDaemonStatus("reconnecting");
+			}
+			throw error;
 		} finally {
 			connectingPromise = undefined;
 		}
@@ -74,15 +156,52 @@ export function currentClient(): DaemonClient | undefined {
 	return client;
 }
 
+/**
+ * Forward a request to the daemon with automatic retry and exponential backoff
+ * in case the daemon temporarily restarts or disconnects.
+ */
+export async function requestDaemon(
+	request: ClientRequestInput,
+	retries = 3,
+): Promise<unknown> {
+	let delay = 350;
+	for (let attempt = 0; attempt <= retries; attempt++) {
+		try {
+			const activeClient = await ensureDaemon();
+			return await activeClient.request(request);
+		} catch (err: any) {
+			const msg = err?.message || String(err);
+			const isConnError =
+				/daemon connection closed|not connected|timed out connecting|ECONNREFUSED|ENOENT/i.test(msg);
+			if (isConnError && attempt < retries && !intentionalDisconnect) {
+				client = undefined;
+				setDaemonStatus("reconnecting");
+				await new Promise((resolve) => setTimeout(resolve, delay));
+				delay = Math.min(delay * 2, 2500);
+				continue;
+			}
+			throw err;
+		}
+	}
+	throw new Error("Daemon request failed after reconnection attempts");
+}
+
 function spawnDaemon(): void {
 	// process.execPath is the Electron binary; ELECTRON_RUN_AS_NODE makes it behave
 	// as plain Node, so no second runtime has to be shipped. A packaged daemon is a
 	// plain-JS bundle; only the dev path needs TS stripping, which Electron 38's
 	// Node 22 supports.
 	const entry = daemonCli();
+	const darwinArgs =
+		process.platform === "darwin"
+			? [
+					"--import",
+					"data:text/javascript,Object.defineProperty(process,'title',{get:()=>'openpi-daemon',set:()=>{},configurable:true});",
+				]
+			: [];
 	const args = entry.endsWith(".ts")
-		? ["--experimental-strip-types", entry, "serve"]
-		: [entry, "serve"];
+		? [...darwinArgs, "--experimental-strip-types", entry, "serve"]
+		: [...darwinArgs, entry, "serve"];
 	const child = spawn(process.execPath, args, {
 		detached: true,
 		stdio: "ignore",
@@ -130,9 +249,10 @@ export async function restartIfStale(): Promise<"restarted" | "deferred" | "curr
 }
 
 export async function restartDaemon(): Promise<void> {
+	setDaemonStatus("reconnecting");
 	if (await isDaemonLive()) {
 		const connection = client ?? new DaemonClient();
-		if (!client) await connection.connect();
+		if (!client) await connection.connect().catch(() => undefined);
 		await connection.request({ type: "shutdown" }).catch(() => undefined);
 		connection.close();
 		client = undefined;
@@ -146,6 +266,12 @@ export async function restartDaemon(): Promise<void> {
 }
 
 export function disconnect(): void {
+	intentionalDisconnect = true;
+	if (reconnectTimer) {
+		clearTimeout(reconnectTimer);
+		reconnectTimer = undefined;
+	}
 	client?.close();
 	client = undefined;
+	setDaemonStatus("disconnected");
 }

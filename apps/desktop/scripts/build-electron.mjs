@@ -40,3 +40,8 @@ await build({
 	// CommonJS; Electron rejects an ESM preload with sandbox enabled.
 	format: "cjs",
 });
+
+import { cpSync, existsSync } from "node:fs";
+if (existsSync("electron/assets")) {
+	cpSync("electron/assets", "dist-electron/assets", { recursive: true });
+}

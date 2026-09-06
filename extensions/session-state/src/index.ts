@@ -47,6 +47,8 @@ import {
 	type TaskState,
 	type TaskStep,
 } from "./task-state.ts";
+import { ThrashingGuardrail } from "./guardrail.ts";
+import { pruneHistoricalToolOutputs } from "./context-pruner.ts";
 
 const StepSchema = Type.Object({
 	content: Type.String({ description: "What this step does" }),
@@ -100,6 +102,7 @@ export default function sessionStateExtension(pi: ExtensionAPI) {
 	const lastInjectedCheckpoint = new Map<string, string>();
 	const sessionStartedAt = new Map<string, number>();
 	const toolCallStartedAt = new Map<string, number>();
+	const guardrail = new ThrashingGuardrail({ maxConsecutiveFailures: 3 });
 
 	pi.registerTool({
 		name: "task",
@@ -294,11 +297,19 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 			}
 		}
 
-		if (additions.length === 0) return;
+		// Prune older historical tool outputs before model execution
+		const pruneResult = pruneHistoricalToolOutputs(event.messages as any[]);
+		const baseMessages = pruneResult.messages as typeof event.messages;
+
+		if (additions.length === 0 && pruneResult.foldedCount === 0) return;
+
+		if (additions.length === 0) {
+			return { messages: baseMessages };
+		}
 
 		// Insert before the final message so the user's current turn stays last.
-		const head = event.messages.slice(0, -1);
-		const tail = event.messages[event.messages.length - 1];
+		const head = baseMessages.slice(0, -1);
+		const tail = baseMessages[baseMessages.length - 1];
 		if (!tail) return;
 		return {
 			messages: [
@@ -427,11 +438,31 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 	pi.on("tool_call", async (event, ctx) => {
 		toolCallStartedAt.set(event.toolCallId, Date.now());
 		appendEvent(ctx.cwd, toolCallEvent(ctx.sessionManager.getSessionId(), event.toolName, event.input));
+		const check = guardrail.checkToolCall(event.toolName, event.input);
+		if (check.block) {
+			pi.appendEntry("openpi:guardrail-trigger", {
+				toolName: event.toolName,
+				failures: check.consecutiveFailures,
+				reason: check.reason,
+				at: new Date().toISOString(),
+			});
+			return {
+				block: true,
+				reason: check.reason,
+			};
+		}
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
 		const startedAt = toolCallStartedAt.get(event.toolCallId);
 		toolCallStartedAt.delete(event.toolCallId);
+		const errorText = event.isError
+			? event.content
+					.filter((part): part is { type: "text"; text: string } => part.type === "text")
+					.map((part) => part.text)
+					.join("\n")
+			: undefined;
+		guardrail.recordToolResult(event.toolName, event.input, Boolean(event.isError), errorText);
 		const resultBytes = event.content.reduce(
 			(total, part) => total + (part.type === "text" ? part.text.length : 0),
 			0,
@@ -453,6 +484,7 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 		sessionStartedAt.delete(sessionId);
 		lastInjectedTask.delete(sessionId);
 		lastInjectedCheckpoint.delete(sessionId);
+		guardrail.reset();
 	});
 
 	pi.registerCommand("task", {

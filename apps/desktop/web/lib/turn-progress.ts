@@ -6,6 +6,8 @@ export interface TurnProgress {
 	label: string;
 	startedAt: number;
 	toolName?: string;
+	toolCount?: number;
+	lastToolName?: string;
 }
 
 export type TurnProgressEvent = {
@@ -35,7 +37,7 @@ export function toolLabel(toolName: string): string {
 }
 
 export function initialTurnProgress(instanceId: string, now = Date.now()): TurnProgress {
-	return { instanceId, stage: "submitted", label: "已提交，正在连接代理…", startedAt: now };
+	return { instanceId, stage: "submitted", label: "已提交，正在连接代理…", startedAt: now, toolCount: 0 };
 }
 
 export function submittedTurnProgress(instanceId: string, now = Date.now()): TurnProgress {
@@ -51,18 +53,40 @@ export function reduceTurnProgress(
 	if (!current || current.instanceId !== instanceId) return current;
 	const type = event.type;
 	if (type === "agent_start") return { ...current, stage: "starting", label: "代理已启动，准备处理中…" };
-	if (type === "turn_start") return { ...current, stage: "thinking", label: "正在思考…" };
+	if (type === "turn_start") return { ...current, stage: "thinking", label: "正在思考…", toolCount: 0 };
 	if (type === "tool_execution_start" || type === "tool_execution_update") {
 		const name = typeof event.toolName === "string" ? event.toolName : undefined;
-		return { ...current, stage: "tool", label: name ? toolLabel(name) : "正在执行工具…", toolName: name };
+		return {
+			...current,
+			stage: "tool",
+			label: name ? toolLabel(name) : "正在执行工具…",
+			toolName: name,
+			lastToolName: name ?? current.lastToolName,
+		};
 	}
-	if (type === "tool_execution_end")
-		return { ...current, stage: "thinking", label: "继续处理中…", toolName: undefined };
+	if (type === "tool_execution_end") {
+		const count = (current.toolCount ?? 0) + 1;
+		const lastLabel = current.toolName ? toolLabel(current.toolName) : current.lastToolName ? toolLabel(current.lastToolName) : undefined;
+		return {
+			...current,
+			stage: "thinking",
+			label: lastLabel ? `已完成${lastLabel}，分析结果中…` : "继续处理中…",
+			toolName: undefined,
+			toolCount: count,
+		};
+	}
 	if (type === "message_update" || type === "message_start") {
 		const messageType = event.assistantMessageEvent?.type;
-		if (messageType === "thinking_delta") return { ...current, stage: "thinking", label: "正在思考…" };
+		if (messageType === "thinking_delta") {
+			const hasExecutedTools = (current.toolCount ?? 0) > 0;
+			return {
+				...current,
+				stage: "thinking",
+				label: hasExecutedTools ? "结合执行结果深入思考中…" : "正在思考…",
+			};
+		}
 		if (messageType === "text_delta") return { ...current, stage: "responding", label: "正在组织回复…" };
-		if (messageType === "toolcall_delta") return { ...current, stage: "tool", label: "正在准备工具调用…" };
+		if (messageType === "toolcall_delta") return { ...current, stage: "tool", label: "正在准备下一步操作…" };
 	}
 	if (type === "agent_settled") return undefined;
 	if (type === "stream_error" || type === "stream_closed" || type === "abort" || type === "send_error")

@@ -11,6 +11,6 @@ export default defineConfig({
 	// used it here, so every UI edit was a full page reload instead of a Fast
 	// Refresh update.
 	plugins: [react()],
-	build: { outDir: "../dist", emptyOutDir: true },
+	build: { outDir: "../dist", emptyOutDir: true, chunkSizeWarningLimit: 1200 },
 	server: { host: "127.0.0.1", port: 5179, strictPort: true },
 });

@@ -24,6 +24,16 @@ export class DaemonClient {
 	private buffer = "";
 	private readonly pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 	private readonly eventHandlers = new Set<EventHandler>();
+	private readonly closeHandlers = new Set<() => void>();
+
+	isConnected(): boolean {
+		return this.socket !== undefined && !this.socket.destroyed;
+	}
+
+	onClose(handler: () => void): () => void {
+		this.closeHandlers.add(handler);
+		return () => this.closeHandlers.delete(handler);
+	}
 
 	connect(timeoutMs = 5000): Promise<void> {
 		return new Promise((resolve, reject) => {
@@ -39,15 +49,24 @@ export class DaemonClient {
 				this.socket = socket;
 				resolve();
 			});
-			socket.once("error", (error) => {
+			socket.on("error", (error) => {
 				clearTimeout(timer);
-				reject(error);
+				if (!this.socket) {
+					reject(error);
+				}
+				for (const [, pending] of this.pending) pending.reject(error);
+				this.pending.clear();
 			});
 			socket.on("data", (chunk: string) => this.handleChunk(chunk));
 			socket.on("close", () => {
 				for (const [, pending] of this.pending) pending.reject(new Error("daemon connection closed"));
 				this.pending.clear();
 				this.socket = undefined;
+				for (const handler of this.closeHandlers) {
+					try {
+						handler();
+					} catch {}
+				}
 			});
 		});
 	}
@@ -76,7 +95,13 @@ export class DaemonClient {
 					reject(error);
 				},
 			});
-			socket.write(encodeMessage({ ...request, id } as ClientRequest));
+			socket.write(encodeMessage({ ...request, id } as ClientRequest), (err) => {
+				if (err) {
+					clearTimeout(timer);
+					this.pending.delete(id);
+					reject(err);
+				}
+			});
 		});
 	}
 

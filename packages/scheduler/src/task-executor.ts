@@ -217,12 +217,22 @@ export class ProcessTaskExecutor implements TaskExecutor {
 						stdio: ["ignore", stdout, stderr],
 					},
 				)
-			: spawn(process.execPath, piArgs, {
-					cwd,
-					detached: process.platform !== "win32",
-					env,
-					stdio: ["ignore", stdout, stderr],
-				});
+			: spawn(
+					process.execPath,
+					process.platform === "darwin"
+						? [
+								"--import",
+								"data:text/javascript,Object.defineProperty(process,'title',{get:()=>'openpi-task',set:()=>{},configurable:true});",
+								...piArgs,
+							]
+						: piArgs,
+					{
+						cwd,
+						detached: process.platform !== "win32",
+						env,
+						stdio: ["ignore", stdout, stderr],
+					},
+				);
 		const forceTimer: { current?: NodeJS.Timeout } = {};
 		const completion = new Promise<TaskExecutionResult>((resolveResult, reject) => {
 			child.once("error", reject);

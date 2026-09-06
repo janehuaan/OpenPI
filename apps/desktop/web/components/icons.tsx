@@ -38,6 +38,12 @@ export const ArrowLeft = (props: IconProps) => (
 		<path d={"M19 12H5"} />
 	</Icon>
 );
+export const ArrowUp = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"m5 12 7-7 7 7"} />
+		<path d={"M12 19V5"} />
+	</Icon>
+);
 export const Bell = (props: IconProps) => (
 	<Icon {...props}>
 		<path d={"M10.268 21a2 2 0 0 0 3.464 0"} />
@@ -311,7 +317,14 @@ export const ExternalLink = (props: IconProps) => (
 	<Icon {...props}>
 		<path d={"M15 3h6v6"} />
 		<path d={"M10 14 21 3"} />
-		<path d={"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"} />
+	</Icon>
+);
+export const FileCode = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M10 12.5 8 15l2 2.5"} />
+		<path d={"m14 12.5 2 2.5-2 2.5"} />
+		<path d={"M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"} />
+		<path d={"M14 2v4a2 2 0 0 0 2 2h4"} />
 	</Icon>
 );
 export const FileJson = (props: IconProps) => (
@@ -343,6 +356,16 @@ export const Folder = (props: IconProps) => (
 export const FolderPlus = (props: IconProps) => (
 	<Icon {...props}>
 		<path d={"M12 10v6"} />
+		<path d={"M9 13h6"} />
+		<path
+			d={
+				"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+			}
+		/>
+	</Icon>
+);
+export const FolderMinus = (props: IconProps) => (
+	<Icon {...props}>
 		<path d={"M9 13h6"} />
 		<path
 			d={
@@ -551,3 +574,90 @@ export const ChevronsUpDown = (props: IconProps) => (
 		<path d={"m7 9 5-5 5 5"} />
 	</Icon>
 );
+export const Sliders = (props: IconProps) => (
+	<Icon {...props}>
+		<line x1={"4"} x2={"4"} y1={"21"} y2={"14"} />
+		<line x1={"4"} x2={"4"} y1={"10"} y2={"3"} />
+		<line x1={"12"} x2={"12"} y1={"21"} y2={"12"} />
+		<line x1={"12"} x2={"12"} y1={"8"} y2={"3"} />
+		<line x1={"20"} x2={"20"} y1={"21"} y2={"16"} />
+		<line x1={"20"} x2={"20"} y1={"12"} y2={"3"} />
+		<line x1={"1"} x2={"7"} y1={"14"} y2={"14"} />
+		<line x1={"9"} x2={"15"} y1={"8"} y2={"8"} />
+		<line x1={"17"} x2={"23"} y1={"16"} y2={"16"} />
+	</Icon>
+);
+export const Quote = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"} />
+		<path d={"M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"} />
+	</Icon>
+);
+
+export const AlertCircle = (props: IconProps) => (
+	<Icon {...props}>
+		<circle cx={"12"} cy={"12"} r={"10"} />
+		<line x1={"12"} x2={"12"} y1={"8"} y2={"12"} />
+		<line x1={"12"} x2={"12.01"} y1={"16"} y2={"16"} />
+	</Icon>
+);
+
+export const Minus = (props: IconProps) => (
+	<Icon {...props}>
+		<line x1={"5"} x2={"19"} y1={"12"} y2={"12"} />
+	</Icon>
+);
+
+export const RotateCcw = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"} />
+		<path d={"M3 3v5h5"} />
+	</Icon>
+);
+
+export const UploadCloud = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"} />
+		<path d={"m12 12-4 4h3v4h2v-4h3z"} />
+	</Icon>
+);
+
+export const Zap = (props: IconProps) => (
+	<Icon {...props}>
+		<polygon points={"13 2 3 14 12 14 11 22 21 10 12 10 13 2"} />
+	</Icon>
+);
+
+export const Archive = (props: IconProps) => (
+	<Icon {...props}>
+		<polyline points={"21 8 21 21 3 21 3 8"} />
+		<rect x={"1"} y={"3"} width={"22"} height={"5"} />
+		<line x1={"10"} y1={"12"} x2={"14"} y2={"12"} />
+	</Icon>
+);
+
+export const Activity = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M22 12h-4l-3 9L9 3l-3 9H2"} />
+	</Icon>
+);
+
+export const Monitor = (props: IconProps) => (
+	<Icon {...props}>
+		<rect width={"20"} height={"14"} x={"2"} y={"3"} rx={"2"} />
+		<line x1={"8"} x2={"16"} y1={"21"} y2={"21"} />
+		<line x1={"12"} x2={"12"} y1={"17"} y2={"21"} />
+	</Icon>
+);
+
+export const Layers = (props: IconProps) => (
+	<Icon {...props}>
+		<polygon points={"12 2 2 7 12 12 22 7 12 2"} />
+		<polyline points={"2 17 12 22 22 17"} />
+		<polyline points={"2 12 12 17 22 12"} />
+	</Icon>
+);
+
+
+
+

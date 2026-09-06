@@ -53,6 +53,12 @@ function installRoot() {
 const target = join(installRoot(), "OpenPI.app");
 process.stdout.write(`Installing ${source}\n         -> ${target}\n`);
 
+// Terminate any running instances of the app before rewriting the bundle
+// to prevent macOS LaunchServices error -600 and locked file conflicts.
+try {
+	execFileSync("pkill", ["-9", "-f", target], { stdio: "ignore" });
+} catch {}
+
 // Remove first: ditto merges into an existing bundle, which can leave stale
 // files from a previous build alive inside the new one.
 rmSync(target, { recursive: true, force: true });
@@ -60,6 +66,22 @@ execFileSync("ditto", [source, target], { stdio: "inherit" });
 
 // Unsigned build: without this Gatekeeper refuses to launch it.
 execFileSync("xattr", ["-cr", target], { stdio: "inherit" });
+
+// Ad-hoc sign the installed app bundle so macOS TCC can reliably persist privacy permission grants
+try {
+	execFileSync("codesign", ["--force", "--deep", "-s", "-", target], { stdio: "inherit" });
+	process.stdout.write("Applied ad-hoc code signature to installed app for macOS TCC persistence.\n");
+} catch (err) {
+	process.stderr.write(`Warning: failed to codesign ${target}: ${err.message}\n`);
+}
+
+// Refresh LaunchServices registration cache so macOS Finder / Spotlight recognizes the updated bundle immediately
+try {
+	const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+	if (existsSync(lsregister)) {
+		execFileSync(lsregister, ["-f", target], { stdio: "ignore" });
+	}
+} catch {}
 
 /**
  * Verify the framework symlinks are still relative.

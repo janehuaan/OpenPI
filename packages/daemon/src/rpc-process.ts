@@ -13,10 +13,31 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { decodeLines, type PiRpcCommand, type PiRpcEvent, type SessionMode } from "@openpi/shared";
-import { agentDir, piRpcEntry } from "./config.ts";
+import { agentDir, getDarwinDockSuppressArgs, piRpcEntry } from "./config.ts";
 
 /** Tool profile for code sessions. Chat sessions get the built-in default set. */
-const CODE_MODE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const CODE_MODE_TOOLS = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"memory",
+	"session_search",
+	"system_os",
+	"system_screen",
+	"system_process",
+	"browser",
+	"web_search",
+	"web_fetch",
+	"subagent",
+	"subagent_status",
+	"subagent_stop",
+	"subagent_risk",
+	"task",
+];
 
 export interface RpcProcessOptions {
 	sessionId: string;
@@ -62,11 +83,13 @@ export class RpcProcess {
 	constructor(options: RpcProcessOptions) {
 		this.sessionId = options.sessionId;
 		const args = buildRpcArgs(options);
-		this.child = spawn(process.execPath, [piRpcEntry(), ...args], {
+		this.child = spawn(process.execPath, [...getDarwinDockSuppressArgs(), piRpcEntry(), ...args], {
 			cwd: options.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
+			detached: process.platform !== "win32",
 			env: {
 				...process.env,
+				ELECTRON_RUN_AS_NODE: "1",
 				// Without this the subprocess loads the user's global extensions
 				// and model defaults instead of openpi's own.
 				PI_CODING_AGENT_DIR: agentDir(),
@@ -77,6 +100,7 @@ export class RpcProcess {
 		this.child.stdout?.on("data", (chunk: string) => this.handleChunk(chunk));
 		this.child.stderr?.setEncoding("utf8");
 		this.child.stderr?.on("data", (chunk: string) => {
+			this.resetWatchdogs();
 			process.stderr.write(`[session ${this.sessionId}] ${chunk}`);
 		});
 		this.child.on("exit", (code) => this.handleExit(code));
@@ -125,15 +149,50 @@ export class RpcProcess {
 
 	stop(): void {
 		if (!this.child || this.exited) return;
-		this.child.kill("SIGTERM");
-		// SIGTERM first so the session can flush; escalate only if it hangs.
 		const child = this.child;
+		const pid = child.pid;
+
+		// Gracefully terminate the entire process group on Unix so child bash commands don't leak
+		try {
+			if (pid && process.platform !== "win32") {
+				process.kill(-pid, "SIGTERM");
+			} else {
+				child.kill("SIGTERM");
+			}
+		} catch {
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+		}
+
+		// Escalate to SIGKILL after 3 seconds if process hasn't exited
 		setTimeout(() => {
-			if (!this.exited) child.kill("SIGKILL");
+			if (!this.exited && pid) {
+				try {
+					if (process.platform !== "win32") {
+						process.kill(-pid, "SIGKILL");
+					} else {
+						child.kill("SIGKILL");
+					}
+				} catch {
+					try {
+						child.kill("SIGKILL");
+					} catch {}
+				}
+			}
 		}, 3000).unref();
 	}
 
+	private resetWatchdogs(): void {
+		for (const [, req] of this.pending) {
+			if (req.timer && typeof req.timer.refresh === "function") {
+				req.timer.refresh();
+			}
+		}
+	}
+
 	private handleChunk(chunk: string): void {
+		this.resetWatchdogs();
 		// decodeLines skips unparseable lines rather than throwing, so a malformed
 		// frame costs only itself - the valid frames in the same chunk still land.
 		const { messages, rest, errors } = decodeLines(this.stdoutBuffer, chunk);

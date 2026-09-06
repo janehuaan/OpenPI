@@ -1,4 +1,5 @@
 import type { SpeechInputEvent } from "./lib/speech-recognition";
+import type { AppSettings } from "./lib/app-types";
 import type {
 	AgentInstance,
 	AgnesImageRequest,
@@ -6,6 +7,7 @@ import type {
 	AgnesMediaCapabilities,
 	AgnesVideoRequest,
 	AgnesVideoResult,
+	ArchivedMemoryEntry,
 	AvailableModel,
 	ConversationCapabilities,
 	ConversationModelOption,
@@ -18,10 +20,17 @@ import type {
 	DesktopSnapshot,
 	DocumentTextExtractionInput,
 	DocumentTextExtractionResult,
+	GitBranch,
+	GitFileChange,
+	GitFileStatus,
+	GitStatusResult,
 	ImageContent,
 	MediaSaveInput,
 	ModelProviderConfig,
+	PortProcessInfo,
+	ProviderPingResult,
 	StatusSegment,
+	SystemTelemetryData,
 	TaskDefinition,
 	TaskRun,
 	ThinkingLevel,
@@ -32,6 +41,8 @@ import type {
 	WorkspaceSummary,
 } from "./types";
 
+export type DaemonStatus = "connected" | "reconnecting" | "disconnected";
+
 type OpenPiBridge = {
 	isNative: boolean;
 	invoke: (channel: string, args?: unknown) => Promise<unknown>;
@@ -39,18 +50,49 @@ type OpenPiBridge = {
 	onRefreshData: (handler: () => void) => () => void;
 	onSpeechEvent: (handler: (event: SpeechInputEvent) => void) => () => void;
 	onDaemonRestartDeferred: (handler: () => void) => () => void;
+	onDaemonStatus?: (handler: (status: DaemonStatus) => void) => () => void;
+	onNavigate?: (handler: (view: string, extra?: unknown) => void) => () => void;
+	onNewConversation?: (handler: () => void) => () => void;
+	onComposerPrefill?: (handler: (draft: { text: string; images?: string[] }) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
+	if (typeof window === "undefined") return undefined;
 	return (window as unknown as { openpi?: OpenPiBridge }).openpi;
 }
 
 const isNative = Boolean(bridge()?.isNative);
 
-async function call<T>(channel: string, args?: unknown): Promise<T> {
+const NON_RETRYABLE_CHANNELS = new Set([
+	"send_message",
+	"steer_conversation",
+	"follow_up_conversation",
+	"delete_conversation",
+	"delete_task",
+	"create_conversation",
+]);
+
+async function call<T>(channel: string, args?: unknown, maxRetries = 2): Promise<T> {
 	const api = bridge();
 	if (!api) throw new Error("OpenPI desktop bridge unavailable. Launch with Electron.");
-	return (await api.invoke(channel, args)) as T;
+
+	let delay = 350;
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		try {
+			return (await api.invoke(channel, args)) as T;
+		} catch (error: any) {
+			const message = error?.message || String(error);
+			const isDisconnectError =
+				/daemon (connection closed|disconnected|unavailable)|not connected|timed out connecting/i.test(message);
+			if (isDisconnectError && attempt < maxRetries && !NON_RETRYABLE_CHANNELS.has(channel)) {
+				await new Promise((resolve) => setTimeout(resolve, delay));
+				delay *= 2;
+				continue;
+			}
+			throw error;
+		}
+	}
+	throw new Error(`IPC call ${channel} failed after retries`);
 }
 
 export const desktopApi = {
@@ -88,12 +130,21 @@ export const desktopApi = {
 		call<DocumentTextExtractionResult>("extract_document_text", input),
 	sendMessage: (instanceId: string, message: string, images: ImageContent[], sessionName?: string) =>
 		call<boolean>("send_message", { instanceId, message, images, sessionName }),
+	steerConversation: (instanceId: string, message: string, images: ImageContent[] = []) =>
+		call<boolean>("steer_conversation", { instanceId, message, images }),
+	followUpConversation: (instanceId: string, message: string, images: ImageContent[] = []) =>
+		call<boolean>("follow_up_conversation", { instanceId, message, images }),
+	clearConversationQueue: (instanceId: string) =>
+		call<{ steering: string[]; followUp: string[] }>("clear_conversation_queue", { instanceId }),
 	abortConversation: (instanceId: string) => call<boolean>("abort_conversation", { instanceId }),
+	compactConversation: (instanceId: string, customInstructions?: string) =>
+		call<unknown>("compact_conversation", { instanceId, customInstructions }),
 	renameConversation: (instanceId: string, name: string) =>
 		call<AgentInstance>("rename_conversation", { instanceId, name }),
 	deleteConversation: (instanceId: string) => call<boolean>("delete_conversation", { instanceId }),
 	watchConversation: (instanceId: string) => call<boolean>("watch_conversation_stream", { instanceId }),
 	stopWatchingConversation: (instanceId: string) => call<boolean>("stop_conversation_stream", { instanceId }),
+	stopConversationStream: (instanceId: string) => call<boolean>("stop_conversation_stream", { instanceId }),
 	respondConversationUi: (instanceId: string, response: ConversationUiResponse) =>
 		call<boolean>("respond_conversation_ui", { instanceId, response }),
 	createTask: (input: CreateTaskInput) => call<TaskDefinition>("create_task", { input }),
@@ -146,6 +197,23 @@ export const desktopApi = {
 			project: { before: number; after: number; merged: number; pruned: number };
 			global: { before: number; after: number; merged: number; pruned: number };
 		}>("maintain_memory", { cwd }),
+	listArchivedMemory: (cwd?: string, scope: "project" | "global" = "project") =>
+		call<ArchivedMemoryEntry[]>("list_archived_memory", { cwd, scope }),
+	restoreArchivedMemory: (cwd: string | undefined, scope: "project" | "global", entry: { type: string; key: string; value: string; body?: string }) =>
+		call<any>("restore_archived_memory", { cwd, scope, entry }),
+	getMemoryHub: (cwd?: string) =>
+		call<{
+			summary: string;
+			handbook: string;
+			rolloutSummaries: Array<{ slug: string; fileName: string; date: string; content: string }>;
+			skills: Array<{ name: string; content: string }>;
+			stats: { pending: number; running: number; completed: number; failed: number; unconsolidatedStage1: number };
+			recentJobs: any[];
+		}>("get_memory_hub", { cwd }),
+	saveMemoryHandbook: (content: string, cwd?: string) =>
+		call<{ ok: boolean }>("save_memory_handbook", { content, cwd }),
+	triggerMemoryConsolidation: (force = true) =>
+		call<{ ok: boolean }>("trigger_memory_consolidation", { force }),
 	listIntelligenceRuns: (cwd: string) => call<string[]>("list_intelligence_runs", { cwd }),
 	readIntelligenceRun: (cwd: string, runId: string) => call<string>("read_intelligence_run", { cwd, runId }),
 	stopInstance: (instanceId: string) => call<boolean>("stop_instance", { instanceId }),
@@ -190,6 +258,13 @@ export const desktopApi = {
 		window.dispatchEvent(new Event("openpi:model-providers-changed"));
 		return result;
 	},
+	fetchProviderRemoteModels: async (input: { providerId?: string; baseUrl?: string; apiKey?: string }) => {
+		const result = await call<{ success: boolean; count: number; models: any[] }>("fetch_provider_remote_models", input);
+		window.dispatchEvent(new Event("openpi:model-providers-changed"));
+		return result;
+	},
+	pingModelProvider: (params: { providerId?: string; baseUrl: string; apiKey?: string }) =>
+		call<ProviderPingResult>("ping_model_provider", params),
 	getMediaCapabilities: () => call<AgnesMediaCapabilities>("get_media_capabilities"),
 	generateImage: (input: AgnesImageRequest) => call<AgnesImageResult>("generate_image", input),
 	createVideo: (input: AgnesVideoRequest) => call<AgnesVideoResult>("create_video", input),
@@ -198,6 +273,55 @@ export const desktopApi = {
 	startSpeechRecognition: (sessionId: string, language: string) =>
 		call<boolean>("start_speech_recognition", { sessionId, language }),
 	stopSpeechRecognition: (sessionId: string) => call<boolean>("stop_speech_recognition", { sessionId }),
+	notifyTaskCompleted: (opts?: { message?: string; title?: string; durationMs?: number; force?: boolean }) =>
+		call<boolean>("notify_task_completed", opts),
+	getAppSettings: () => call<AppSettings>("get_app_settings"),
+	updateAppSettings: async (patch: Partial<AppSettings>) => {
+		const result = await call<AppSettings>("update_app_settings", patch);
+		window.dispatchEvent(new Event("openpi:app-settings-changed"));
+		return result;
+	},
+	// Git operations
+	getGitStatus: (cwd?: string) => call<GitStatusResult>("git_status", { cwd }),
+	getGitDiff: (opts?: { cwd?: string; path?: string; staged?: boolean }) =>
+		call<{ diff: string; error?: string }>("git_diff", opts),
+	gitStage: (opts?: { cwd?: string; paths?: string[]; all?: boolean }) =>
+		call<{ ok: boolean; error?: string }>("git_stage", opts),
+	gitUnstage: (opts?: { cwd?: string; paths?: string[]; all?: boolean }) =>
+		call<{ ok: boolean; error?: string }>("git_unstage", opts),
+	gitDiscard: (opts: { cwd?: string; paths: string[] }) =>
+		call<{ ok: boolean; error?: string }>("git_discard", opts),
+	gitCommit: (opts: { cwd?: string; message: string; stageAll?: boolean }) =>
+		call<{ ok: boolean; output?: string; error?: string }>("git_commit", opts),
+	getGitBranches: (cwd?: string) =>
+		call<{ current: string; branches: GitBranch[]; error?: string }>("git_branches", { cwd }),
+	gitCheckout: (opts: { cwd?: string; branch: string; create?: boolean }) =>
+		call<{ ok: boolean; currentBranch?: string; error?: string }>("git_checkout", opts),
+	gitSync: (opts: { cwd?: string; action: "pull" | "push" | "sync" }) =>
+		call<{ ok: boolean; output?: string; error?: string }>("git_sync", opts),
+	gitInit: (cwd?: string) =>
+		call<{ ok: boolean; output?: string; error?: string }>("git_init", { cwd }),
+	gitResolveConflict: (opts: { cwd?: string; path: string; strategy: "ours" | "theirs" }) =>
+		call<{ ok: boolean; status?: GitStatusResult; error?: string }>("git_resolve_conflict", opts),
+
+	// ── System Operations ───────────────────────────────────────────────
+	getSystemTelemetry: () =>
+		call<SystemTelemetryData>("system_get_telemetry"),
+	listListeningPorts: (port?: number) =>
+		call<PortProcessInfo[]>("system_list_ports", { port }),
+	killPort: (port: number) =>
+		call<{ success: boolean; killed: number[] }>("system_kill_port", { port }),
+	captureScreen: (opts?: { target?: "fullscreen" | "window"; savePath?: string }) =>
+		call<{ path: string; dataUrl?: string }>("system_capture_screen", opts),
+	getActiveApp: () =>
+		call<{ name: string; title: string; url?: string }>("system_get_active_app"),
+	runAppleScript: (script: string) =>
+		call<{ ok: boolean; output?: string; error?: string }>("system_run_applescript", { script }),
+	manageClipboard: (opts: { action: "read" | "write"; text?: string }) =>
+		call<{ text?: string; hasImage?: boolean; ok?: boolean; length?: number }>("system_manage_clipboard", opts),
+	toggleHud: () =>
+		call<boolean>("toggle_hud_window"),
+
 	onConversationEvent: (handler: (payload: { instanceId: string; event: unknown }) => void) => {
 		const api = bridge();
 		if (!api) return () => undefined;
@@ -217,5 +341,25 @@ export const desktopApi = {
 		const api = bridge();
 		if (!api) return () => undefined;
 		return api.onDaemonRestartDeferred(handler);
+	},
+	onDaemonStatus: (handler: (status: DaemonStatus) => void) => {
+		const api = bridge();
+		if (!api?.onDaemonStatus) return () => undefined;
+		return api.onDaemonStatus(handler);
+	},
+	onNavigate: (handler: (view: string, extra?: unknown) => void) => {
+		const api = bridge();
+		if (!api?.onNavigate) return () => undefined;
+		return api.onNavigate(handler);
+	},
+	onNewConversation: (handler: () => void) => {
+		const api = bridge();
+		if (!api?.onNewConversation) return () => undefined;
+		return api.onNewConversation(handler);
+	},
+	onComposerPrefill: (handler: (draft: { text: string; images?: string[] }) => void) => {
+		const api = bridge();
+		if (!api?.onComposerPrefill) return () => undefined;
+		return api.onComposerPrefill(handler);
 	},
 };

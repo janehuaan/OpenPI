@@ -153,9 +153,9 @@ test("events reach every subscriber of that session", async () => {
 	const seenB: string[] = [];
 	supervisor.subscribe(session.sessionId, (_id, event) => seenA.push(event.type));
 	supervisor.subscribe(session.sessionId, (_id, event) => seenB.push(event.type));
-
+	const settled = waitFor(supervisor, session.sessionId, (event) => event.type === "agent_settled");
 	await supervisor.rpc(session.sessionId, { type: "prompt", message: "hi" });
-	await waitFor(supervisor, session.sessionId, (event) => event.type === "agent_settled");
+	await settled;
 
 	assert.ok(seenA.includes("agent_start"));
 	assert.ok(seenB.includes("agent_start"));

@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Capabilities, CapabilityEntry, DocumentText, UserProfile } from "@openpi/shared";
-import { agentDir, piCli } from "./config.ts";
+import { agentDir, getDarwinDockSuppressArgs, piCli } from "./config.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -174,8 +174,8 @@ export async function removePackage(source: string): Promise<Capabilities> {
 }
 
 async function runPi(args: string[]): Promise<string> {
-	const { stdout, stderr } = await execFileAsync(process.execPath, [piCli(), ...args], {
-		env: { ...process.env, PI_CODING_AGENT_DIR: agentDir() },
+	const { stdout, stderr } = await execFileAsync(process.execPath, [...getDarwinDockSuppressArgs(), piCli(), ...args], {
+		env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", PI_CODING_AGENT_DIR: agentDir() },
 		timeout: 120_000,
 		maxBuffer: 4 * 1024 * 1024,
 	});

@@ -68,4 +68,14 @@ export default async function afterPack(context) {
 
 	const size = execFileSync("du", ["-sh", target], { encoding: "utf8" }).split("\t")[0];
 	process.stdout.write(`  • openpi runtime staged  ${size}  ${context.arch === 1 ? "x64" : "arm64"}\n`);
+
+	if (context.electronPlatformName === "darwin") {
+		const appBundle = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+		try {
+			execFileSync("codesign", ["--force", "--deep", "-s", "-", appBundle], { stdio: "inherit" });
+			process.stdout.write(`  • ad-hoc signed ${context.packager.appInfo.productFilename}.app to satisfy macOS TCC\n`);
+		} catch (err) {
+			process.stderr.write(`  ! failed to ad-hoc sign: ${err.message}\n`);
+		}
+	}
 }

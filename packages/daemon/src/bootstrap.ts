@@ -11,9 +11,11 @@
  * the marker re-runs it.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { agentDir, globalAgentDir } from "./config.ts";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { agentDir, globalAgentDir, openpiDir } from "./config.ts";
 
 /** Files worth importing. Anything holding a secret is copied, never logged. */
 const IMPORT_FILES = ["models.json", "auth.json", "models-store.json"];
@@ -41,6 +43,61 @@ export function listProviders(dir: string): string[] {
 	}
 }
 
+/** Synchronize bundled runtime extensions into openpi's isolated agent/extensions dir. */
+export function syncRuntimeExtensions(): string[] {
+	const target = join(agentDir(), "extensions");
+	mkdirSync(target, { recursive: true });
+
+	const here = dirname(fileURLToPath(import.meta.url));
+	const candidates = [
+		join(here, "extensions"),
+		join(here, "../../../apps/desktop/runtime/extensions"),
+		join(process.cwd(), "apps/desktop/runtime/extensions"),
+	];
+
+	const sourceDir = candidates.find((d) => existsSync(d) && readdirSync(d).some((f) => f.endsWith(".js")));
+	if (!sourceDir) return [];
+
+	const copied: string[] = [];
+	try {
+		const files = readdirSync(sourceDir).filter((f) => f.endsWith(".js"));
+		for (const file of files) {
+			const src = join(sourceDir, file);
+			const dst = join(target, file);
+			try {
+				copyFileSync(src, dst);
+				copied.push(file);
+			} catch {}
+		}
+	} catch {}
+	return copied;
+}
+
+/** Auto-migrate legacy ~/.pi/memory files to ~/.openpi/memory if target is uninitialized. */
+export function migrateLegacyMemory(): boolean {
+	const legacyDir = join(homedir(), ".pi", "memory");
+	const targetDir = join(openpiDir(), "memory");
+	if (!existsSync(legacyDir)) return false;
+	mkdirSync(targetDir, { recursive: true });
+
+	const targetIndex = join(targetDir, "MEMORY.md");
+	if (existsSync(targetIndex)) return false;
+
+	try {
+		const files = readdirSync(legacyDir);
+		for (const file of files) {
+			const src = join(legacyDir, file);
+			const dst = join(targetDir, file);
+			try {
+				copyFileSync(src, dst);
+			} catch {}
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Copy provider config from the user's pi CLI dir into openpi's isolated agent
  * dir. Returns what happened; callers surface this to the user so an empty
@@ -49,6 +106,9 @@ export function listProviders(dir: string): string[] {
 export function bootstrapCredentials(options: { force?: boolean } = {}): BootstrapResult {
 	const target = agentDir();
 	mkdirSync(target, { recursive: true });
+
+	syncRuntimeExtensions();
+	migrateLegacyMemory();
 
 	if (!options.force && existsSync(markerPath())) {
 		return { imported: [], skipped: [], providers: listProviders(target), alreadyBootstrapped: true };

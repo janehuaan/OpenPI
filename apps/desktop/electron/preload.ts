@@ -45,4 +45,31 @@ contextBridge.exposeInMainWorld("openpi", {
 		ipcRenderer.on("openpi:daemon-restart-deferred", listener);
 		return () => ipcRenderer.removeListener("openpi:daemon-restart-deferred", listener);
 	},
+
+	onDaemonStatus(handler: (status: "connected" | "reconnecting" | "disconnected") => void): () => void {
+		const listener = (_event: unknown, payload: unknown) =>
+			handler(payload as "connected" | "reconnecting" | "disconnected");
+		ipcRenderer.on("openpi:daemon-status", listener);
+		return () => ipcRenderer.removeListener("openpi:daemon-status", listener);
+	},
+
+	onNavigate(handler: (view: string, extra?: unknown) => void): () => void {
+		const listener = (_event: unknown, view: unknown, extra?: unknown) =>
+			handler(String(view), extra);
+		ipcRenderer.on("openpi:navigate", listener);
+		return () => ipcRenderer.removeListener("openpi:navigate", listener);
+	},
+
+	onNewConversation(handler: () => void): () => void {
+		const listener = () => handler();
+		ipcRenderer.on("openpi:new-conversation", listener);
+		return () => ipcRenderer.removeListener("openpi:new-conversation", listener);
+	},
+
+	onComposerPrefill(handler: (draft: { text: string; images?: string[] }) => void): () => void {
+		const listener = (_event: unknown, payload: unknown) =>
+			handler(payload as { text: string; images?: string[] });
+		ipcRenderer.on("openpi:composer-prefill", listener);
+		return () => ipcRenderer.removeListener("openpi:composer-prefill", listener);
+	},
 });

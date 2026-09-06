@@ -14,6 +14,10 @@ import {
 	defaultWorkspace,
 	deleteMemory,
 	listMemory,
+	listArchivedMemory,
+	restoreArchivedMemory,
+	maintainMemory,
+	memoryMeta,
 	modelCatalog,
 	providerStatus,
 	readMemoryTopic,
@@ -52,6 +56,7 @@ import {
 	stopScheduler,
 } from "./scheduler-ops.ts";
 import { isDaemonLive } from "./ipc/client.ts";
+import { MemoryEngine } from "./memory/memory-engine.ts";
 import { Supervisor } from "./supervisor.ts";
 
 const startedAt = Date.now();
@@ -109,6 +114,23 @@ async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {
 			};
 		case "delete_memory":
 			return { entries: deleteMemory(op.cwd, op.scope ?? "project", op.type, op.key) };
+		case "maintain_memory":
+			return maintainMemory(op.cwd);
+		case "list_archived_memory":
+			return { entries: listArchivedMemory(op.cwd, op.scope ?? "project") };
+		case "restore_archived_memory":
+			return {
+				entries: restoreArchivedMemory(op.cwd, op.scope ?? "project", op.entry),
+			};
+		case "memory_meta":
+			return memoryMeta(op.cwd);
+		case "get_memory_hub":
+			return MemoryEngine.get().getMemoryHub(op.cwd);
+		case "save_memory_handbook":
+			return { ok: MemoryEngine.get().saveHandbook(op.content, op.cwd) };
+		case "trigger_memory_consolidation":
+			MemoryEngine.get().triggerConsolidation(op.force ?? true);
+			return { ok: true };
 
 		case "list_tasks":
 			return { tasks: listTasks() };
@@ -181,7 +203,8 @@ export async function serve(): Promise<void> {
 		process.stderr.write("[daemon] warning: no providers configured; model calls will fail with 401\n");
 	}
 
-	const supervisor = new Supervisor();
+	const supervisor = new Supervisor({ enableWarmPool: true });
+	supervisor.scheduleWarmRefill(defaultWorkspace(), "code");
 	let server: Server | undefined;
 	let shuttingDown = false;
 
@@ -189,6 +212,7 @@ export async function serve(): Promise<void> {
 		if (shuttingDown) return;
 		shuttingDown = true;
 		process.stderr.write(`[daemon] shutting down (${reason})\n`);
+		MemoryEngine.get().stop();
 		supervisor.stopAll();
 		stopScheduler();
 		server?.close();
@@ -224,6 +248,7 @@ export async function serve(): Promise<void> {
 					mode: request.mode,
 					model: request.model,
 					name: request.name,
+					eager: (request as any).eager,
 				});
 			case "stop_session":
 				supervisor.stop(request.sessionId);
@@ -255,6 +280,7 @@ export async function serve(): Promise<void> {
 		}
 	});
 
+	MemoryEngine.get().start();
 	writeFileSync(pidPath(), String(process.pid), "utf8");
 	process.stderr.write(`[daemon] listening on ${socketPath()} (pid ${process.pid})\n`);
 

@@ -5,8 +5,12 @@
  * compact-safe re-injection, heuristic + LLM extract, and AutoDream maintain.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { buildDualTrackMemoryInjection } from "./adaptive-preload.ts";
 import { globalMemoryDir, loadMemoryConfig } from "./config.ts";
 import { backupMemoryDirectory, ensureDurabilityLayout, listArchiveCount, loadActiveOrRecover } from "./durability.ts";
 import {
@@ -19,6 +23,7 @@ import {
 	type TranscriptTurn,
 	textFromSessionMessage,
 } from "./extract.ts";
+import { executeLlmExtract } from "./llm-extract.ts";
 import {
 	bumpSessionCount,
 	idleOrganize,
@@ -28,6 +33,7 @@ import {
 	saveMeta,
 	shouldMaintain,
 } from "./maintain.ts";
+import { registerSessionSearchTool } from "./session-search.ts";
 import { formatSelectiveSnapshot, selectSnapshotEntries } from "./snapshot.ts";
 import {
 	deleteTopic,
@@ -53,7 +59,7 @@ import { entriesFingerprint, hybridSearch, reindexVectors } from "./vectors.ts";
 
 const MemoryParams = Type.Object({
 	action: Type.String({
-		description: "save | query | list | delete | read | maintain",
+		description: "save | query | list | delete | read | maintain | handbook",
 	}),
 	type: Type.Optional(Type.String({ description: "user | feedback | project | lesson" })),
 	key: Type.Optional(Type.String()),
@@ -108,7 +114,7 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 		promptGuidelines: [
 			"Prior conversations may already appear under long-term memory — treat them as known; do not ask the user to re-explain.",
 			"Do not wait for the user to say 'remember' or 'search memory'; use injected notes and call memory query only when you need more detail.",
-			"When the user states a lasting preference, rule, or project decision, save it (user/feedback → prefer scope=global).",
+			"When the user issues a permanent correction or rule (e.g. '以后都要这样', '禁止'), promote permanent rules to MEMORY.md (tag [pinned] to stay in L0) via memory save.",
 			"Read the index before saving duplicates. Do not store git/code-derivable details.",
 			"Prefer short index values; put detail in the topic body.",
 		],
@@ -123,6 +129,23 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			const projectEntries = loadIndex(ctx.cwd);
 			const globalEntries = loadIndexFile(globalDir);
 			const entries = scope === "global" ? globalEntries : projectEntries;
+
+			if (action === "handbook") {
+				const projectHandbook = join(ctx.cwd, ".pi", "memory", "MEMORY.md");
+				const globalHandbook = join(homedir(), ".openpi", "memories", "MEMORY.md");
+				const text =
+					(existsSync(projectHandbook) ? readFileSync(projectHandbook, "utf8").trim() : "") ||
+					(existsSync(globalHandbook) ? readFileSync(globalHandbook, "utf8").trim() : "");
+				return {
+					content: [
+						{
+							type: "text",
+							text: text || "No long-term MEMORY.md handbook found yet.",
+						},
+					],
+					details: { action, found: Boolean(text), scope },
+				};
+			}
 
 			if (action === "maintain") {
 				const projectResult = maintainMemoryIndex(ctx.cwd, config);
@@ -301,6 +324,8 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 		},
 	});
 
+	registerSessionSearchTool(pi);
+
 	pi.registerCommand("memory", {
 		description: "Show memory status; args: maintain | backup | status",
 		handler: async (args, ctx) => {
@@ -430,6 +455,50 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 	pi.on("before_agent_start", async (event, ctx) => {
 		config = loadMemoryConfig(ctx.cwd);
 		if (!config.proactiveInject) return;
+
+		const privacyInstruction =
+			process.platform === "darwin"
+				? "\n\n[macOS Privacy Note]: When searching files with `find`, `grep`, or `bash`, never run unconstrained recursive scans on the user home directory (`~`). Always scope searches to specific project subdirectories to prevent triggering macOS privacy permission dialogs for ~/Downloads, ~/Desktop, and ~/Documents."
+				: "";
+
+		// Dual-Track Progressive Disclosure: Check for consolidated memory_summary.md and MEMORY.md
+		const projectSummaryFile = join(ctx.cwd, ".pi", "memory", "memory_summary.md");
+		const globalSummaryFile = join(homedir(), ".openpi", "memories", "memory_summary.md");
+		let summaryText = "";
+		try {
+			if (existsSync(projectSummaryFile)) summaryText = readFileSync(projectSummaryFile, "utf8").trim();
+			else if (existsSync(globalSummaryFile)) summaryText = readFileSync(globalSummaryFile, "utf8").trim();
+		} catch {}
+
+		const projectHandbookFile = join(ctx.cwd, ".pi", "memory", "MEMORY.md");
+		const globalHandbookFile = join(homedir(), ".openpi", "memories", "MEMORY.md");
+		let handbookText = "";
+		try {
+			if (existsSync(projectHandbookFile)) handbookText = readFileSync(projectHandbookFile, "utf8").trim();
+			else if (existsSync(globalHandbookFile)) handbookText = readFileSync(globalHandbookFile, "utf8").trim();
+		} catch {}
+
+		if (summaryText || handbookText) {
+			const content = buildDualTrackMemoryInjection({
+				summaryText: summaryText || undefined,
+				handbookText: handbookText || undefined,
+				userPrompt: event.prompt ?? "",
+				privacyInstruction,
+			});
+
+			return {
+				message: {
+					customType: "openpi-memory:snapshot",
+					content,
+					display: false,
+					details: {
+						mode: "dual_track_progressive",
+						proactive: true,
+					},
+				},
+			};
+		}
+
 		// Always refresh freeze so same-session saves are visible next turn
 		refreeze(ctx.cwd);
 		if (frozen.length === 0) return;
@@ -476,7 +545,19 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			rankedRest,
 		);
 		// Include digest bodies so “上次聊到哪” gets real facts, not a one-line teaser
-		const content = formatSelectiveSnapshot(selected, frozen.length, event.prompt, resolveBody);
+		const content = formatSelectiveSnapshot(selected, frozen.length, event.prompt, resolveBody) + privacyInstruction;
+		const recalled = selected.map((e) => ({ type: e.type, key: e.key, value: e.value }));
+		if (recalled.length > 0) {
+			try {
+				pi.appendEntry("openpi-memory:recalled", {
+					count: recalled.length,
+					recalled,
+					at: new Date().toISOString(),
+				});
+			} catch {
+				// ignore if appendEntry is not supported
+			}
+		}
 		return {
 			message: {
 				customType: "openpi-memory:snapshot",
@@ -489,10 +570,46 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 					hybrid: config.vectorSearch,
 					proactive: true,
 					withBodies: true,
+					recalled,
 				},
 			},
 		};
 	});
+
+	// Safeguard macOS privacy folders (~/Downloads, ~/Desktop, ~/Documents, ~/Library)
+	// from unconstrained recursive scans that trigger repeated TCC permission dialogs.
+	if (process.platform === "darwin") {
+		pi.on("tool_call", async (event, ctx) => {
+			const home = homedir();
+			if (event.toolName === "find") {
+				const input = event.input as { path?: string };
+				const target = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
+				if (target === home) {
+					return {
+						block: true,
+						reason: "Scanning directly in the user home directory (~) triggers macOS privacy permission prompts (Downloads, Desktop, Documents). Please specify a project directory or subfolder.",
+					};
+				}
+			} else if (event.toolName === "bash") {
+				const input = event.input as { command?: string };
+				if (typeof input.command === "string") {
+					const trimmed = input.command.trim();
+					const touchesBroadHome =
+						/\bfind\s+(?:~|\$HOME|"[^"]*"|'[^']*'|\/Users\/[^\s/]+)(?:\s+|$)/.test(trimmed) &&
+						!trimmed.includes("-prune");
+					if (
+						touchesBroadHome &&
+						(trimmed.startsWith("find ~") || trimmed.startsWith("find $HOME") || trimmed.includes(`find ${home}`))
+					) {
+						return {
+							block: true,
+							reason: "Broad recursive `find` on the user home directory triggers macOS privacy dialogs for protected folders (Downloads, Desktop, Documents). Please scope to a specific subfolder or use `-path <folder> -prune`.",
+						};
+					}
+				}
+			}
+		});
+	}
 
 	// Idle time: after agent settles, refresh continuity digest + organize when due
 	pi.on("agent_settled", async (_event, ctx) => {
@@ -643,6 +760,22 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 			const candidates = extractFromTranscript(turns, existing);
 			const saved = applyCandidates(ctx.cwd, candidates, config);
 			if (saved > 0) refreeze(ctx.cwd);
+
+			// Background LLM extraction before compaction loses transcript nuances
+			if (config.llmExtract !== false && (ctx as any).model && (ctx as any).modelRegistry) {
+				const llmCandidates = await executeLlmExtract(ctx as any, turns, existing);
+				if (llmCandidates.length > 0) {
+					const llmSaved = applyCandidates(ctx.cwd, llmCandidates, config);
+					if (llmSaved > 0) {
+						refreeze(ctx.cwd);
+						pi.appendEntry("openpi-memory:llm-extract", {
+							trigger: "before_compact",
+							count: llmSaved,
+							at: new Date().toISOString(),
+						});
+					}
+				}
+			}
 		} catch {
 			// ignore
 		}
@@ -683,6 +816,21 @@ Exclusion list: ${EXCLUSION_LIST.join("; ")}`,
 						at: new Date().toISOString(),
 						keys: candidates.slice(0, 12).map((c) => `${c.type}/${c.key}`),
 					});
+				}
+
+				// Background LLM extraction on shutdown for rich conversations
+				if (config.llmExtract !== false && (ctx as any).model && (ctx as any).modelRegistry && turns.length >= 4) {
+					const llmCandidates = await executeLlmExtract(ctx as any, turns, existing);
+					if (llmCandidates.length > 0) {
+						const llmSaved = applyCandidates(ctx.cwd, llmCandidates, config);
+						if (llmSaved > 0) {
+							pi.appendEntry("openpi-memory:llm-extract", {
+								trigger: "shutdown",
+								count: llmSaved,
+								at: new Date().toISOString(),
+							});
+						}
+					}
 				}
 			}
 

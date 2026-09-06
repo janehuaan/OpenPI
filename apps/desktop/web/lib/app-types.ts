@@ -9,9 +9,34 @@ import type {
 
 export const emptySnapshot: DesktopSnapshot = { daemonRunning: false, instances: [], tasks: [], runs: [], health: {} };
 
-export type View = "chat" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon";
+export type View = "chat" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
 export type TaskFilter = "all" | "active" | "paused";
-export type CapabilityTab = "market" | "skills" | "mcp" | "extensions" | "tools" | "packages" | "models" | "kernel";
+export type CapabilityTab =
+	| "general"
+	| "models"
+	| "commands"
+	| "market"
+	| "skills"
+	| "mcp"
+	| "extensions"
+	| "tools"
+	| "packages"
+	| "kernel";
+
+export interface AppSettings {
+	defaultProvider?: string;
+	defaultModel?: string;
+	defaultThinkingLevel?: string;
+	defaultMode?: "chat" | "code" | "personal";
+	fastPreset?: { provider?: string; model?: string; thinkingLevel?: string };
+	deepPreset?: { provider?: string; model?: string; thinkingLevel?: string };
+	autoCompact?: boolean;
+	reserveTokens?: number;
+	autoMemory?: boolean;
+	desktopNotifications?: boolean;
+	notificationThresholdSec?: number;
+	httpProxy?: string;
+}
 
 export interface OptimisticUserMessage {
 	instanceId?: string;

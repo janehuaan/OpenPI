@@ -79,6 +79,13 @@ export type AppOp =
 	| { name: "read_memory_topic"; cwd: string; scope?: MemoryScope; type: string; key: string }
 	| { name: "write_memory"; cwd: string; scope?: MemoryScope; type: string; key: string; value: string; body?: string }
 	| { name: "delete_memory"; cwd: string; scope?: MemoryScope; type: string; key: string }
+	| { name: "maintain_memory"; cwd: string }
+	| { name: "list_archived_memory"; cwd: string; scope?: MemoryScope }
+	| { name: "restore_archived_memory"; cwd: string; scope?: MemoryScope; entry: { type: string; key: string; value: string; body?: string } }
+	| { name: "memory_meta"; cwd: string }
+	| { name: "get_memory_hub"; cwd?: string }
+	| { name: "save_memory_handbook"; content: string; cwd?: string }
+	| { name: "trigger_memory_consolidation"; force?: boolean }
 	// Scheduled tasks. The scheduler is its own package but needs a long-lived
 	// process to tick in, so the daemon hosts it and forwards these.
 	| { name: "list_tasks" }

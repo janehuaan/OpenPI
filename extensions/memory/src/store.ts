@@ -225,6 +225,21 @@ export function saveIndexAt(
 		}
 	}
 	const capped = deduped.length > maxEntries ? deduped.slice(-maxEntries) : deduped;
+	// Archive entries replaced/superseded by deduplication
+	for (const prev of previous) {
+		if (!capped.some((e) => e.type === prev.type && e.key === prev.key)) {
+			const body = readTopicAt(memoryDirectory, prev.type, prev.key);
+			archiveEntry(memoryDirectory, prev.type, prev.key, prev.value, body, "superseded");
+			const topic = path.join(memoryDirectory, topicFileName(prev.type, prev.key));
+			if (fs.existsSync(topic)) fs.unlinkSync(topic);
+			removeVector(memoryDirectory, prev.type, prev.key);
+			try {
+				const meta = loadMetadataAt(memoryDirectory);
+				delete meta.entries[metadataId(prev.type, prev.key)];
+				saveMetadataAt(memoryDirectory, meta);
+			} catch {}
+		}
+	}
 	const indexFile = path.join(memoryDirectory, INDEX_FILE);
 	const tmp = `${indexFile}.${process.pid}.tmp`;
 	fs.writeFileSync(tmp, generateIndexContent(capped), "utf8");

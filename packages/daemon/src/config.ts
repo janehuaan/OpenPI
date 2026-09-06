@@ -28,6 +28,22 @@ export function sessionsDir(): string {
 	return join(openpiDir(), "sessions");
 }
 
+export function memoriesDir(): string {
+	return process.env.OPENPI_MEMORIES_DIR ?? join(openpiDir(), "memories");
+}
+
+export function memoriesDbPath(): string {
+	return process.env.OPENPI_MEMORIES_DB ?? join(openpiDir(), "memories.sqlite");
+}
+
+export function rolloutSummariesDir(): string {
+	return join(memoriesDir(), "rollout_summaries");
+}
+
+export function skillsDir(): string {
+	return join(memoriesDir(), "skills");
+}
+
 export function socketPath(): string {
 	return process.env.OPENPI_SOCKET ?? join(openpiDir(), "daemon.sock");
 }
@@ -112,3 +128,17 @@ export function piCliMtimeMs(): number {
 		return 0;
 	}
 }
+
+/**
+ * Arguments to pass to Node/Electron to prevent macOS from registering
+ * headless background processes as foreground GUI applications on the Dock
+ * when they modify process.title.
+ */
+export function getDarwinDockSuppressArgs(): string[] {
+	if (process.platform !== "darwin") return [];
+	return [
+		"--import",
+		"data:text/javascript,Object.defineProperty(process,'title',{get:()=>'openpi',set:()=>{},configurable:true});",
+	];
+}
+
