@@ -1,4 +1,5 @@
 import {
+	ArrowLeft,
 	Bot,
 	CircleStop,
 	Menu,
@@ -15,6 +16,7 @@ export function DaemonSurface({
 	snapshot,
 	busy,
 	onOpenSidebar,
+	onClose,
 	onStart,
 	onStop,
 	onRestart,
@@ -24,6 +26,7 @@ export function DaemonSurface({
 	snapshot: DesktopSnapshot;
 	busy?: string;
 	onOpenSidebar(): void;
+	onClose?(): void;
 	onStart(): void;
 	onStop(): void;
 	onRestart(): void;
@@ -41,14 +44,26 @@ export function DaemonSurface({
 	return (
 		<section className="operations-surface">
 			<header className="surface-header operation-page-header">
-				<button
-					className="icon-button quiet mobile-only"
-					title="Open conversations"
-					aria-label="Open conversations"
-					onClick={onOpenSidebar}
-				>
-					<Menu size={18} />
-				</button>
+				{onClose ? (
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="返回对话"
+						aria-label="返回对话"
+						onClick={onClose}
+					>
+						<ArrowLeft size={16} />
+					</button>
+				) : (
+					<button
+						className="icon-button quiet mobile-only"
+						title="Open conversations"
+						aria-label="Open conversations"
+						onClick={onOpenSidebar}
+					>
+						<Menu size={18} />
+					</button>
+				)}
 				<div className="surface-heading">
 					<strong>运行时</strong>
 					<span>后台服务是否在线，以及有多少助手进程</span>

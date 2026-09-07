@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
 	Archive,
+	ArrowLeft,
 	BookOpen,
 	Check,
 	FileText,
@@ -61,6 +62,7 @@ export function MemorySurface({
 	meta,
 	busy,
 	onOpenSidebar,
+	onClose,
 	onRefresh,
 	onScopeChange,
 	onMaintain,
@@ -95,6 +97,7 @@ export function MemorySurface({
 	};
 	busy?: string;
 	onOpenSidebar(): void;
+	onClose?(): void;
 	onRefresh(): void;
 	onScopeChange?(scope: "project" | "global"): void;
 	onMaintain?(): void;
@@ -232,6 +235,17 @@ export function MemorySurface({
 	return (
 		<section className="operation-panel-page">
 			<header className="operation-page-header">
+				{onClose && (
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="返回对话"
+						aria-label="返回对话"
+						onClick={onClose}
+					>
+						<ArrowLeft size={16} />
+					</button>
+				)}
 				<div className="surface-heading">
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 						<strong>两阶段长期记忆中枢 (Memory Hub)</strong>
@@ -345,81 +359,66 @@ export function MemorySurface({
 				</div>
 			)}
 
-			{/* 4-Tab Navigation Bar */}
-			<div
-				style={{
-					display: "flex",
-					gap: 6,
-					padding: "8px 16px 0",
-					borderBottom: "1px solid var(--border)",
-					background: "var(--bg-elevated)",
-				}}
-			>
+			{/* 5-Tab Navigation Bar */}
+			<div className="memory-tabs-bar">
 				<button
 					type="button"
 					onClick={() => setActiveTab("handbook")}
 					className={`context-tab ${activeTab === "handbook" ? "active" : ""}`}
-					style={{ padding: "8px 14px", fontSize: 13 }}
 				>
 					<BookOpen size={14} />
-					<span>📖 知识手册 (MEMORY.md)</span>
+					<span>知识手册 (MEMORY.md)</span>
 				</button>
 				<button
 					type="button"
 					onClick={() => setActiveTab("index")}
 					className={`context-tab ${activeTab === "index" ? "active" : ""}`}
-					style={{ padding: "8px 14px", fontSize: 13 }}
 				>
 					<FileText size={14} />
-					<span>📑 认知索引 (Prompt 常驻)</span>
+					<span>认知索引 (Prompt 常驻)</span>
 				</button>
 				<button
 					type="button"
 					onClick={() => setActiveTab("rollout")}
 					className={`context-tab ${activeTab === "rollout" ? "active" : ""}`}
-					style={{ padding: "8px 14px", fontSize: 13 }}
 				>
 					<Layers size={14} />
-					<span>🔍 会话证据归档 ({hubData?.rolloutSummaries.length ?? 0})</span>
+					<span>会话证据归档 ({hubData?.rolloutSummaries.length ?? 0})</span>
 				</button>
 				<button
 					type="button"
 					onClick={() => setActiveTab("skills")}
 					className={`context-tab ${activeTab === "skills" ? "active" : ""}`}
-					style={{ padding: "8px 14px", fontSize: 13 }}
 				>
 					<Zap size={14} />
-					<span>⚡ 进化技能库 ({hubData?.skills.length ?? 0})</span>
+					<span>进化技能库 ({hubData?.skills.length ?? 0})</span>
 				</button>
 				<button
 					type="button"
 					onClick={() => setActiveTab("entries")}
 					className={`context-tab ${activeTab === "entries" ? "active" : ""}`}
-					style={{ padding: "8px 14px", fontSize: 13 }}
 				>
 					<Archive size={14} />
-					<span>🗂️ 结构化条目 ({parsedEntries.length})</span>
+					<span>结构化条目 ({parsedEntries.length})</span>
 				</button>
 			</div>
 
-			<div className="operation-panel-body" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}>
+			<div className="operation-panel-body" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "24px 28px" }}>
 				{/* ----------------- TAB 1: HANDBOOK (MEMORY.md) ----------------- */}
 				{activeTab === "handbook" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900, margin: "0 auto" }}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
+							className="glass-card"
 							style={{
 								display: "flex",
 								alignItems: "center",
 								justifyContent: "space-between",
-								padding: "12px 16px",
-								borderRadius: 8,
-								background: "var(--bg-muted)",
-								border: "1px solid var(--border)",
+								padding: "16px 22px",
 							}}
 						>
 							<div>
-								<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>长期知识手册 (Handbook)</h3>
-								<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+								<h3 style={{ margin: 0, fontSize: 14.5, fontWeight: 650 }}>长期知识手册 (Handbook)</h3>
+								<p style={{ margin: "3px 0 0", fontSize: 12.5, color: "var(--text-secondary)" }}>
 									由 Stage 1 与 Phase 2 自动提炼与去重，Agent 按需通过文件读取工具读取。支持白盒透明直接编辑。
 								</p>
 							</div>
@@ -464,6 +463,7 @@ export function MemorySurface({
 						{isEditingHandbook ? (
 							<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 								<textarea
+									className="glass-card"
 									value={handbookDraft}
 									onChange={(e) => setHandbookDraft(e.target.value)}
 									rows={22}
@@ -472,10 +472,7 @@ export function MemorySurface({
 										fontFamily: "var(--font-mono, monospace)",
 										fontSize: 13,
 										lineHeight: 1.6,
-										padding: 16,
-										borderRadius: 8,
-										border: "1px solid var(--border)",
-										background: "var(--bg-card)",
+										padding: 20,
 										color: "var(--text)",
 										resize: "vertical",
 									}}
@@ -484,11 +481,9 @@ export function MemorySurface({
 							</div>
 						) : (
 							<div
+								className="glass-card"
 								style={{
-									padding: 24,
-									borderRadius: 8,
-									border: "1px solid var(--border)",
-									background: "var(--bg-card)",
+									padding: "28px 32px",
 									lineHeight: 1.65,
 								}}
 							>
@@ -522,16 +517,14 @@ export function MemorySurface({
 
 				{/* ----------------- TAB 2: INDEX (memory_summary.md) ----------------- */}
 				{activeTab === "index" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900, margin: "0 auto" }}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
+							className="glass-card"
 							style={{
-								padding: "14px 18px",
-								borderRadius: 8,
-								background: "rgba(59, 130, 246, 0.08)",
-								border: "1px solid rgba(59, 130, 246, 0.2)",
+								padding: "16px 20px",
 								display: "flex",
 								alignItems: "flex-start",
-								gap: 12,
+								gap: 14,
 							}}
 						>
 							<Sparkles size={18} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 2 }} />
@@ -546,11 +539,10 @@ export function MemorySurface({
 						</div>
 
 						<div
+							className="glass-card"
 							style={{
-								padding: 24,
-								borderRadius: 8,
-								border: "1px solid var(--border)",
-								background: "var(--bg-card)",
+								padding: "24px 28px",
+								lineHeight: 1.65,
 							}}
 						>
 							{hubData?.summary ? (
@@ -578,13 +570,11 @@ export function MemorySurface({
 
 				{/* ----------------- TAB 3: ROLLOUT SUMMARIES ----------------- */}
 				{activeTab === "rollout" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900, margin: "0 auto" }}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
+							className="glass-card"
 							style={{
-								padding: "12px 16px",
-								borderRadius: 8,
-								background: "var(--bg-muted)",
-								border: "1px solid var(--border)",
+								padding: "16px 20px",
 							}}
 						>
 							<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>会话回溯与证据链归档 (Rollout Summaries)</h3>
@@ -594,18 +584,15 @@ export function MemorySurface({
 						</div>
 
 						{hubData?.rolloutSummaries && hubData.rolloutSummaries.length > 0 ? (
-							<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 								{hubData.rolloutSummaries.map((item) => {
 									const isExpanded = expandedRollout === item.fileName;
 									return (
 										<div
 											key={item.fileName}
+											className="glass-card"
 											style={{
-												padding: "16px 20px",
-												borderRadius: 8,
-												border: "1px solid var(--border)",
-												background: "var(--bg-card)",
-												transition: "border-color 150ms ease",
+												padding: "18px 22px",
 											}}
 										>
 											<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
@@ -672,13 +659,11 @@ export function MemorySurface({
 
 				{/* ----------------- TAB 4: SKILLS ----------------- */}
 				{activeTab === "skills" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900, margin: "0 auto" }}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
+							className="glass-card"
 							style={{
-								padding: "12px 16px",
-								borderRadius: 8,
-								background: "var(--bg-muted)",
-								border: "1px solid var(--border)",
+								padding: "16px 20px",
 							}}
 						>
 							<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>自进化技能库 (Synthesized Skills)</h3>
@@ -688,15 +673,13 @@ export function MemorySurface({
 						</div>
 
 						{hubData?.skills && hubData.skills.length > 0 ? (
-							<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 								{hubData.skills.map((skill) => (
 									<div
 										key={skill.name}
+										className="glass-card"
 										style={{
-											padding: "16px 20px",
-											borderRadius: 8,
-											border: "1px solid var(--border)",
-											background: "var(--bg-card)",
+											padding: "18px 22px",
 										}}
 									>
 										<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>

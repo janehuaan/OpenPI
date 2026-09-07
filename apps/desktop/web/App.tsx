@@ -127,7 +127,7 @@ export function App() {
 	const [chatQuery, setChatQuery] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-	const [startupReady, setStartupReady] = useState(false);
+	const [startupReady, setStartupReady] = useState(true);
 	const [busy, setBusy] = useState<string>();
 	const [error, setError] = useState<string>();
 	// Track which instances are actively processing (agent_start → agent_settled)
@@ -366,14 +366,6 @@ export function App() {
 	}, [refresh, setup.checked, setup.enabled, isStreaming, snapshot.daemonRunning, snapshot.health?.sessionsIndexed]);
 
 	useEffect(() => {
-		if (startupReady) return;
-		if (!setup.checked) return;
-		if (!setup.enabled) {
-			setStartupReady(true);
-			return;
-		}
-		if (!initialLoadComplete || !snapshot.daemonRunning || !snapshot.health?.sessionsIndexed) return;
-
 		let disposed = false;
 		const loadInitialData = async (): Promise<void> => {
 			try {
@@ -384,25 +376,14 @@ export function App() {
 				if (disposed) return;
 				setUserProfile(profile ?? {});
 				setVisionFallback(fallback);
-			} catch (caught) {
-				if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
-			} finally {
-				if (!disposed) setStartupReady(true);
-			}
+			} catch {}
 		};
 
 		void loadInitialData();
 		return () => {
 			disposed = true;
 		};
-	}, [
-		initialLoadComplete,
-		setup.checked,
-		setup.enabled,
-		snapshot.daemonRunning,
-		snapshot.health?.sessionsIndexed,
-		startupReady,
-	]);
+	}, []);
 
 	// Conversation stats + provider balance for the status bar.
 	useEffect(() => {
@@ -1906,125 +1887,20 @@ export function App() {
 		};
 	}, []);
 
-	if (!startupReady) {
+	if (typeof window !== "undefined" && window.location.hash.includes("hud")) {
 		return (
-			<div className="setup-shell">
-				<div className="setup-card startup-card startup-card-active">
-					<h1>OpenPI</h1>
-					<p className="muted">正在加载工作区…</p>
-					<div className="startup-progress" role="status" aria-live="polite">
-						<RefreshCw size={20} className="spin" />
-						<span>初始化服务与会话</span>
-					</div>
-				</div>
-			</div>
+			<FloatingHud
+				onOpenMainWithPrompt={(prompt) => {
+					void desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
+				}}
+			/>
 		);
 	}
 
+	let pageContent: ReactNode = null;
 	let mainContent: ReactNode;
-
-	if (view === "chat") {
-		mainContent = (
-			<ReferenceWorkspacePreview
-				projectInstances={conversationList.projects}
-				chatInstances={conversations}
-				selectedInstanceId={selectedInstanceId}
-				conversation={conversation}
-				conversationTitles={conversationTitles}
-				workspaceSummary={workspaceSummary}
-				runningTools={runningTools}
-				toolDurations={toolDurations}
-				turnProgress={turnProgress}
-				todoState={todoState}
-				optimisticMessage={
-					optimisticMessage &&
-					(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
-						? optimisticMessage.message
-						: undefined
-				}
-				memoryEntries={workspaceMemory}
-				memoryCount={memoryMeta.projectCount ?? workspaceMemory.length}
-				stats={conversationStats}
-				providerBalance={providerBalance}
-				modelOptions={conversationModels}
-				visionFallback={visionFallback}
-				loadingModels={loadingConversationModels}
-				configuring={busy === "set-model" || busy === "set-thinking"}
-				sending={busy === "send-message"}
-				appMode={appMode}
-				sidebarOpen={sidebarOpen}
-				onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-				onSelectConversation={(instanceId) => {
-					setAppMode("chat");
-					setPreferredMode("work");
-					selectConversation(instanceId);
-				}}
-				onOpenProject={(instanceId) => {
-					const project = snapshot.instances.find((instance) => instance.id === instanceId);
-					setAppMode("code");
-					setPreferredMode("code");
-					if (project?.cwd) setCodeWorkspace(project.cwd);
-					selectConversation(instanceId);
-				}}
-				onNewProjectSession={(workspace) => {
-					setAppMode("code");
-					setPreferredMode("code");
-					setCodeWorkspace(workspace);
-					clearRunningTools();
-					void createConversation("code", workspace);
-				}}
-				onNewConversation={() => {
-					setAppMode("chat");
-					setPreferredMode("work");
-					clearRunningTools();
-					void createConversation("work", undefined);
-				}}
-				onOpenSettings={() => setView("capabilities")}
-				onSend={sendMessage}
-				onSteer={steerMessage}
-				onFollowUp={followUpMessage}
-				onAbort={handleAbort}
-				onRenameConversation={(target) => {
-					const inst = target ?? selectedAgentInstance;
-					if (inst) setRenamingConversation(inst);
-				}}
-				onExportConversation={exportSelectedConversation}
-				onDeleteConversation={(target) => {
-					const inst = target ?? selectedAgentInstance;
-					if (inst) setDeletingConversation(inst);
-				}}
-				onRemoveProject={(target) => {
-					setRemovingProject(target);
-				}}
-				onRemember={(text) => rememberFromChat(text)}
-				onCreateTaskFromChat={openTaskFromChat}
-				onModelChange={(model) =>
-					void updateConversationConfiguration("set-model", async (instanceId) => {
-						const res = await desktopApi.setConversationModel(instanceId, model.provider, model.id);
-						if (modelSupportsReasoning(model)) {
-							const highest = getHighestThinkingLevel(model);
-							await desktopApi.setConversationThinkingLevel(instanceId, highest).catch(() => {});
-						}
-						return res;
-					})
-				}
-				onThinkingLevelChange={(level) =>
-					void updateConversationConfiguration("set-thinking", (instanceId) =>
-						desktopApi.setConversationThinkingLevel(instanceId, level),
-					)
-				}
-				onAppModeChange={handleModeChange}
-				slashCommands={conversationCommands}
-				gitStatus={gitStatus}
-				gitLoading={gitLoading}
-				onRefreshGit={loadGitStatus}
-				onOpenGit={() => setView("git")}
-				onNavigate={(next) => setView(next)}
-				prefillDraft={composerDraftRequest}
-			/>
-		);
-	} else if (view === "capabilities") {
-		mainContent = (
+	if (view === "capabilities") {
+		pageContent = (
 			<CapabilitiesSurface
 				conversation={conversation}
 				capabilities={capabilities}
@@ -2051,149 +1927,240 @@ export function App() {
 				}
 			/>
 		);
-	} else if (typeof window !== "undefined" && window.location.hash.includes("hud")) {
-		return (
-			<FloatingHud
-				onOpenMainWithPrompt={(prompt) => {
-					void desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
-				}}
+	} else if (view === "git") {
+		pageContent = (
+			<GitSurface
+				cwd={selectedWorkspace ?? setup.workspace}
+				gitStatus={gitStatus}
+				loading={gitLoading}
+				onRefresh={() => void loadGitStatus()}
+				onClose={() => setView("chat")}
 			/>
 		);
-	} else {
-		mainContent = (
-		<div className={`app-shell chat-first ${sidebarOpen ? "sidebar-open" : ""} ${view === "tasks" ? "tasks-view" : ""} ${operationView ? "operations-view" : ""}`}>
-			<div className="main-column">
-				<div className="secondary-bar">
-					<button type="button" className="text-button back-chat" onClick={() => setView("chat")}>
-						<ArrowLeft size={14} />
-						返回对话
-					</button>
-					<span className="secondary-bar-note">辅助页面 · 主路径是聊天</span>
-				</div>
-				{extensionNotice && (
-					<div className={`notice-banner ${extensionNotice.type}`}>
-						<Bell size={15} />
-						<span>{extensionNotice.message}</span>
-						<button
-							className="icon-button quiet"
-							title="关闭通知"
-							aria-label="关闭通知"
-							onClick={() => setExtensionNotice(undefined)}
-						>
-							<X size={15} />
-						</button>
-					</div>
-				)}
-				{error && (
-					<div className="error-banner">
-						<span>{error}</span>
-						<button
-							className="icon-button quiet"
-							title="关闭错误"
-							aria-label="关闭错误"
-							onClick={() => setError(undefined)}
-						>
-							<X size={15} />
-						</button>
-					</div>
-				)}
-				{loading ? (
-					<div className="loading-state">
-						<RefreshCw size={22} className="spin" />
-						<span>加载中…</span>
-					</div>
-				) : view === "tasks" ? (
-					<TasksSurface
-						tasks={tasks}
-						taskCount={snapshot.tasks.length}
-						selectedTask={selectedTask}
-						taskRuns={taskRuns}
-						selectedRun={selectedRun}
-						filter={taskFilter}
-						query={taskQuery}
-						log={log}
-						busy={busy}
-						onFilterChange={setTaskFilter}
-						onQueryChange={setTaskQuery}
-						onSelectTask={(taskId) => {
-							setSelectedTaskId(taskId);
-							setSelectedRunId(undefined);
-							setLog(undefined);
-						}}
-						onSelectRun={(runId) => {
-							setSelectedRunId(runId);
-							setLog(undefined);
-						}}
-						onNew={() => setShowCreateTask(true)}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onRun={(taskId) => perform("run", () => desktopApi.runTask(taskId))}
-						onPause={(taskId, paused) => perform("pause", () => desktopApi.setTaskPaused(taskId, paused))}
-						onDelete={(taskId) => perform("delete", () => desktopApi.deleteTask(taskId))}
-						onCancel={(runId) => perform("cancel", () => desktopApi.cancelRun(runId))}
-						onLoadLog={loadLog}
-					/>
-				) : view === "memory" ? (
-					<MemorySurface
-						workspace={selectedWorkspace}
-						entries={workspaceMemory}
-						draft={memoryDraft}
-						scope={memoryScope}
-						meta={memoryMeta}
-						busy={busy}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onRefresh={() => void refreshMemory()}
-						onScopeChange={(scope) => {
-							setMemoryScope(scope);
-							// refresh after scope flip on next tick
-							queueMicrotask(() => void refreshMemory());
-						}}
-						onMaintain={() => void runMemoryMaintain()}
-						onDraftChange={(field, value) => setMemoryDraft((current) => ({ ...current, [field]: value }))}
-						onSave={() => void saveMemory()}
-						onSaveEntry={(memoryType, key, value) => void saveMemoryEntry(memoryType, key, value)}
-						onDelete={(memoryType, key) => void deleteMemory(memoryType, key)}
-					/>
-				) : view === "intelligence" ? (
-					<IntelligenceSurface
-						workspace={selectedWorkspace}
-						runs={workspaceIntelligenceRuns}
-						commands={conversationCommands}
-						selectedRunId={selectedIntelligenceRunId}
-						detail={intelligenceDetail}
-						busy={busy}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onRefresh={() => void refreshIntelligence()}
-						onSelectRun={(runId) => void loadIntelligenceRun(runId)}
-					/>
-				) : view === "git" ? (
-					<GitSurface
-						cwd={selectedWorkspace ?? setup.workspace}
-						gitStatus={gitStatus}
-						loading={gitLoading}
-						onRefresh={() => void loadGitStatus()}
-						onClose={() => setView("chat")}
-					/>
-				) : (
-					<DaemonSurface
-						snapshot={snapshot}
-						busy={busy}
-						onOpenSidebar={() => setSidebarOpen(true)}
-						onStart={() => void perform("daemon-start", desktopApi.startDaemon)}
-						onStop={() => void perform("daemon-stop", desktopApi.stopDaemon)}
-						onRestart={() => void perform("daemon-restart", desktopApi.restartDaemon)}
-						onStopInstance={(instanceId) =>
-							void perform("stop-instance", () => desktopApi.stopInstance(instanceId))
-						}
-						onPruneStopped={() => void perform("prune-stopped", desktopApi.pruneStoppedInstances)}
-					/>
-				)}
-			</div>
-		</div>
+	} else if (view === "tasks") {
+		pageContent = (
+			<TasksSurface
+				tasks={tasks}
+				taskCount={snapshot.tasks.length}
+				selectedTask={selectedTask}
+				taskRuns={taskRuns}
+				selectedRun={selectedRun}
+				filter={taskFilter}
+				query={taskQuery}
+				log={log}
+				busy={busy}
+				onFilterChange={setTaskFilter}
+				onQueryChange={setTaskQuery}
+				onSelectTask={(taskId) => {
+					setSelectedTaskId(taskId);
+					setSelectedRunId(undefined);
+					setLog(undefined);
+				}}
+				onSelectRun={(runId) => {
+					setSelectedRunId(runId);
+					setLog(undefined);
+				}}
+				onNew={() => setShowCreateTask(true)}
+				onOpenSidebar={() => setSidebarOpen(true)}
+				onClose={() => setView("chat")}
+				onRun={(taskId) => perform("run", () => desktopApi.runTask(taskId))}
+				onPause={(taskId, paused) => perform("pause", () => desktopApi.setTaskPaused(taskId, paused))}
+				onDelete={(taskId) => perform("delete", () => desktopApi.deleteTask(taskId))}
+				onCancel={(runId) => perform("cancel", () => desktopApi.cancelRun(runId))}
+				onLoadLog={loadLog}
+			/>
+		);
+	} else if (view === "memory") {
+		pageContent = (
+			<MemorySurface
+				workspace={selectedWorkspace}
+				entries={workspaceMemory}
+				draft={memoryDraft}
+				scope={memoryScope}
+				meta={memoryMeta}
+				busy={busy}
+				onOpenSidebar={() => setSidebarOpen(true)}
+				onClose={() => setView("chat")}
+				onRefresh={() => void refreshMemory()}
+				onScopeChange={(scope) => {
+					setMemoryScope(scope);
+					queueMicrotask(() => void refreshMemory());
+				}}
+				onMaintain={() => void runMemoryMaintain()}
+				onDraftChange={(field, value) => setMemoryDraft((current) => ({ ...current, [field]: value }))}
+				onSave={() => void saveMemory()}
+				onSaveEntry={(memoryType, key, value) => void saveMemoryEntry(memoryType, key, value)}
+				onDelete={(memoryType, key) => void deleteMemory(memoryType, key)}
+			/>
+		);
+	} else if (view === "intelligence") {
+		pageContent = (
+			<IntelligenceSurface
+				workspace={selectedWorkspace}
+				runs={workspaceIntelligenceRuns}
+				commands={conversationCommands}
+				selectedRunId={selectedIntelligenceRunId}
+				detail={intelligenceDetail}
+				busy={busy}
+				onOpenSidebar={() => setSidebarOpen(true)}
+				onClose={() => setView("chat")}
+				onRefresh={() => void refreshIntelligence()}
+				onSelectRun={(runId) => void loadIntelligenceRun(runId)}
+			/>
+		);
+	} else if (view === "daemon") {
+		pageContent = (
+			<DaemonSurface
+				snapshot={snapshot}
+				busy={busy}
+				onOpenSidebar={() => setSidebarOpen(true)}
+				onClose={() => setView("chat")}
+				onStart={() => void perform("daemon-start", desktopApi.startDaemon)}
+				onStop={() => void perform("daemon-stop", desktopApi.stopDaemon)}
+				onRestart={() => void perform("daemon-restart", desktopApi.restartDaemon)}
+				onStopInstance={(instanceId) =>
+					void perform("stop-instance", () => desktopApi.stopInstance(instanceId))
+				}
+				onPruneStopped={() => void perform("prune-stopped", desktopApi.pruneStoppedInstances)}
+			/>
 		);
 	}
 
+	mainContent = (
+		<ReferenceWorkspacePreview
+			activeView={view}
+			customContent={pageContent}
+			projectInstances={conversationList.projects}
+			chatInstances={conversations}
+			selectedInstanceId={selectedInstanceId}
+			conversation={conversation}
+			conversationTitles={conversationTitles}
+			workspaceSummary={workspaceSummary}
+			runningTools={runningTools}
+			toolDurations={toolDurations}
+			turnProgress={turnProgress}
+			todoState={todoState}
+			optimisticMessage={
+				optimisticMessage &&
+				(optimisticMessage.instanceId === undefined || optimisticMessage.instanceId === selectedInstanceId)
+					? optimisticMessage.message
+					: undefined
+			}
+			memoryEntries={workspaceMemory}
+			memoryCount={memoryMeta.projectCount ?? workspaceMemory.length}
+			stats={conversationStats}
+			providerBalance={providerBalance}
+			modelOptions={conversationModels}
+			visionFallback={visionFallback}
+			loadingModels={loadingConversationModels}
+			configuring={busy === "set-model" || busy === "set-thinking"}
+			sending={busy === "send-message"}
+			appMode={appMode}
+			sidebarOpen={sidebarOpen}
+			onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+			onSelectConversation={(instanceId) => {
+				setView("chat");
+				setAppMode("chat");
+				setPreferredMode("work");
+				selectConversation(instanceId);
+			}}
+			onOpenProject={(instanceId) => {
+				setView("chat");
+				const project = snapshot.instances.find((instance) => instance.id === instanceId);
+				setAppMode("code");
+				setPreferredMode("code");
+				if (project?.cwd) setCodeWorkspace(project.cwd);
+				selectConversation(instanceId);
+			}}
+			onNewProjectSession={(workspace) => {
+				setView("chat");
+				setAppMode("code");
+				setPreferredMode("code");
+				setCodeWorkspace(workspace);
+				clearRunningTools();
+				void createConversation("code", workspace);
+			}}
+			onNewConversation={() => {
+				setView("chat");
+				setAppMode("chat");
+				setPreferredMode("work");
+				clearRunningTools();
+				void createConversation("work", undefined);
+			}}
+			onOpenSettings={() => setView("capabilities")}
+			onSend={sendMessage}
+			onSteer={steerMessage}
+			onFollowUp={followUpMessage}
+			onAbort={handleAbort}
+			onRenameConversation={(target) => {
+				const inst = target ?? selectedAgentInstance;
+				if (inst) setRenamingConversation(inst);
+			}}
+			onExportConversation={exportSelectedConversation}
+			onDeleteConversation={(target) => {
+				const inst = target ?? selectedAgentInstance;
+				if (inst) setDeletingConversation(inst);
+			}}
+			onRemoveProject={(target) => {
+				setRemovingProject(target);
+			}}
+			onRemember={(text) => rememberFromChat(text)}
+			onCreateTaskFromChat={openTaskFromChat}
+			onModelChange={(model) =>
+				void updateConversationConfiguration("set-model", async (instanceId) => {
+					const res = await desktopApi.setConversationModel(instanceId, model.provider, model.id);
+					if (modelSupportsReasoning(model)) {
+						const highest = getHighestThinkingLevel(model);
+						await desktopApi.setConversationThinkingLevel(instanceId, highest).catch(() => {});
+					}
+					return res;
+				})
+			}
+			onThinkingLevelChange={(level) =>
+				void updateConversationConfiguration("set-thinking", (instanceId) =>
+					desktopApi.setConversationThinkingLevel(instanceId, level),
+				)
+			}
+			onAppModeChange={handleModeChange}
+			slashCommands={conversationCommands}
+			gitStatus={gitStatus}
+			gitLoading={gitLoading}
+			onRefreshGit={loadGitStatus}
+			onOpenGit={() => setView("git")}
+			onNavigate={(next) => setView(next)}
+			prefillDraft={composerDraftRequest}
+		/>
+	);
+
 	return (
 		<>
+			{extensionNotice && (
+				<div className={`notice-banner ${extensionNotice.type}`} style={{ position: "fixed", top: 12, right: 24, zIndex: 9999, maxWidth: 460 }}>
+					<Bell size={15} />
+					<span>{extensionNotice.message}</span>
+					<button
+						className="icon-button quiet"
+						title="关闭通知"
+						aria-label="关闭通知"
+						onClick={() => setExtensionNotice(undefined)}
+					>
+						<X size={15} />
+					</button>
+				</div>
+			)}
+			{error && (
+				<div className="error-banner" style={{ position: "fixed", top: 12, right: 24, zIndex: 9999, maxWidth: 460 }}>
+					<span>{error}</span>
+					<button
+						className="icon-button quiet"
+						title="关闭错误"
+						aria-label="关闭错误"
+						onClick={() => setError(undefined)}
+					>
+						<X size={15} />
+					</button>
+				</div>
+			)}
 			{mainContent}
 
 			{showCreateTask && (

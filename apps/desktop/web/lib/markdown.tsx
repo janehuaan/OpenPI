@@ -1,4 +1,5 @@
 import { memo, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy, Terminal } from "../components/icons";
 import { nextStreamingTextOffset } from "./smooth-stream";
 
 const STREAM_FRAME_INTERVAL_MS = 24;
@@ -9,15 +10,31 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
 	const handleCopy = () => {
 		void navigator.clipboard.writeText(code).then(() => {
 			setCopied(true);
-			setTimeout(() => setCopied(false), 1500);
+			setTimeout(() => setCopied(false), 1600);
 		});
 	};
 	return (
 		<div className="md-code-block">
 			<div className="md-code-header">
-				<span className="md-code-lang">{lang || "code"}</span>
-				<button type="button" className="md-code-copy-btn" onClick={handleCopy} title="复制代码">
-					{copied ? "已复制 ✓" : "复制"}
+				<div className="md-code-header-left">
+					<div className="md-code-dots" aria-hidden="true">
+						<span className="md-code-dot red" />
+						<span className="md-code-dot yellow" />
+						<span className="md-code-dot green" />
+					</div>
+					<div className="md-code-badge">
+						<Terminal size={12} className="md-code-terminal-icon" />
+						<span className="md-code-lang">{lang || "code"}</span>
+					</div>
+				</div>
+				<button
+					type="button"
+					className={`md-code-copy-btn ${copied ? "copied" : ""}`}
+					onClick={handleCopy}
+					title="复制代码"
+				>
+					{copied ? <Check size={12} /> : <Copy size={12} />}
+					<span>{copied ? "已复制" : "复制"}</span>
 				</button>
 			</div>
 			<pre className="md-code">

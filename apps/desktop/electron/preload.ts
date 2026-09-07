@@ -13,6 +13,7 @@ const allowedInvoke = new Set<string>(INVOKE_CHANNELS);
 
 contextBridge.exposeInMainWorld("openpi", {
 	isNative: true,
+	platform: process.platform,
 
 	invoke(channel: string, args?: unknown): Promise<unknown> {
 		if (typeof channel !== "string" || !allowedInvoke.has(channel)) {

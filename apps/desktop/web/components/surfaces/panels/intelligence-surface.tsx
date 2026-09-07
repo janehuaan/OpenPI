@@ -1,4 +1,5 @@
 import {
+	ArrowLeft,
 	BrainCircuit,
 	ChevronRight,
 	FileJson,
@@ -18,6 +19,7 @@ export function IntelligenceSurface({
 	detail,
 	busy,
 	onOpenSidebar,
+	onClose,
 	onRefresh,
 	onSelectRun,
 }: {
@@ -28,6 +30,7 @@ export function IntelligenceSurface({
 	detail: string;
 	busy?: string;
 	onOpenSidebar(): void;
+	onClose?(): void;
 	onRefresh(): void;
 	onSelectRun(runId: string): void;
 }) {
@@ -37,14 +40,26 @@ export function IntelligenceSurface({
 	return (
 		<section className="operations-surface">
 			<header className="surface-header operation-page-header">
-				<button
-					className="icon-button quiet mobile-only"
-					title="对话列表"
-					aria-label="对话列表"
-					onClick={onOpenSidebar}
-				>
-					<Menu size={18} />
-				</button>
+				{onClose ? (
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="返回对话"
+						aria-label="返回对话"
+						onClick={onClose}
+					>
+						<ArrowLeft size={16} />
+					</button>
+				) : (
+					<button
+						className="icon-button quiet mobile-only"
+						title="对话列表"
+						aria-label="对话列表"
+						onClick={onOpenSidebar}
+					>
+						<Menu size={18} />
+					</button>
+				)}
 				<div className="surface-heading">
 					<strong>智能规划</strong>
 					<span>复杂任务的计划与执行记录 · {workspaceLabel}</span>

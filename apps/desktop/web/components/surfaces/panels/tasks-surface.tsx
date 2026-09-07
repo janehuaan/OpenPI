@@ -1,4 +1,5 @@
 import {
+	ArrowLeft,
 	Check,
 	ChevronRight,
 	CircleStop,
@@ -37,6 +38,7 @@ export function TasksSurface({
 	onSelectRun,
 	onNew,
 	onOpenSidebar,
+	onClose,
 	onRun,
 	onPause,
 	onDelete,
@@ -58,6 +60,7 @@ export function TasksSurface({
 	onSelectRun(runId: string): void;
 	onNew(): void;
 	onOpenSidebar(): void;
+	onClose?(): void;
 	onRun(taskId: string): Promise<unknown>;
 	onPause(taskId: string, paused: boolean): Promise<unknown>;
 	onDelete(taskId: string): Promise<unknown>;
@@ -67,14 +70,26 @@ export function TasksSurface({
 	return (
 		<section className="tasks-surface">
 			<header className="surface-header task-page-header">
-				<button
-					className="icon-button quiet mobile-only"
-					title="Open conversations"
-					aria-label="Open conversations"
-					onClick={onOpenSidebar}
-				>
-					<Menu size={18} />
-				</button>
+				{onClose ? (
+					<button
+						type="button"
+						className="icon-button quiet"
+						title="返回对话"
+						aria-label="返回对话"
+						onClick={onClose}
+					>
+						<ArrowLeft size={16} />
+					</button>
+				) : (
+					<button
+						className="icon-button quiet mobile-only"
+						title="Open conversations"
+						aria-label="Open conversations"
+						onClick={onOpenSidebar}
+					>
+						<Menu size={18} />
+					</button>
+				)}
 				<div className="surface-heading">
 					<strong>定时任务</strong>
 					<span>{taskCount === 0 ? "还没有自动化" : `${taskCount} 个任务`}</span>

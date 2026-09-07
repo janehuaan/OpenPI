@@ -237,6 +237,8 @@ export function ReferenceWorkspacePreview({
 	onOpenGit,
 	extraDataSlot,
 	prefillDraft,
+	activeView,
+	customContent,
 }: {
 	projectInstances: AgentInstance[];
 	chatInstances: AgentInstance[];
@@ -287,6 +289,8 @@ export function ReferenceWorkspacePreview({
 	onOpenGit?: () => void;
 	extraDataSlot?: ReactNode;
 	prefillDraft?: { id: string; text: string; images?: string[] };
+	activeView?: string;
+	customContent?: ReactNode;
 }) {
 	const initialKey = selectedInstanceId ?? "__new_draft__";
 	const [draft, setDraft] = useState(() => draftStore.getDraft(initialKey)?.text ?? "");
@@ -1297,7 +1301,7 @@ export function ReferenceWorkspacePreview({
 
 	return (
 		<div
-			className={`reference-workspace ${sidebarOpen === false ? "left-collapsed" : ""} ${!contextPanelOpen ? "context-collapsed" : ""}`}
+			className={`reference-workspace ${sidebarOpen === false ? "left-collapsed" : ""} ${!contextPanelOpen || Boolean(customContent) ? "context-collapsed" : ""}`}
 		>
 			<aside className="reference-leftbar">
 				<header className="reference-brand">
@@ -1344,7 +1348,7 @@ export function ReferenceWorkspacePreview({
 					<div className="reference-nav-bar">
 						<button
 							type="button"
-							className="reference-nav-item"
+							className={`reference-nav-item ${activeView === "git" ? "active" : ""}`}
 							title="版本管理 (Git 变更与差异对比)"
 							onClick={onOpenGit || (() => onNavigate("git"))}
 						>
@@ -1356,7 +1360,7 @@ export function ReferenceWorkspacePreview({
 						</button>
 						<button
 							type="button"
-							className="reference-nav-item"
+							className={`reference-nav-item ${activeView === "memory" ? "active" : ""}`}
 							title="长期记忆库"
 							onClick={() => onNavigate("memory")}
 						>
@@ -1366,7 +1370,7 @@ export function ReferenceWorkspacePreview({
 						</button>
 						<button
 							type="button"
-							className="reference-nav-item"
+							className={`reference-nav-item ${activeView === "tasks" ? "active" : ""}`}
 							title="自动化定时任务"
 							onClick={() => onNavigate("tasks")}
 						>
@@ -1628,7 +1632,7 @@ export function ReferenceWorkspacePreview({
 					<div className="reference-account-actions">
 						<button
 							type="button"
-							className="reference-account-btn"
+							className={`reference-account-btn ${activeView === "git" ? "active" : ""}`}
 							title="版本管理 (Git)"
 							aria-label="版本管理"
 							onClick={onOpenGit || (() => onNavigate("git"))}
@@ -1637,7 +1641,7 @@ export function ReferenceWorkspacePreview({
 						</button>
 						<button
 							type="button"
-							className="reference-account-btn"
+							className={`reference-account-btn ${activeView === "capabilities" ? "active" : ""}`}
 							title="设置"
 							aria-label="设置"
 							onClick={onOpenSettings}
@@ -1649,6 +1653,23 @@ export function ReferenceWorkspacePreview({
 			</aside>
 
 			<main className="reference-main">
+				{customContent ? (
+					<div className="reference-custom-container">
+						{sidebarOpen === false && onToggleSidebar && (
+							<button
+								type="button"
+								className="reference-floating-toggle-sidebar"
+								title="展开侧边栏 (⌘B)"
+								aria-label="展开侧边栏"
+								onClick={onToggleSidebar}
+							>
+								<PanelLeftOpen size={16} />
+							</button>
+						)}
+						{customContent}
+					</div>
+				) : (
+					<>
 				<header className="reference-main-header">
 					<div className="reference-title">
 						{sidebarOpen === false && onToggleSidebar && (
@@ -1726,6 +1747,15 @@ export function ReferenceWorkspacePreview({
 								<button type="button" onClick={() => onNavigate("tasks")}>
 									<ListTodo size={14} /> 定时任务
 								</button>
+								<button type="button" onClick={() => onNavigate("intelligence")}>
+									<BrainCircuit size={14} /> 智能规划与记录
+								</button>
+								<button type="button" onClick={() => onNavigate("daemon")}>
+									<Server size={14} /> 守护进程与服务
+								</button>
+								<button type="button" onClick={onOpenSettings}>
+									<Wrench size={14} /> 系统设置与模型
+								</button>
 								<div className="reference-menu-divider" />
 								<span className="reference-menu-label">会话操作</span>
 								<button
@@ -1769,21 +1799,24 @@ export function ReferenceWorkspacePreview({
 										className="reference-draft-chip"
 										onClick={() => setDraft("帮我检查当前项目的代码结构并提出优化建议")}
 									>
-										🔍 审查项目架构
+										<span className="reference-chip-icon">🔍</span>
+										<span>审查项目架构</span>
 									</button>
 									<button
 										type="button"
 										className="reference-draft-chip"
 										onClick={() => setDraft("编写一个单元测试来覆盖核心逻辑")}
 									>
-										🧪 编写单元测试
+										<span className="reference-chip-icon">🧪</span>
+										<span>编写单元测试</span>
 									</button>
 									<button
 										type="button"
 										className="reference-draft-chip"
 										onClick={() => setDraft("解释当前项目的构建与打包配置流程")}
 									>
-										📦 构建与打包解析
+										<span className="reference-chip-icon">📦</span>
+										<span>构建与打包解析</span>
 									</button>
 								</div>
 							</div>
@@ -1799,40 +1832,31 @@ export function ReferenceWorkspacePreview({
 											</div>
 										)}
 										<div className="reference-message-row user">
-											<div
-												className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""}`}
-											>
-												<p>{text}</p>
-												{hasVisionContext(item.message.content) && (
-													<span className="reference-vision-badge">
-														<ImageIcon size={12} /> GLM-4.6V 视觉解析
-													</span>
+											<div className="reference-user-bubble-wrapper">
+												{text && (
+													<UserMessageActions text={text} onRemember={onRemember} />
 												)}
-												{contentImages(item.message.content).length > 0 && (
-													<div className="reference-message-images">
-														{contentImages(item.message.content).map((image, imageIndex) => (
-															<img
-																src={`data:${image.mimeType};base64,${image.data}`}
-																alt="已附加图片"
-																key={`${image.mimeType}-${imageIndex}`}
-															/>
-														))}
-													</div>
-												)}
-												{text && onRemember && (
-													<div className="reference-user-actions" role="toolbar" aria-label="用户消息操作">
-														<button
-															type="button"
-															className="ref-action-btn"
-															title="存为长期记忆"
-															aria-label="存为长期记忆"
-															onClick={() => void onRemember(text)}
-														>
-															<BrainCircuit size={11} />
-															<span className="ref-action-text">存为记忆</span>
-														</button>
-													</div>
-												)}
+												<div
+													className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""}`}
+												>
+													<p>{text}</p>
+													{hasVisionContext(item.message.content) && (
+														<span className="reference-vision-badge">
+															<ImageIcon size={12} /> GLM-4.6V 视觉解析
+														</span>
+													)}
+													{contentImages(item.message.content).length > 0 && (
+														<div className="reference-message-images">
+															{contentImages(item.message.content).map((image, imageIndex) => (
+																<img
+																	src={`data:${image.mimeType};base64,${image.data}`}
+																	alt="已附加图片"
+																	key={`${image.mimeType}-${imageIndex}`}
+																/>
+															))}
+														</div>
+													)}
+												</div>
 											</div>
 										</div>
 									</Fragment>
@@ -2339,8 +2363,11 @@ export function ReferenceWorkspacePreview({
 					/>
 				</div>
 			</footer>
+					</>
+				)}
 			</main>
 
+			{!customContent && (
 			<aside className="reference-context">
 				<header>
 					<strong>Context</strong>
@@ -2568,6 +2595,49 @@ export function ReferenceWorkspacePreview({
 					</ReferenceContextCard>
 				)}
 			</aside>
+			)}
+		</div>
+	);
+}
+
+function UserMessageActions({
+	text,
+	onRemember,
+}: {
+	text: string;
+	onRemember?(text: string): void;
+}) {
+	const [copied, setCopied] = useState(false);
+	const handleCopy = () => {
+		void navigator.clipboard.writeText(text).then(() => {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		});
+	};
+	return (
+		<div className="reference-user-actions" role="toolbar" aria-label="用户消息操作">
+			<button
+				type="button"
+				className={`ref-action-btn ${copied ? "copied" : ""}`}
+				title={copied ? "已复制" : "复制"}
+				aria-label={copied ? "已复制" : "复制"}
+				onClick={handleCopy}
+			>
+				{copied ? <Check size={11} /> : <Copy size={11} />}
+				{copied && <span className="ref-action-text">已复制</span>}
+			</button>
+			{onRemember && (
+				<button
+					type="button"
+					className="ref-action-btn"
+					title="存为长期记忆"
+					aria-label="存为长期记忆"
+					onClick={() => void onRemember(text)}
+				>
+					<BrainCircuit size={11} />
+					<span className="ref-action-text">存为记忆</span>
+				</button>
+			)}
 		</div>
 	);
 }

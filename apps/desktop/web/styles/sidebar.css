@@ -9,6 +9,8 @@
 	align-items: center;
 	padding: 12px 0 24px;
 	background: var(--rail-bg);
+	backdrop-filter: blur(20px) saturate(150%);
+	-webkit-backdrop-filter: blur(20px) saturate(150%);
 	border-right: 1px solid var(--border);
 	z-index: 32;
 	gap: 4px;

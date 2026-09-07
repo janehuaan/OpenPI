@@ -5,6 +5,7 @@ import { MiniDiffView } from "../../diff-viewer.tsx";
 import {
 	AlertCircle,
 	ArrowDown,
+	ArrowLeft,
 	ArrowUp,
 	Check,
 	ChevronDown,
@@ -239,16 +240,38 @@ export function GitSurface({
 
 	if (!isRepo) {
 		return (
-			<section className="git-surface non-repo-surface" aria-label="版本管理">
-				<div className="git-empty-card">
-					<GitBranchIcon size={36} className="empty-git-icon" />
-					<h3>当前目录不是 Git 仓库</h3>
-					<p>该工作区目录尚未初始化版本控制系统。初始化后即可使用分支、提交与差异对比功能。</p>
-					{actionError && <div className="git-error-banner">{actionError}</div>}
-					<button type="button" className="btn-primary-action" onClick={handleInitRepo}>
-						<Plus size={15} />
-						<span>初始化 Git 仓库 (git init)</span>
-					</button>
+			<section className="git-surface" aria-label="版本管理">
+				<header className="git-surface-header">
+					<div className="git-header-left">
+						{onClose && (
+							<button
+								type="button"
+								className="git-back-btn"
+								title="返回对话"
+								aria-label="返回对话"
+								onClick={onClose}
+							>
+								<ArrowLeft size={14} />
+								<span>返回</span>
+							</button>
+						)}
+						<GitBranchIcon size={18} className="header-git-icon" />
+						<strong style={{ fontSize: 13 }}>版本管理</strong>
+					</div>
+				</header>
+				<div className="git-empty-viewport">
+					<div className="git-empty-card glass-card">
+						<div className="git-empty-icon-wrapper">
+							<GitBranchIcon size={36} className="empty-git-icon" />
+						</div>
+						<h3>当前目录不是 Git 仓库</h3>
+						<p>该工作区目录尚未初始化版本控制系统。初始化后即可使用分支、提交与差异对比功能。</p>
+						{actionError && <div className="git-error-banner">{actionError}</div>}
+						<button type="button" className="btn-primary-action" onClick={handleInitRepo}>
+							<Plus size={15} />
+							<span>初始化 Git 仓库 (git init)</span>
+						</button>
+					</div>
 				</div>
 			</section>
 		);
@@ -259,6 +282,18 @@ export function GitSurface({
 			{/* Top Bar */}
 			<header className="git-surface-header">
 				<div className="git-header-left">
+					{onClose && (
+						<button
+							type="button"
+							className="git-back-btn"
+							title="返回对话"
+							aria-label="返回对话"
+							onClick={onClose}
+						>
+							<ArrowLeft size={14} />
+							<span>返回</span>
+						</button>
+					)}
 					<GitBranchIcon size={18} className="header-git-icon" />
 					<div className="git-branch-selector-wrap">
 						<button

@@ -124,12 +124,21 @@ function resolveIcon(): string | undefined {
 
 function createWindow(): void {
 	const icon = resolveIcon();
+	const isMac = process.platform === "darwin";
 	const window = new BrowserWindow({
 		...fitToDisplay(loadState() ?? DEFAULT_STATE),
 		minWidth: MIN_WIDTH,
 		minHeight: MIN_HEIGHT,
 		title: "OpenPI",
-		backgroundColor: backgroundColor(),
+		titleBarStyle: isMac ? "hidden" : "default",
+		trafficLightPosition: isMac ? { x: 18, y: 19 } : undefined,
+		backgroundColor: isMac ? "#00000000" : backgroundColor(),
+		...(isMac
+			? {
+					vibrancy: "under-window" as const,
+					visualEffectState: "active" as const,
+			  }
+			: {}),
 		...(icon ? { icon } : {}),
 		webPreferences: {
 			preload: join(here, "preload.cjs"),
@@ -167,26 +176,38 @@ function createWindow(): void {
 			}, 800);
 		}
 	});
-	window.webContents.on("console-message", (_event, level, message, line, source) => {
-		if (level >= 2) safeWriteStderr(`[renderer] ${message} (${source}:${line})\n`);
+	window.webContents.on("dom-ready", () => {
+		safeWriteStderr(`[main] dom-ready url=${window.webContents.getURL()}\n`);
+		window.webContents
+			.executeJavaScript("document.body ? document.body.innerHTML : 'no body'")
+			.then((html) => safeWriteStderr(`[main] dom body: ${html.slice(0, 200)}\n`))
+			.catch((err) => safeWriteStderr(`[main] executeJS error: ${err}\n`));
 	});
-	window.webContents.on("render-process-gone", (_event, details) => {
-		safeWriteStderr(`[renderer] gone: ${details.reason}\n`);
+	window.webContents.on("did-finish-load", () => {
+		safeWriteStderr(`[main] did-finish-load url=${window.webContents.getURL()}\n`);
 	});
 
 	if (isDev) {
+		safeWriteStderr(`[main] loading dev url: ${DEV_URL}\n`);
 		void window.loadURL(DEV_URL);
 		window.webContents.openDevTools({ mode: "detach" });
 	} else {
 		const index = join(here, "../dist/index.html");
-		if (!existsSync(index)) {
-			safeWriteStderr(`[main] missing ${index} - run \`npm run build:web\`\n`);
-		}
 		void window.loadFile(index);
 	}
+	window.show();
+	window.focus();
 }
 
-app.whenReady().then(() => {
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+	app.quit();
+} else {
+	app.on("second-instance", () => {
+		focusMainWindow();
+	});
+
+	app.whenReady().then(() => {
 	// Automatically approve safe permissions (clipboard, notifications, fullscreen) and block others silently without popups
 	session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
 		const allowedPermissions = new Set([
@@ -209,7 +230,9 @@ app.whenReady().then(() => {
 	});
 
 	registerHandlers(ipcMain, () => mainWindow);
-	nativeTheme.on("updated", () => mainWindow?.setBackgroundColor(backgroundColor()));
+	nativeTheme.on("updated", () => {
+		if (process.platform !== "darwin") mainWindow?.setBackgroundColor(backgroundColor());
+	});
 	createWindow();
 
 	setupGlobalShortcuts(() => mainWindow);
@@ -260,9 +283,14 @@ app.whenReady().then(() => {
 	});
 
 	app.on("activate", () => {
-		if (BrowserWindow.getAllWindows().length === 0) createWindow();
+		if (BrowserWindow.getAllWindows().length === 0) {
+			createWindow();
+		} else {
+			focusMainWindow();
+		}
 	});
 });
+}
 
 app.on("will-quit", () => {
 	cleanupGlobalShortcuts();
