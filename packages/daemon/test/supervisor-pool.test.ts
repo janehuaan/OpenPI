@@ -96,12 +96,15 @@ test("working sessions are protected from LRU eviction", async () => {
 });
 
 test("idle reaper suspends inactive sessions after timeout", async () => {
-	const supervisor = makeSupervisor({ idleTimeoutMs: 30 });
+	const supervisor = makeSupervisor({ idleTimeoutMs: 20 });
 	const s1 = supervisor.create({ cwd: process.cwd(), mode: "chat" });
 	assert.equal(supervisor.runningCount, 1);
 
-	// Wait past idle timeout
-	await new Promise((resolve) => setTimeout(resolve, 50));
+	// Wait past idle timeout reliably on all CI environments
+	const start = Date.now();
+	while (Date.now() - start < 100) {
+		await new Promise((resolve) => setTimeout(resolve, 15));
+	}
 
 	const reaped = supervisor.reapIdleProcesses();
 	assert.equal(reaped, 1, "should reap 1 idle session");

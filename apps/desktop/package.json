@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "description": "OpenPI desktop app: Electron shell over the openpi daemon",
+  "homepage": "https://github.com/janehuaan/OpenPI",
+  "author": {
+    "name": "Jane Huaan",
+    "email": "huaan@users.noreply.github.com"
+  },
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k \"vite --port 5179\" \"npm:dev:electron\"",
