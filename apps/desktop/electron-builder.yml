@@ -73,3 +73,8 @@ linux:
   maintainer: "Jane Huaan <huaan@users.noreply.github.com>"
   synopsis: OpenPI desktop personal agent
   description: OpenPI desktop personal agent built on Pi
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+deb:
+  packageName: openpi
+  artifactName: ${productName}-${version}-${arch}.${ext}

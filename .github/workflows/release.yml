@@ -69,6 +69,10 @@ jobs:
           npm run build -w @openpi/desktop
           npm run build:runtime -w @openpi/desktop
 
+      - name: Disable Spotlight Indexing (macOS)
+        if: runner.os == 'macOS'
+        run: sudo mdutil -a -i off || true
+
       - name: Package with electron-builder
         run: ${{ matrix.build_cmd }}
         working-directory: apps/desktop
