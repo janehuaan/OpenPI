@@ -17,6 +17,9 @@
     "build:runtime": "node scripts/build-runtime.mjs",
     "pack:dir": "npm run build && npm run build:runtime && electron-builder --dir",
     "pack:mac": "npm run build && npm run build:runtime && electron-builder --mac",
+    "pack:win": "npm run build && npm run build:runtime && electron-builder --win",
+    "pack:linux": "npm run build && npm run build:runtime && electron-builder --linux",
+    "pack:all": "npm run build && npm run build:runtime && electron-builder -mwl",
     "install:local": "npm run pack:mac && node scripts/install-local.mjs"
   },
   "dependencies": {

@@ -1,0 +1,166 @@
+name: Release Multi-Platform Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.1)'
+        required: false
+        default: ''
+      draft:
+        description: 'Publish as draft release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+            build_cmd: npx electron-builder --mac
+          - os: windows-latest
+            platform: windows
+            build_cmd: npx electron-builder --win
+          - os: ubuntu-latest
+            platform: linux
+            build_cmd: npx electron-builder --linux AppImage deb
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools dpkg fakeroot
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build web application and runtime
+        run: |
+          npm run build -w @openpi/desktop
+          npm run build:runtime -w @openpi/desktop
+
+      - name: Package with electron-builder
+        run: ${{ matrix.build_cmd }}
+        working-directory: apps/desktop
+
+      - name: Collect release artifacts
+        run: |
+          mkdir -p dist-artifacts
+          find apps/desktop/release -maxdepth 1 -type f \( \
+            -name "*.dmg" -o \
+            -name "*.dmg.blockmap" -o \
+            -name "*.zip" -o \
+            -name "*.zip.blockmap" -o \
+            -name "*.exe" -o \
+            -name "*.exe.blockmap" -o \
+            -name "*.AppImage" -o \
+            -name "*.deb" \
+          \) -exec cp {} dist-artifacts/ \;
+          echo "Collected artifacts:"
+          ls -la dist-artifacts/
+
+      - name: Upload platform artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.platform }}
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-assets
+          merge-multiple: true
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd all-assets
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+          echo "Final release artifacts list:"
+          ls -lh
+
+      - name: Publish or Update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_INPUT: ${{ github.event.inputs.tag }}
+          IS_DRAFT: ${{ github.event.inputs.draft == 'true' && '--draft' || '' }}
+          IS_PRERELEASE: ${{ github.event.inputs.prerelease == 'true' && '--prerelease' || '' }}
+        run: |
+          set -euo pipefail
+
+          TAG_NAME="${TAG_INPUT}"
+          if [[ -z "${TAG_NAME}" ]]; then
+            if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+              TAG_NAME="${GITHUB_REF#refs/tags/}"
+            else
+              VERSION=$(node -p "require('./apps/desktop/package.json').version")
+              TAG_NAME="v${VERSION}"
+            fi
+          fi
+
+          echo "Target Release Tag: ${TAG_NAME}"
+
+          cd all-assets
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Release ${TAG_NAME} exists. Uploading assets..."
+            gh release upload "${TAG_NAME}" * --clobber
+          else
+            echo "Creating new release ${TAG_NAME}..."
+            gh release create "${TAG_NAME}" * \
+              --title "OpenPI ${TAG_NAME}" \
+              --generate-notes \
+              ${IS_DRAFT} ${IS_PRERELEASE}
+          fi
+
+          echo "GitHub Release published successfully for ${TAG_NAME}!"

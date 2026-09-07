@@ -66,7 +66,12 @@ export default async function afterPack(context) {
 		}
 	}
 
-	const size = execFileSync("du", ["-sh", target], { encoding: "utf8" }).split("\t")[0];
+	let size = "";
+	try {
+		size = execFileSync("du", ["-sh", target], { encoding: "utf8" }).split("\t")[0];
+	} catch {
+		size = "staged";
+	}
 	process.stdout.write(`  • openpi runtime staged  ${size}  ${context.arch === 1 ? "x64" : "arm64"}\n`);
 
 	if (context.electronPlatformName === "darwin") {

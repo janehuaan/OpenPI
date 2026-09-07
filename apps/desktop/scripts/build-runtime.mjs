@@ -41,8 +41,18 @@ function log(message) {
 }
 
 function size(path) {
-	const output = execFileSync("du", ["-sh", path], { encoding: "utf8" });
-	return output.split("\t")[0];
+	try {
+		const output = execFileSync("du", ["-sh", path], { encoding: "utf8" });
+		return output.split("\t")[0];
+	} catch {
+		try {
+			const st = statSync(path);
+			if (st.isFile()) return `${(st.size / 1024).toFixed(0)}K`;
+			return "staged";
+		} catch {
+			return "";
+		}
+	}
 }
 
 rmSync(runtime, { recursive: true, force: true });

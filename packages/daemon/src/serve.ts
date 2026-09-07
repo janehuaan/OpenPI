@@ -66,23 +66,29 @@ const startedAt = Date.now();
  * processes whose command line matches this daemon's entry are touched.
  */
 function reapStaleDaemon(): void {
-	try {
-		const output = execFileSync("pgrep", ["-f", "openpi-daemon serve"], { encoding: "utf8" });
-		for (const line of output.split("\n")) {
-			const pid = Number.parseInt(line.trim(), 10);
-			if (!Number.isFinite(pid) || pid === process.pid) continue;
-			try {
-				process.kill(pid, "SIGKILL");
-				process.stderr.write(`[daemon] reaped stale daemon pid ${pid}\n`);
-			} catch {
-				// Already gone between listing and killing.
+	if (process.platform !== "win32") {
+		try {
+			const output = execFileSync("pgrep", ["-f", "openpi-daemon serve"], { encoding: "utf8" });
+			for (const line of output.split("\n")) {
+				const pid = Number.parseInt(line.trim(), 10);
+				if (!Number.isFinite(pid) || pid === process.pid) continue;
+				try {
+					process.kill(pid, "SIGKILL");
+					process.stderr.write(`[daemon] reaped stale daemon pid ${pid}\n`);
+				} catch {
+					// Already gone between listing and killing.
+				}
 			}
+		} catch {
+			// pgrep exits non-zero when nothing matches; that is the normal case.
 		}
-	} catch {
-		// pgrep exits non-zero when nothing matches; that is the normal case.
+		const path = socketPath();
+		if (existsSync(path)) {
+			try {
+				unlinkSync(path);
+			} catch {}
+		}
 	}
-	const path = socketPath();
-	if (existsSync(path)) unlinkSync(path);
 }
 
 async function handleApp(op: AppOp, supervisor: Supervisor): Promise<unknown> {

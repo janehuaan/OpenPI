@@ -45,7 +45,11 @@ export function skillsDir(): string {
 }
 
 export function socketPath(): string {
-	return process.env.OPENPI_SOCKET ?? join(openpiDir(), "daemon.sock");
+	if (process.env.OPENPI_SOCKET) return process.env.OPENPI_SOCKET;
+	if (process.platform === "win32") {
+		return "\\\\.\\pipe\\openpi-daemon.sock";
+	}
+	return join(openpiDir(), "daemon.sock");
 }
 
 export function pidPath(): string {
