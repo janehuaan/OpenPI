@@ -13,7 +13,7 @@
 	align-items: center;
 	gap: 14px;
 	padding: 0 18px;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+	border-bottom: none;
 	background: linear-gradient(180deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.22) 100%);
 	backdrop-filter: blur(36px) saturate(210%);
 	-webkit-backdrop-filter: blur(36px) saturate(210%);
@@ -24,7 +24,7 @@
 [data-theme="dark"] .capability-page-header,
 [data-theme="dark"] .task-page-header {
 	background: linear-gradient(180deg, rgba(28, 36, 52, 0.45) 0%, rgba(16, 22, 34, 0.32) 100%);
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	border-bottom: none;
 	box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.04), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
 }
 .surface-heading {
@@ -60,7 +60,8 @@
 	background: var(--sidebar-bg);
 	backdrop-filter: blur(40px) saturate(200%);
 	-webkit-backdrop-filter: blur(40px) saturate(200%);
-	border-left: 1px solid var(--border);
+	border-left: none;
+	box-shadow: inset 1px 0 0 0 rgba(255, 255, 255, 0.25);
 	z-index: 22;
 }
 .context-panel > header {
@@ -75,7 +76,7 @@
 	display: flex;
 	gap: 0;
 	padding: 0 8px;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+	border-bottom: none;
 	background: transparent;
 }
 .context-tab {
