@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, session, shell } from "electron";
-import { disconnect } from "./daemon.ts";
+import { disconnect, ensureDaemon } from "./daemon.ts";
 import { registerHandlers } from "./handlers.ts";
 import { cleanupGlobalShortcuts, setupGlobalShortcuts, toggleHudWindow } from "./hud.ts";
 import { captureScreenNative } from "./system-ops.ts";
@@ -133,6 +133,7 @@ function createWindow(): void {
 		titleBarStyle: isMac ? "hidden" : "default",
 		trafficLightPosition: isMac ? { x: 18, y: 19 } : undefined,
 		backgroundColor: isMac ? "#00000000" : backgroundColor(),
+		show: false,
 		...(isMac
 			? {
 					vibrancy: "under-window" as const,
@@ -148,6 +149,19 @@ function createWindow(): void {
 		},
 	});
 	mainWindow = window;
+
+	let isShown = false;
+	const showWindow = () => {
+		if (isShown || window.isDestroyed()) return;
+		isShown = true;
+		window.show();
+		window.focus();
+	};
+
+	window.once("ready-to-show", showWindow);
+	// Safety timeout: ensure window is presented even if ready-to-show is delayed
+	const fallbackShowTimer = setTimeout(showWindow, 1000);
+	window.once("show", () => clearTimeout(fallbackShowTimer));
 
 	const persist = () => saveState(window);
 	window.on("resize", persist);
@@ -195,8 +209,6 @@ function createWindow(): void {
 		const index = join(here, "../dist/index.html");
 		void window.loadFile(index);
 	}
-	window.show();
-	window.focus();
 }
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -208,7 +220,12 @@ if (!gotSingleInstanceLock) {
 	});
 
 	app.whenReady().then(() => {
-	// Automatically approve safe permissions (clipboard, notifications, fullscreen) and block others silently without popups
+		// Concurrently warm up daemon in background immediately to eliminate initial IPC latency
+		void ensureDaemon().catch((err) => {
+			safeWriteStderr(`[main] daemon background warmup: ${err}\n`);
+		});
+
+		// Automatically approve safe permissions (clipboard, notifications, fullscreen) and block others silently without popups
 	session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
 		const allowedPermissions = new Set([
 			"clipboard-read",

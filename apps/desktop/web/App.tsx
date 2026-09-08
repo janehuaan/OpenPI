@@ -52,6 +52,8 @@ import { exportAndDownloadConversation } from "./lib/export-markdown";
 import { useGlobalKeybindings } from "./lib/keybindings";
 
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
+const SNAPSHOT_CACHE_KEY = "openpi-snapshot-cache";
+const CONVERSATION_CACHE_PREFIX = "openpi-conv-cache:";
 
 import type {
 	AgentInstance,
@@ -63,6 +65,7 @@ import type {
 	ConversationStats,
 	ConversationUiResponse,
 	CreateTaskInput,
+	DesktopSnapshot,
 	GitStatusResult,
 	ImageContent,
 	RunningTool,
@@ -95,8 +98,30 @@ export function App() {
 		enabled: boolean;
 		workspace?: string;
 	}>({ checked: false, enabled: true });
-	const [snapshot, setSnapshot] = useState(emptySnapshot);
-	const [conversation, setConversation] = useState<ConversationSnapshot>();
+	const [snapshot, setSnapshot] = useState<DesktopSnapshot>(() => {
+		if (typeof window === "undefined") return emptySnapshot;
+		try {
+			const raw = window.localStorage.getItem(SNAPSHOT_CACHE_KEY);
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				if (parsed && Array.isArray(parsed.instances)) return parsed;
+			}
+		} catch {}
+		return emptySnapshot;
+	});
+	const [conversation, setConversation] = useState<ConversationSnapshot | undefined>(() => {
+		if (typeof window === "undefined") return undefined;
+		const id = window.localStorage.getItem(SELECTED_INSTANCE_KEY);
+		if (!id) return undefined;
+		try {
+			const raw = window.sessionStorage.getItem(`${CONVERSATION_CACHE_PREFIX}${id}`);
+			if (raw) {
+				const parsed = JSON.parse(raw);
+				if (parsed?.instance?.id === id) return parsed;
+			}
+		} catch {}
+		return undefined;
+	});
 	const [conversationStats, setConversationStats] = useState<ConversationStats>();
 	const [todoState, setTodoState] = useState<TodoState>();
 	const [providerBalance, setProviderBalance] = useState<{ currency: string; totalBalance: number } | null>();
@@ -115,7 +140,10 @@ export function App() {
 	/** info notify (e.g. TPS) shown under the latest assistant reply, not the top bar */
 	const [turnMeta, setTurnMeta] = useState<{ instanceId: string; message: string }>();
 	const [composerDraftRequest, setComposerDraftRequest] = useState<{ id: string; text: string; images?: string[] }>();
-	const [selectedInstanceId, setSelectedInstanceId] = useState<string>();
+	const [selectedInstanceId, setSelectedInstanceId] = useState<string | undefined>(() => {
+		if (typeof window === "undefined") return undefined;
+		return window.localStorage.getItem(SELECTED_INSTANCE_KEY) || undefined;
+	});
 	const [selectedTaskId, setSelectedTaskId] = useState<string>();
 	const [selectedRunId, setSelectedRunId] = useState<string>();
 	const [view, setView] = useState<View>(() => {
@@ -125,8 +153,14 @@ export function App() {
 	const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
 	const [taskQuery, setTaskQuery] = useState("");
 	const [chatQuery, setChatQuery] = useState("");
-	const [loading, setLoading] = useState(true);
-	const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+	const [loading, setLoading] = useState<boolean>(() => {
+		if (typeof window === "undefined") return true;
+		return !window.localStorage.getItem(SNAPSHOT_CACHE_KEY);
+	});
+	const [initialLoadComplete, setInitialLoadComplete] = useState<boolean>(() => {
+		if (typeof window === "undefined") return false;
+		return Boolean(window.localStorage.getItem(SNAPSHOT_CACHE_KEY));
+	});
 	const [startupReady, setStartupReady] = useState(true);
 	const [busy, setBusy] = useState<string>();
 	const [error, setError] = useState<string>();
@@ -224,7 +258,15 @@ export function App() {
 	const isWorking = Boolean(isStreaming || busy === "send-message" || runningTools.length > 0);
 
 	useEffect(() => {
-		if (conversation) conversationCacheRef.current[conversation.instance.id] = conversation;
+		if (conversation) {
+			conversationCacheRef.current[conversation.instance.id] = conversation;
+			try {
+				window.sessionStorage.setItem(
+					`${CONVERSATION_CACHE_PREFIX}${conversation.instance.id}`,
+					JSON.stringify(conversation),
+				);
+			} catch {}
+		}
 	}, [conversation]);
 
 	const refresh = useCallback(
@@ -233,6 +275,9 @@ export function App() {
 			try {
 				const next = await desktopApi.getSnapshot({ includeStopped });
 				setSnapshot(next);
+				try {
+					window.localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(next));
+				} catch {}
 				setSelectedInstanceId((current) => {
 					// Keep pinned selection if still present (including just-created online)
 					if (current && next.instances.some((instance) => instance.id === current)) return current;
@@ -356,14 +401,13 @@ export function App() {
 	}, []);
 
 	useEffect(() => {
-		if (!setup.checked || !setup.enabled) return;
-		void refresh(true);
+		void refresh(!initialLoadComplete);
 		// Reconcile quickly while the daemon is starting, then back off.
 		const intervalMs =
 			snapshot.daemonRunning && snapshot.health?.sessionsIndexed ? (isStreaming ? 5_000 : 15_000) : 750;
 		const timer = window.setInterval(() => void refresh(), intervalMs);
 		return () => window.clearInterval(timer);
-	}, [refresh, setup.checked, setup.enabled, isStreaming, snapshot.daemonRunning, snapshot.health?.sessionsIndexed]);
+	}, [refresh, isStreaming, snapshot.daemonRunning, snapshot.health?.sessionsIndexed]);
 
 	useEffect(() => {
 		let disposed = false;
@@ -798,8 +842,22 @@ export function App() {
 		let disposed = false;
 		let timer: number | undefined;
 		const instanceId = selectedInstanceId;
-		const cached = conversationCacheRef.current[instanceId];
-		setConversation(cached);
+		const cached =
+			conversationCacheRef.current[instanceId] ??
+			(() => {
+				try {
+					const raw = window.sessionStorage.getItem(`${CONVERSATION_CACHE_PREFIX}${instanceId}`);
+					if (raw) {
+						const parsed = JSON.parse(raw);
+						if (parsed?.instance?.id === instanceId) return parsed;
+					}
+				} catch {}
+				return undefined;
+			})();
+		if (cached) {
+			conversationCacheRef.current[instanceId] = cached;
+			setConversation(cached);
+		}
 		const poll = async () => {
 			let delay = 4_000;
 			try {

@@ -214,9 +214,9 @@ async function startDaemon(): Promise<void> {
 	spawnDaemon();
 	// Poll rather than sleeping a fixed interval: the socket appears as soon as
 	// the daemon binds, usually well under a second.
-	for (let attempt = 0; attempt < 40; attempt++) {
+	for (let attempt = 0; attempt < 80; attempt++) {
 		if (await isDaemonLive()) return;
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 	throw new Error("daemon did not start within 4s");
 }
