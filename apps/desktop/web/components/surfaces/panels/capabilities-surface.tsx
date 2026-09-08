@@ -1711,21 +1711,6 @@ export function ModelProvidersPanel({ instanceId }: { instanceId?: string }) {
 								<Plus size={14} />
 								自定义服务商
 							</button>
-							<button
-								type="button"
-								className="secondary"
-								title="刷新服务商与模型目录"
-								disabled={loadingProviders || loadingCatalog}
-								onClick={() => {
-									void loadSettings();
-									void loadProviders();
-									void loadAuthStatus();
-									void loadCatalog();
-								}}
-							>
-								<RefreshCw size={13} className={loadingProviders || loadingCatalog ? "spin" : ""} />
-								刷新
-							</button>
 							<div className="model-provider-search">
 								<Search size={13} />
 								<input

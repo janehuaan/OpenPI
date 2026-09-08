@@ -1949,7 +1949,7 @@
 }
 .model-providers-toolbar button.primary {
 	padding: 7px 14px;
-	border: 1px solid var(--accent);
+	border: none;
 	border-radius: var(--radius-sm, 6px);
 	background: var(--accent);
 	color: var(--accent-contrast);
@@ -1959,9 +1959,13 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	transition: opacity 0.15s;
+	box-shadow: 0 2px 8px rgba(37, 102, 232, 0.25);
+	transition: opacity 0.15s, transform 0.15s;
 }
-.model-providers-toolbar button.primary:hover { opacity: 0.88; }
+.model-providers-toolbar button.primary:hover {
+	opacity: 0.92;
+	transform: translateY(-0.5px);
+}
 .model-providers-count {
 	font-size: 12px;
 	color: var(--text-tertiary);
