@@ -227,8 +227,11 @@
 	margin: 0.4em 0;
 	padding: 12px 14px;
 	border-radius: 8px;
-	background: var(--bg-elevated, #ffffff);
-	border: 1px solid var(--border, #e2e6f0);
+	background: rgba(255, 255, 255, 0.20);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+	border: none;
+	box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.7);
 	overflow: auto;
 	font-family: var(--mono, monospace);
 	font-size: 12.5px;
@@ -240,12 +243,13 @@
 .md-inline-code {
 	padding: 2px 6px;
 	border-radius: 5px;
-	background: var(--bg-muted, #edf1f8);
-	border: 1px solid var(--border, #e2e6f0);
+	background: rgba(37, 99, 235, 0.08);
+	border: none;
 	font-family: var(--mono, monospace);
 	font-size: 0.88em;
 	color: var(--accent, #2566e8);
-	font-weight: 500;
+	font-weight: 550;
+	box-shadow: inset 0 0.5px 1px rgba(255, 255, 255, 0.5);
 }
 
 .md-link {
@@ -258,15 +262,19 @@
 	opacity: 0.85;
 }
 
-/* ── Table ── */
+/* ── Table (Liquid Glass Optical Card) ── */
 .md-table-wrap {
 	width: 100%;
 	overflow-x: auto;
 	margin: 0.8em 0 1em;
-	border-radius: 10px;
-	border: 1px solid var(--border, #e2e6f0);
-	background: var(--bg-elevated, #ffffff);
-	box-shadow: 0 1px 4px rgba(30, 45, 80, 0.04);
+	border-radius: 12px;
+	border: none;
+	background: rgba(255, 255, 255, 0.22);
+	backdrop-filter: blur(28px) saturate(190%);
+	-webkit-backdrop-filter: blur(28px) saturate(190%);
+	box-shadow: 
+		inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.8),
+		0 6px 20px -2px rgba(15, 23, 42, 0.03);
 }
 
 .md-table {
@@ -279,13 +287,13 @@
 .md-table th,
 .md-table td {
 	padding: 9px 14px;
-	border-bottom: 1px solid var(--border, #e2e6f0);
+	border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 	text-align: left;
 	vertical-align: top;
 }
 
 .md-table th {
-	background: var(--bg-muted, #edf1f8);
+	background: rgba(255, 255, 255, 0.28);
 	font-size: 11px;
 	font-weight: 600;
 	color: var(--text-secondary, #525d76);
@@ -303,11 +311,11 @@
 }
 
 .md-table tbody tr:nth-child(even) td {
-	background: rgba(237, 241, 248, 0.45);
+	background: rgba(255, 255, 255, 0.08);
 }
 
 .md-table tbody tr:hover td {
-	background: rgba(37, 102, 232, 0.04);
+	background: rgba(37, 102, 232, 0.05);
 }
 
 .md strong {
@@ -325,15 +333,15 @@
 }
 
 [data-theme="dark"] .md-h1 {
-	border-bottom-color: #30363d;
+	border-bottom: none;
 }
 
 [data-theme="dark"] .md-hr {
-	border-top-color: #30363d;
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="dark"] .md-quote {
-	background: rgba(22, 27, 34, 0.55);
+	background: rgba(37, 99, 235, 0.12);
 	backdrop-filter: blur(16px);
 	-webkit-backdrop-filter: blur(16px);
 	border-left-color: #3b82f6;
@@ -344,7 +352,7 @@
 	background: rgba(22, 27, 34, 0.65);
 	backdrop-filter: blur(24px);
 	-webkit-backdrop-filter: blur(24px);
-	border-color: rgba(48, 54, 61, 0.65);
+	border: none;
 	box-shadow: 
 		inset 0 1px 0 0 rgba(255, 255, 255, 0.06),
 		0 4px 16px rgba(0, 0, 0, 0.25);
@@ -352,7 +360,7 @@
 
 [data-theme="dark"] .md-code-header {
 	background: rgba(31, 36, 44, 0.6);
-	border-bottom-color: rgba(48, 54, 61, 0.6);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 	color: #8b949e;
 }
 
@@ -372,32 +380,37 @@
 [data-theme="dark"] .md-code-block .md-code,
 [data-theme="dark"] .md-code {
 	color: #e6edf3;
-	background: #161b22;
-	border-color: #30363d;
+	background: rgba(20, 26, 38, 0.55);
+	border: none;
+	box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="dark"] .md-inline-code {
-	background: #21262d;
-	border-color: #30363d;
+	background: rgba(59, 130, 246, 0.16);
+	border: none;
 	color: #e6edf3;
 }
 
 [data-theme="dark"] .md-table-wrap {
-	border-color: #30363d;
+	background: rgba(20, 26, 38, 0.55);
+	backdrop-filter: blur(28px);
+	-webkit-backdrop-filter: blur(28px);
+	border: none;
+	box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="dark"] .md-table th {
-	background: #1f242c;
+	background: rgba(255, 255, 255, 0.05);
 	color: #e6edf3;
-	border-bottom-color: #30363d;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 [data-theme="dark"] .md-table td {
-	border-bottom-color: #30363d;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 [data-theme="dark"] .md-table tbody tr:nth-child(even) td {
-	background: #161b22;
+	background: rgba(255, 255, 255, 0.02);
 }
 
 [data-theme="dark"] .md strong {

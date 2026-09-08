@@ -3,29 +3,29 @@
 /* OpenPI desktop workbench */
 
 :root {
-	--bg: rgba(255, 255, 255, 0.28);
-	--bg-elevated: rgba(255, 255, 255, 0.52);
-	--bg-muted: rgba(240, 244, 252, 0.42);
-	--sidebar-bg: rgba(240, 244, 252, 0.30);
-	--rail-bg: rgba(230, 236, 248, 0.26);
-	--border: rgba(255, 255, 255, 0.55);
-	--border-strong: rgba(200, 210, 230, 0.60);
+	--bg: rgba(255, 255, 255, 0.12);
+	--bg-elevated: rgba(255, 255, 255, 0.24);
+	--bg-muted: rgba(240, 244, 252, 0.18);
+	--sidebar-bg: rgba(240, 244, 252, 0.15);
+	--rail-bg: rgba(230, 236, 248, 0.12);
+	--border: rgba(255, 255, 255, 0.40);
+	--border-strong: rgba(200, 210, 230, 0.45);
 	--text: #1b2030;
 	--text-secondary: #525d76;
 	--text-tertiary: #8794ab;
 	--accent: #2566e8;
 	--accent-hover: #1d54c7;
-	--accent-soft: rgba(37, 102, 232, 0.12);
+	--accent-soft: rgba(37, 102, 232, 0.10);
 	--accent-contrast: #ffffff;
 	--focus: #6a58e6;
 	--danger: #d64a4a;
-	--danger-soft: rgba(214, 74, 74, 0.12);
+	--danger-soft: rgba(214, 74, 74, 0.10);
 	--ok: #1f9d64;
-	--ok-soft: rgba(31, 157, 100, 0.12);
+	--ok-soft: rgba(31, 157, 100, 0.10);
 	--warn: #b9760e;
-	--warn-soft: rgba(185, 118, 14, 0.12);
-	--shadow: 0 14px 40px rgba(30, 35, 60, 0.14), 0 2px 8px rgba(30, 35, 60, 0.06);
-	--shadow-soft: 0 1px 3px rgba(30, 35, 60, 0.08);
+	--warn-soft: rgba(185, 118, 14, 0.10);
+	--shadow: 0 14px 40px rgba(30, 35, 60, 0.08), 0 2px 8px rgba(30, 35, 60, 0.03);
+	--shadow-soft: 0 1px 3px rgba(30, 35, 60, 0.04);
 	--radius: 14px;
 	--radius-sm: 10px;
 	--radius-lg: 18px;
@@ -35,18 +35,18 @@
 	--sidebar-w: 264px;
 
 	/* Liquid Glass Design Tokens (Light) */
-	--glass-bg: rgba(255, 255, 255, 0.48);
-	--glass-bg-subtle: rgba(255, 255, 255, 0.32);
-	--glass-bg-elevated: rgba(255, 255, 255, 0.68);
-	--glass-bg-hover: rgba(255, 255, 255, 0.76);
-	--glass-border: rgba(255, 255, 255, 0.80);
-	--glass-border-subtle: rgba(255, 255, 255, 0.45);
+	--glass-bg: rgba(255, 255, 255, 0.25);
+	--glass-bg-subtle: rgba(255, 255, 255, 0.14);
+	--glass-bg-elevated: rgba(255, 255, 255, 0.35);
+	--glass-bg-hover: rgba(255, 255, 255, 0.45);
+	--glass-border: rgba(255, 255, 255, 0.55);
+	--glass-border-subtle: rgba(255, 255, 255, 0.25);
 	--glass-blur: blur(32px) saturate(200%);
 	--glass-blur-heavy: blur(48px) saturate(210%);
 	--glass-blur-card: blur(28px) saturate(190%);
-	--glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
-	--glass-shadow: var(--glass-specular), 0 10px 32px -4px rgba(15, 23, 42, 0.07), 0 2px 8px rgba(15, 23, 42, 0.04);
-	--glass-shadow-elevated: var(--glass-specular), 0 18px 48px -6px rgba(15, 23, 42, 0.12), 0 4px 14px rgba(15, 23, 42, 0.05);
+	--glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.85);
+	--glass-shadow: var(--glass-specular), 0 10px 32px -4px rgba(15, 23, 42, 0.05), 0 2px 8px rgba(15, 23, 42, 0.02);
+	--glass-shadow-elevated: var(--glass-specular), 0 18px 48px -6px rgba(15, 23, 42, 0.08), 0 4px 14px rgba(15, 23, 42, 0.03);
 
 	color: var(--text);
 	background: transparent;
@@ -148,43 +148,43 @@
 
 :root[data-theme="light"],
 [data-theme="light"] {
-	--bg: rgba(255, 255, 255, 0.28);
-	--bg-elevated: rgba(255, 255, 255, 0.52);
-	--bg-muted: rgba(240, 244, 252, 0.42);
-	--sidebar-bg: rgba(240, 244, 252, 0.30);
-	--rail-bg: rgba(230, 236, 248, 0.26);
-	--border: rgba(255, 255, 255, 0.55);
-	--border-strong: rgba(200, 210, 230, 0.60);
+	--bg: rgba(255, 255, 255, 0.12);
+	--bg-elevated: rgba(255, 255, 255, 0.24);
+	--bg-muted: rgba(240, 244, 252, 0.18);
+	--sidebar-bg: rgba(240, 244, 252, 0.15);
+	--rail-bg: rgba(230, 236, 248, 0.12);
+	--border: rgba(255, 255, 255, 0.40);
+	--border-strong: rgba(200, 210, 230, 0.45);
 	--text: #0f172a;
 	--text-secondary: #475569;
 	--text-tertiary: #94a3b8;
 	--accent: #2563eb;
 	--accent-hover: #1d4ed8;
-	--accent-soft: rgba(37, 99, 235, 0.12);
+	--accent-soft: rgba(37, 99, 235, 0.10);
 	--accent-contrast: #ffffff;
 	--focus: #6a58e6;
 	--danger: #d64a4a;
-	--danger-soft: rgba(214, 74, 74, 0.12);
+	--danger-soft: rgba(214, 74, 74, 0.10);
 	--ok: #1f9d64;
-	--ok-soft: rgba(31, 157, 100, 0.12);
+	--ok-soft: rgba(31, 157, 100, 0.10);
 	--warn: #b9760e;
-	--warn-soft: rgba(185, 118, 14, 0.12);
-	--shadow: 0 14px 40px rgba(30, 35, 60, 0.14), 0 2px 8px rgba(30, 35, 60, 0.06);
-	--shadow-soft: 0 1px 3px rgba(30, 35, 60, 0.08);
+	--warn-soft: rgba(185, 118, 14, 0.10);
+	--shadow: 0 14px 40px rgba(30, 35, 60, 0.08), 0 2px 8px rgba(30, 35, 60, 0.03);
+	--shadow-soft: 0 1px 3px rgba(30, 35, 60, 0.04);
 
 	/* Liquid Glass Design Tokens (Light) */
-	--glass-bg: rgba(255, 255, 255, 0.48);
-	--glass-bg-subtle: rgba(255, 255, 255, 0.32);
-	--glass-bg-elevated: rgba(255, 255, 255, 0.68);
-	--glass-bg-hover: rgba(255, 255, 255, 0.76);
-	--glass-border: rgba(255, 255, 255, 0.80);
-	--glass-border-subtle: rgba(255, 255, 255, 0.45);
+	--glass-bg: rgba(255, 255, 255, 0.25);
+	--glass-bg-subtle: rgba(255, 255, 255, 0.14);
+	--glass-bg-elevated: rgba(255, 255, 255, 0.35);
+	--glass-bg-hover: rgba(255, 255, 255, 0.45);
+	--glass-border: rgba(255, 255, 255, 0.55);
+	--glass-border-subtle: rgba(255, 255, 255, 0.25);
 	--glass-blur: blur(32px) saturate(200%);
 	--glass-blur-heavy: blur(48px) saturate(210%);
 	--glass-blur-card: blur(28px) saturate(190%);
-	--glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 1px rgba(255, 255, 255, 0.25);
-	--glass-shadow: var(--glass-specular), 0 10px 32px -4px rgba(15, 23, 42, 0.07), 0 2px 8px rgba(15, 23, 42, 0.04);
-	--glass-shadow-elevated: var(--glass-specular), 0 18px 48px -6px rgba(15, 23, 42, 0.12), 0 4px 14px rgba(15, 23, 42, 0.05);
+	--glass-specular: inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.85);
+	--glass-shadow: var(--glass-specular), 0 10px 32px -4px rgba(15, 23, 42, 0.05), 0 2px 8px rgba(15, 23, 42, 0.02);
+	--glass-shadow-elevated: var(--glass-specular), 0 18px 48px -6px rgba(15, 23, 42, 0.08), 0 4px 14px rgba(15, 23, 42, 0.03);
 
 	color-scheme: light;
 }
