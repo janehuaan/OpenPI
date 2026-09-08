@@ -209,6 +209,7 @@
 	place-items: center;
 	padding: 24px;
 	z-index: 10000;
+	animation: dialog-backdrop-in 200ms ease-out both;
 }
 .dialog {
 	width: min(520px, 100%);
@@ -223,6 +224,23 @@
 	padding: 24px 26px;
 	display: grid;
 	gap: 16px;
+	animation: dialog-spring-in 260ms var(--ease-spring) both;
+}
+
+@keyframes dialog-backdrop-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+
+@keyframes dialog-spring-in {
+	from {
+		opacity: 0;
+		transform: scale(0.95) translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1) translateY(0);
+	}
 }
 .dialog-header {
 	display: flex;
@@ -363,6 +381,18 @@
 		0 16px 40px -6px rgba(15, 23, 42, 0.12),
 		0 2px 6px rgba(15, 23, 42, 0.04);
 	overflow: hidden;
+	animation: popover-spring-in 180ms var(--ease-spring) both;
+}
+
+@keyframes popover-spring-in {
+	from {
+		opacity: 0;
+		transform: scale(0.95) translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1) translateY(0);
+	}
 }
 .ui-select-viewport { padding: 4px; }
 .ui-select-item,

@@ -741,20 +741,30 @@
 	color: var(--text-secondary);
 	font-size: 12px;
 	font-weight: 550;
-	transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+	transition: background var(--anim-fast), color var(--anim-fast), transform var(--anim-fast), box-shadow var(--anim-fast);
 }
 .segmented button:hover {
 	color: var(--text);
 	background: rgba(255, 255, 255, 0.08);
+	transform: translateY(-0.5px);
 }
 [data-theme="dark"] .segmented button:hover {
 	background: rgba(255, 255, 255, 0.08);
+}
+.segmented button:active {
+	transform: scale(0.96);
+	transition-duration: var(--anim-press);
 }
 .segmented button.active {
 	background: rgba(37, 102, 232, 0.12);
 	color: var(--accent);
 	box-shadow: 0 2px 8px rgba(37, 102, 232, 0.10);
 	font-weight: 600;
+	transform: scale(1.02);
+}
+.segmented button.active:active {
+	transform: scale(0.97);
+	transition-duration: var(--anim-press);
 }
 [data-theme="dark"] .segmented button.active {
 	background: linear-gradient(135deg, rgba(37, 102, 232, 0.30) 0%, rgba(14, 165, 233, 0.15) 100%);
@@ -2781,17 +2791,23 @@
 	font-size: 12px;
 	font-weight: 550;
 	cursor: pointer;
-	transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+	transition: background var(--anim-fast), color var(--anim-fast), transform var(--anim-fast), box-shadow var(--anim-fast);
 	white-space: nowrap;
 }
 
 .segmented-control button:hover {
 	color: var(--text);
 	background: rgba(255, 255, 255, 0.08);
+	transform: translateY(-0.5px);
 }
 
 [data-theme="dark"] .segmented-control button:hover {
 	background: rgba(255, 255, 255, 0.08);
+}
+
+.segmented-control button:active {
+	transform: scale(0.96);
+	transition-duration: var(--anim-press);
 }
 
 .segmented-control button.active {
@@ -2799,6 +2815,12 @@
 	color: var(--accent);
 	font-weight: 600;
 	box-shadow: 0 2px 8px rgba(37, 102, 232, 0.10);
+	transform: scale(1.02);
+}
+
+.segmented-control button.active:active {
+	transform: scale(0.97);
+	transition-duration: var(--anim-press);
 }
 
 [data-theme="dark"] .segmented-control button.active {
