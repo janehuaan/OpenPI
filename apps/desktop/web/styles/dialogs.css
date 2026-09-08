@@ -25,7 +25,7 @@
 .model-popover-wide { width: min(400px, 92vw); padding: 0; }
 .model-popover-section {
 	padding: 10px 12px 10px;
-	border-bottom: 1px solid var(--border);
+	border-bottom: none;
 }
 .model-popover-section:last-child {
 	border-bottom: 0;
@@ -57,7 +57,7 @@
 	margin: 0;
 	padding: 0 11px;
 	height: 36px;
-	border: 1px solid var(--border);
+	border: none;
 	border-radius: 7px;
 	background: var(--bg-muted);
 	color: var(--text-tertiary);
@@ -115,7 +115,7 @@
 	display: flex;
 	flex-direction: column;
 	gap: 18px;
-	border: 1px solid var(--border);
+	border: none;
 	border-radius: 10px;
 	background: var(--bg-elevated);
 	padding: 22px;
@@ -125,7 +125,7 @@
 	align-items: center;
 	justify-content: space-between;
 	padding-bottom: 12px;
-	border-bottom: 1px solid var(--border);
+	border-bottom: none;
 }
 .model-form-header strong {
 	font-size: 14px;
@@ -150,7 +150,7 @@
 .model-form-field input,
 .model-form-field select {
 	padding: 9px 12px;
-	border: 1px solid var(--border);
+	border: none;
 	border-radius: var(--radius-sm, 6px);
 	background: var(--bg);
 	color: var(--text);
@@ -160,41 +160,35 @@
 }
 .model-form-field input:focus,
 .model-form-field select:focus {
-	border-color: var(--focus);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 12%, transparent);
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .model-form-field input::placeholder {
 	color: var(--text-tertiary);
 }
 .model-form-actions {
 	display: flex;
-	gap: 8px;
 	justify-content: flex-end;
-	padding-top: 12px;
-	border-top: 1px solid var(--border);
+	gap: 8px;
+	padding-top: 6px;
 }
 .model-form-actions button {
 	padding: 8px 16px;
-	border: 1px solid var(--border);
 	border-radius: var(--radius-sm, 6px);
-	background: var(--bg);
-	color: var(--text);
 	font-size: 13px;
 	font-weight: 500;
 	cursor: pointer;
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	transition: background 0.12s;
+	border: none;
+	background: var(--bg-muted);
+	color: var(--text);
+	transition: background 0.15s;
 }
 .model-form-actions button:hover {
-	background: var(--bg-elevated);
+	background: var(--border);
 }
 .model-form-actions button.primary {
 	background: var(--accent);
-	border-color: var(--accent);
-	color: var(--accent-contrast);
-	font-weight: 550;
+	color: #fff;
 }
 .model-form-actions button.primary:hover {
 	opacity: 0.9;
@@ -221,7 +215,7 @@
 	max-height: min(86dvh, 720px);
 	overflow: auto;
 	background: var(--glass-bg-elevated);
-	border: 1px solid var(--glass-border);
+	border: none;
 	border-radius: var(--radius-lg);
 	box-shadow: var(--glass-shadow-elevated);
 	backdrop-filter: var(--glass-blur-heavy);
@@ -258,7 +252,56 @@
 	font-size: 12px;
 	color: var(--text-secondary, #64748b);
 	word-break: break-all;
-	border: 1px solid var(--border, #e2e8f0);
+	user-select: all;
+}
+.dialog-form {
+	display: grid;
+	gap: 14px;
+}
+.dialog-form-field {
+	display: grid;
+	gap: 6px;
+}
+.dialog-form-field label {
+	font-size: 12px;
+	font-weight: 550;
+	color: var(--text-secondary);
+}
+.dialog-form-field input,
+.dialog-form-field textarea {
+	width: 100%;
+	padding: 8px 12px;
+	border-radius: var(--radius-sm, 6px);
+	border: none;
+	background: var(--bg-muted, rgba(0, 0, 0, 0.04));
+	color: var(--text);
+	font-size: 13px;
+	outline: none;
+	transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dialog-form-field input:focus,
+.dialog-form-field textarea:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.dialog-form-field textarea {
+	min-height: 60px;
+	resize: vertical;
+	font-family: inherit;
+}
+.dialog-form-error {
+	font-size: 12px;
+	color: #ef4444;
+	line-height: 1.4;
+}
+.dialog-empty-hint {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	color: var(--text-tertiary);
+	font-size: 12px;
+	padding: 6px 0;
 }
 .danger-text { color: var(--danger); }
 .button.destructive {
@@ -311,7 +354,7 @@
 .ui-select-content,
 .model-popover {
 	z-index: 80;
-	background: rgba(255, 255, 255, 0.40);
+	background: rgba(255, 255, 255, 0.05);
 	backdrop-filter: blur(24px) saturate(190%);
 	-webkit-backdrop-filter: blur(24px) saturate(190%);
 	border: none;
@@ -471,18 +514,14 @@
 	background: rgba(20, 26, 38, 0.78);
 	backdrop-filter: blur(28px) saturate(190%);
 	-webkit-backdrop-filter: blur(28px) saturate(190%);
-	border-color: rgba(255, 255, 255, 0.12);
-	box-shadow: 
-		inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
-		0 24px 64px -10px rgba(0, 0, 0, 0.7);
+	border: none;
+	box-shadow: 0 24px 64px -10px rgba(0, 0, 0, 0.7);
 }
 [data-theme="dark"] .ui-popover-content,
 [data-theme="dark"] .ui-select-content,
 [data-theme="dark"] .model-popover {
 	background: rgba(18, 24, 35, 0.88);
-	border-color: rgba(255, 255, 255, 0.12);
-	box-shadow: 
-		inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
-		0 20px 50px -10px rgba(0, 0, 0, 0.65);
+	border: none;
+	box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.65);
 }
 
