@@ -17,6 +17,6 @@
     "@earendil-works/pi-coding-agent": "0.84.4"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test 'test/*.test.ts'"
   }
 }

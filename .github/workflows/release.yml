@@ -36,8 +36,11 @@ jobs:
       matrix:
         include:
           - os: macos-14
-            platform: mac
-            build_cmd: npx electron-builder --mac
+            platform: mac-arm64
+            build_cmd: npx electron-builder --mac --arm64
+          - os: macos-14
+            platform: mac-x64
+            build_cmd: npx electron-builder --mac --x64
           - os: windows-latest
             platform: windows
             build_cmd: npx electron-builder --win
@@ -104,6 +107,7 @@ jobs:
   publish-release:
     name: Publish GitHub Release
     needs: build-desktop
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
