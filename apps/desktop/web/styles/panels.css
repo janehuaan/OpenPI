@@ -14,16 +14,16 @@
 	gap: 14px;
 	padding: 0 18px;
 	border-bottom: none;
-	background: linear-gradient(180deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.22) 100%);
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.05) 100%);
 	backdrop-filter: blur(36px) saturate(210%);
 	-webkit-backdrop-filter: blur(36px) saturate(210%);
-	box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.8), 0 4px 16px rgba(0, 0, 0, 0.02);
+	box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.25), inset 0 1px 0 0 rgba(255, 255, 255, 0.5), 0 4px 16px rgba(0, 0, 0, 0.02);
 }
 [data-theme="dark"] .surface-header,
 [data-theme="dark"] .operation-page-header,
 [data-theme="dark"] .capability-page-header,
 [data-theme="dark"] .task-page-header {
-	background: linear-gradient(180deg, rgba(28, 36, 52, 0.45) 0%, rgba(16, 22, 34, 0.32) 100%);
+	background: linear-gradient(180deg, rgba(28, 36, 52, 0.25) 0%, rgba(16, 22, 34, 0.16) 100%);
 	border-bottom: none;
 	box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.04), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
 }
