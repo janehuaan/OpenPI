@@ -287,6 +287,23 @@ export function ChatSurface({
 	speechErrorHandler.current = onError;
 	const isStreaming = conversation?.state.isStreaming ?? false;
 	const isWorking = isStreaming || optimisticMessage !== undefined;
+
+	const workingStartedAtRef = useRef<number>(0);
+	useEffect(() => {
+		if (isWorking) {
+			workingStartedAtRef.current = Date.now();
+		}
+	}, [isWorking]);
+
+	const handleSafeAbort = useCallback(() => {
+		// Prevent accidental misfires: ignore abort clicks within 800ms of generation start
+		if (Date.now() - workingStartedAtRef.current < 800) {
+			console.warn("[ChatSurface] Ignored rapid abort click within 800ms grace period");
+			return;
+		}
+		onAbort();
+	}, [onAbort]);
+
 	const rawConversationMessages = conversation?.messages ?? [];
 	let pendingRecalled: Array<{ type: string; key: string; value: string }> | undefined;
 	const storedMessages: ConversationMessage[] = [];
@@ -837,6 +854,8 @@ export function ChatSurface({
 		setDraft("");
 		setAttachments([]);
 		setSlashOpen(false);
+		(document.activeElement as HTMLElement)?.blur();
+		draftInput.current?.focus();
 		try {
 			if (composerMode === "image") {
 				await generateImage(message, pendingAttachments);
@@ -1037,8 +1056,8 @@ export function ChatSurface({
 			<header className="surface-header">
 				<button
 					className="icon-button quiet mobile-only"
-					title="Open conversations"
-					aria-label="Open conversations"
+					title="打开对话列表"
+					aria-label="打开对话列表"
 					onClick={onOpenSidebar}
 				>
 					<Menu size={18} />
@@ -1691,7 +1710,7 @@ export function ChatSurface({
 																		</span>
 																		<span className="model-option-actions">
 																			{model.supportsImages && (
-																				<ImageIcon size={13} aria-label="Supports images" />
+																				<ImageIcon size={13} aria-label="支持多模态图片" />
 																			)}
 																			<Check
 																				className={
@@ -1761,7 +1780,14 @@ export function ChatSurface({
 											</button>
 										</>
 									) : null}
-									<button className="send-button stop" title="停止运行" aria-label="停止" onClick={onAbort}>
+									<button
+										type="button"
+										tabIndex={-1}
+										className="send-button stop"
+										title="停止运行"
+										aria-label="停止"
+										onClick={handleSafeAbort}
+									>
 										<Square size={13} fill="currentColor" />
 									</button>
 								</>

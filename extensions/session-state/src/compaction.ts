@@ -12,9 +12,50 @@
  * never fail because our extra step did.
  */
 
-import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { checkpointFromDraft, type ContextCheckpoint, parseCheckpointDraft } from "./checkpoint.ts";
+
+/**
+ * Self-contained conversation serializer for compaction prompt.
+ * Completely eliminates transitive dependency on pi-coding-agent's CLI/chalk bundle.
+ */
+export function serializeConversation(messages: any[]): string {
+	const parts: string[] = [];
+	for (const msg of messages) {
+		if (!msg) continue;
+		if (msg.role === "user") {
+			const text = typeof msg.content === "string" 
+				? msg.content 
+				: Array.isArray(msg.content) 
+					? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n") 
+					: "";
+			if (text) parts.push(`[User]: ${text}`);
+		} else if (msg.role === "assistant") {
+			if (Array.isArray(msg.content)) {
+				const text = msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n");
+				if (text) parts.push(`[Assistant]: ${text}`);
+				const toolCalls = msg.content.filter((p: any) => p.type === "toolCall");
+				if (toolCalls.length > 0) {
+					const callsStr = toolCalls.map((tc: any) => `${tc.name}(${JSON.stringify(tc.arguments ?? {})})`).join("; ");
+					parts.push(`[Assistant tool calls]: ${callsStr}`);
+				}
+			} else if (typeof msg.content === "string") {
+				parts.push(`[Assistant]: ${msg.content}`);
+			}
+		} else if (msg.role === "toolResult" || msg.role === "tool") {
+			const text = typeof msg.content === "string"
+				? msg.content
+				: Array.isArray(msg.content)
+					? msg.content.filter((p: any) => p.type === "text").map((p: any) => p.text).join("\n")
+					: "";
+			if (text) {
+				const truncated = text.length > 1500 ? `${text.slice(0, 1500)}\n\n[... truncated]` : text;
+				parts.push(`[Tool result]: ${truncated}`);
+			}
+		}
+	}
+	return parts.join("\n\n");
+}
 
 export const CHECKPOINT_SCHEMA_PROMPT = `Summarize the conversation above as a context checkpoint another agent will use to continue the work.
 
@@ -54,7 +95,7 @@ export interface BuildPromptOptions {
 
 /** Build the summarization prompt. Pure, so it can be tested without a model. */
 export function buildCheckpointPrompt(options: BuildPromptOptions): string {
-	const conversation = serializeConversation(convertToLlm(options.messages));
+	const conversation = serializeConversation(options.messages);
 	if (options.previousSummary) {
 		return [
 			`<previous-checkpoint>\n${options.previousSummary}\n</previous-checkpoint>`,

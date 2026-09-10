@@ -107,6 +107,8 @@ export const INVOKE_CHANNELS = [
 	"system_run_applescript",
 	"system_manage_clipboard",
 	"toggle_hud_window",
+	"probe_model_capabilities",
+	"batch_probe_provider_models",
 ] as const;
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number];

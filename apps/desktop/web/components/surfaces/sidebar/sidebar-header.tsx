@@ -20,7 +20,7 @@ export function SidebarHeader({
 				<span className="sidebar-brand-mark">π</span>
 				<span className="sidebar-brand-text">
 					<strong>OpenPI</strong>
-					<span>Personal agent</span>
+					<span>智能编程助理</span>
 				</span>
 			</button>
 		</div>

@@ -1,6 +1,6 @@
 {
   "name": "@openpi/extension-memory",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "File-based long-term memory for openpi (hashed n-gram vectors + BM25, fully local)",

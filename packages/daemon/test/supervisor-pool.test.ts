@@ -100,10 +100,9 @@ test("idle reaper suspends inactive sessions after timeout", async () => {
 	const s1 = supervisor.create({ cwd: process.cwd(), mode: "chat" });
 	assert.equal(supervisor.runningCount, 1);
 
-	// Wait past idle timeout reliably on all CI environments
-	const start = Date.now();
-	while (Date.now() - start < 100) {
-		await new Promise((resolve) => setTimeout(resolve, 15));
+	// Wait past idle timeout reliably on all environments based on actual lastActive
+	while (Date.now() - (supervisor.getLastActive(s1.sessionId) ?? 0) < 30) {
+		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
 
 	const reaped = supervisor.reapIdleProcesses();

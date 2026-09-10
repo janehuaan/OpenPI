@@ -3418,7 +3418,7 @@
 .reference-aborted-notice {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
+	gap: 8px;
 	padding: 5px 12px;
 	font-size: 12px;
 	font-weight: 500;
@@ -3429,24 +3429,93 @@
 	user-select: none;
 	margin-top: 6px;
 }
+[data-theme="dark"] .reference-aborted-notice {
+	background: rgba(185, 118, 14, 0.15);
+	color: #fbbf24;
+	border-color: rgba(251, 191, 36, 0.3);
+}
 .reference-aborted-notice .aborted-dot {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
 	background: var(--warn, #b9760e);
 }
+.reference-inline-retry-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: 4px;
+	padding: 2px 8px;
+	font-size: 11px;
+	font-weight: 500;
+	color: var(--warn, #b9760e);
+	background: rgba(185, 118, 14, 0.12);
+	border: 1px solid rgba(185, 118, 14, 0.3);
+	border-radius: 6px;
+	cursor: pointer;
+	transition: all 120ms ease;
+}
+.reference-inline-retry-btn:hover {
+	background: rgba(185, 118, 14, 0.22);
+	color: var(--text-primary, #0f172a);
+}
+[data-theme="dark"] .reference-inline-retry-btn {
+	color: #fbbf24;
+	background: rgba(251, 191, 36, 0.15);
+	border-color: rgba(251, 191, 36, 0.35);
+}
+[data-theme="dark"] .reference-inline-retry-btn:hover {
+	background: rgba(251, 191, 36, 0.25);
+	color: #ffffff;
+}
 
 .reference-error-box {
-	display: block;
-	padding: 10px 14px;
-	font-size: 12.5px;
-	line-height: 1.5;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 12px;
+	font-size: 12px;
+	line-height: 1.4;
 	color: var(--danger, #d64a4a);
 	background: var(--danger-soft, #fae5e5);
 	border: 1px solid rgba(214, 74, 74, 0.25);
 	border-radius: var(--radius-sm, 8px);
 	word-break: break-word;
 	margin-top: 6px;
+}
+[data-theme="dark"] .reference-error-box {
+	background: rgba(214, 74, 74, 0.12);
+	border-color: rgba(248, 113, 113, 0.28);
+	color: #f87171;
+}
+.reference-error-text {
+	flex: 1;
+	min-width: 0;
+}
+.reference-error-retry-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	flex-shrink: 0;
+	padding: 4px 10px;
+	font-size: 11.5px;
+	font-weight: 500;
+	color: #ffffff;
+	background: var(--danger, #d64a4a);
+	border: none;
+	border-radius: 6px;
+	cursor: pointer;
+	box-shadow: 0 1px 3px rgba(214, 74, 74, 0.3);
+	transition: all 120ms ease;
+}
+.reference-error-retry-btn:hover {
+	filter: brightness(1.1);
+	transform: translateY(-0.5px);
+}
+[data-theme="dark"] .reference-error-retry-btn {
+	background: #ef4444;
+	color: #ffffff;
 }
 
 /* ── Right Context Panel Header ── */
@@ -4608,16 +4677,16 @@
 }
 .message-reasoning pre {
 	margin: 0;
-	padding: 10px 14px;
+	padding: 8px 12px;
 	background: rgba(241, 245, 249, 0.45);
 	border-top: 1px dashed rgba(226, 230, 240, 0.75);
 	font-family: var(--font-mono, monospace);
 	font-size: 11px;
-	line-height: 1.6;
+	line-height: 1.5;
 	color: #475569;
 	white-space: pre-wrap;
 	word-break: break-word;
-	max-height: 280px;
+	max-height: 160px;
 	overflow-y: auto;
 }
 [data-theme="dark"] .message-reasoning pre {

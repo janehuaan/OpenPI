@@ -57,8 +57,8 @@ export function DaemonSurface({
 				) : (
 					<button
 						className="icon-button quiet mobile-only"
-						title="Open conversations"
-						aria-label="Open conversations"
+						title="打开对话列表"
+						aria-label="打开对话列表"
 						onClick={onOpenSidebar}
 					>
 						<Menu size={18} />
@@ -211,8 +211,8 @@ export function DaemonSurface({
 											<button
 												className="icon-button quiet danger"
 												type="button"
-												title={`Stop ${instanceTitle(instance)}`}
-												aria-label={`Stop ${instanceTitle(instance)}`}
+												title={`停止 ${instanceTitle(instance)}`}
+												aria-label={`停止 ${instanceTitle(instance)}`}
 												disabled={busy === "stop-instance"}
 												onClick={() => onStopInstance(instance.id)}
 											>

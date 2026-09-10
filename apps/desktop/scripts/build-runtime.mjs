@@ -79,9 +79,6 @@ log(`daemon.js      ${size(join(runtime, "daemon.js"))}`);
 // set of the agent types and typebox validators.
 const externals = [
 	"@earendil-works/pi-coding-agent",
-	"@earendil-works/pi-ai",
-	"@earendil-works/pi-agent-core",
-	"typebox",
 ];
 
 mkdirSync(join(runtime, "extensions"), { recursive: true });

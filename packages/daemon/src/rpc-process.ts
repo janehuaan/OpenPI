@@ -14,6 +14,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { decodeLines, type PiRpcCommand, type PiRpcEvent, type SessionMode } from "@openpi/shared";
 import { agentDir, getDarwinDockSuppressArgs, piRpcEntry } from "./config.ts";
+import { StreamMicroBatcher } from "./streaming-batcher.ts";
 
 /** Tool profile for code sessions. Chat sessions get the built-in default set. */
 const CODE_MODE_TOOLS = [
@@ -77,11 +78,17 @@ export class RpcProcess {
 	private readonly pending = new Map<string, PendingRequest>();
 	private readonly eventListeners = new Set<EventListener>();
 	private readonly exitListeners = new Set<(code: number | null) => void>();
+	private readonly streamBatcher: StreamMicroBatcher;
 	private uiRequestHandler: UiRequestHandler | undefined;
 	private exited = false;
 
 	constructor(options: RpcProcessOptions) {
 		this.sessionId = options.sessionId;
+		this.streamBatcher = new StreamMicroBatcher((event) => {
+			for (const listener of this.eventListeners) {
+				listener(event);
+			}
+		});
 		const args = buildRpcArgs(options);
 		this.child = spawn(process.execPath, [...getDarwinDockSuppressArgs(), piRpcEntry(), ...args], {
 			cwd: options.cwd,
@@ -102,6 +109,10 @@ export class RpcProcess {
 		this.child.stderr?.on("data", (chunk: string) => {
 			this.resetWatchdogs();
 			process.stderr.write(`[session ${this.sessionId}] ${chunk}`);
+		});
+		this.child.stdin?.on("error", (error) => {
+			process.stderr.write(`[session ${this.sessionId}] stdin pipe error: ${error.message}\n`);
+			this.handleExit(null);
 		});
 		this.child.on("exit", (code) => this.handleExit(code));
 		this.child.on("error", (error) => {
@@ -144,10 +155,16 @@ export class RpcProcess {
 
 	/** Fire-and-forget write, used for UI responses which carry no reply. */
 	write(message: Record<string, unknown>): void {
-		this.child?.stdin?.write(`${JSON.stringify(message)}\n`);
+		if (!this.running || !this.child?.stdin?.writable) return;
+		try {
+			this.child.stdin.write(`${JSON.stringify(message)}\n`);
+		} catch (error: any) {
+			process.stderr.write(`[session ${this.sessionId}] write error: ${error?.message || error}\n`);
+		}
 	}
 
 	stop(): void {
+		this.streamBatcher.flush();
 		if (!this.child || this.exited) return;
 		const child = this.child;
 		const pid = child.pid;
@@ -207,6 +224,7 @@ export class RpcProcess {
 
 	private dispatch(message: PiRpcEvent): void {
 		if (message.type === "response" && typeof message.id === "string") {
+			this.streamBatcher.flush();
 			const pending = this.pending.get(message.id);
 			if (!pending) return;
 			this.pending.delete(message.id);
@@ -220,17 +238,17 @@ export class RpcProcess {
 		}
 
 		if (message.type === "extension_ui_request") {
+			this.streamBatcher.flush();
 			if (this.uiRequestHandler) this.uiRequestHandler(message);
 			return;
 		}
 
-		for (const listener of this.eventListeners) {
-			listener(message);
-		}
+		this.streamBatcher.push(message);
 	}
 
 	private handleExit(code: number | null): void {
 		if (this.exited) return;
+		this.streamBatcher.close();
 		this.exited = true;
 		this.child = undefined;
 		for (const [, pending] of this.pending) {

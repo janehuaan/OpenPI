@@ -17,6 +17,7 @@ import {
 	QuickSaveMemoryDialog,
 	ReferenceWorkspacePreview,
 	RenameConversationDialog,
+	ShortcutsDialog,
 	TasksSurface,
 	GitSurface,
 	FloatingHud,
@@ -213,6 +214,7 @@ export function App() {
 	const [showAllConversations, setShowAllConversations] = useState(false);
 	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
+	const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 	const [authDialog, setAuthDialog] = useState<{
 		provider: string;
 		url?: string;
@@ -584,6 +586,13 @@ export function App() {
 				}
 				return;
 			}
+			if (eventType === "model_fallback_triggered") {
+				setError(undefined);
+				void desktopApi.getConversation(payload.instanceId).then((next) => {
+					if (selectedInstanceIdRef.current === payload.instanceId) setConversation(next);
+				});
+				return;
+			}
 			if (eventType === "rpc_ready") {
 				setStreamConnectedInstanceId(payload.instanceId);
 				return;
@@ -735,26 +744,28 @@ export function App() {
 
 						// Circuit Breaker: detect repetitive degeneration loop (only on final text output)
 						const textToCheck = block.type === "text" ? block.text : "";
-						const loop = detectRepetitionLoop(textToCheck || "");
-						if (loop.isLoop && loop.repeatedPattern) {
-							void desktopApi.abortConversation(payload.instanceId);
-							setError(
-								`⚠️ 检测到模型输出陷入重复死循环（“${loop.repeatedPattern}” 连续重复出现），已自动为您熔断截停！已阻止不必要的 Token 消耗。建议切换至 medium 思考档位或选用 Pro 模型。`,
-							);
-							setStreamingInstances((prev) => {
-								const next = new Set(prev);
-								next.delete(payload.instanceId);
-								return next;
-							});
-							clearRunningTools(payload.instanceId);
-							if (block.type === "text") {
-								block.text = `${block.text}\n\n> ⚠️ *[OpenPI 智能熔断]* 检测到模型输出陷入自回归复读死循环，已自动终止生成，保护您的 Token 与上下文。`;
+						if (textToCheck && textToCheck.length >= 80) {
+							const loop = detectRepetitionLoop(textToCheck);
+							if (loop.isLoop && loop.repeatedPattern && (loop.count ?? 0) >= 8) {
+								void desktopApi.abortConversation(payload.instanceId, "circuit_breaker");
+								setError(
+									`⚠️ 检测到模型输出陷入重复死循环（“${loop.repeatedPattern}” 连续重复出现），已自动为您熔断截停！已阻止不必要的 Token 消耗。建议切换至 medium 思考档位或选用 Pro 模型。`,
+								);
+								setStreamingInstances((prev) => {
+									const next = new Set(prev);
+									next.delete(payload.instanceId);
+									return next;
+								});
+								clearRunningTools(payload.instanceId);
+								if (block.type === "text") {
+									block.text = `${block.text}\n\n> ⚠️ *[OpenPI 智能熔断]* 检测到模型输出陷入自回归复读死循环，已自动终止生成，保护您的 Token 与上下文。`;
+								}
+								return {
+									...current,
+									state: { ...current.state, isStreaming: false },
+									messages,
+								};
 							}
-							return {
-								...current,
-								state: { ...current.state, isStreaming: false },
-								messages,
-							};
 						}
 
 						return {
@@ -1437,9 +1448,10 @@ export function App() {
 		setSelectedInstanceId(instanceId);
 	}
 
-	function abortConversation(): void {
+	function abortConversation(reason = "user_action"): void {
 		const instanceId = selectedInstanceIdRef.current;
 		if (!instanceId) return;
+		console.log(`[App:abortConversation] Triggered for instance ${instanceId}, reason: ${reason}`);
 		setStreamingInstances((prev) => {
 			const next = new Set(prev);
 			next.delete(instanceId);
@@ -1455,7 +1467,7 @@ export function App() {
 			conversationCacheRef.current[instanceId] = next;
 			return next;
 		});
-		void desktopApi.abortConversation(instanceId).catch((caught: unknown) => {
+		void desktopApi.abortConversation(instanceId, reason).catch((caught: unknown) => {
 			clearRunningTools(instanceId);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		});
@@ -1552,17 +1564,24 @@ export function App() {
 		void createConversation(targetAgentMode, targetWorkspace);
 	}, [appMode, codeWorkspace, selectedWorkspace, clearRunningTools, createConversation]);
 
-	const handleAbort = useCallback(() => {
-		abortConversation();
+	const handleKeyboardAbort = useCallback((source: "escape" | "cmd_dot") => {
+		const el = typeof document !== "undefined" ? document.activeElement : null;
+		const activeDesc = el ? `${el.tagName.toLowerCase()}${el.className ? "." + String(el.className).split(" ")[0] : ""}` : "none";
+		abortConversation(`keyboard_${source} (focused: ${activeDesc})`);
+	}, []);
+
+	const handleButtonAbort = useCallback(() => {
+		abortConversation("click_stop_button");
 	}, []);
 
 	useGlobalKeybindings({
 		onNewConversation: handleNewConversation,
 		onToggleSidebar: () => setSidebarOpen((prev) => !prev),
-		onAbort: handleAbort,
+		onAbort: handleKeyboardAbort,
 		onOpenSettings: () => setView("capabilities"),
 		onExportMarkdown: exportSelectedConversation,
 		onToggleGit: () => setView((prev) => (prev === "git" ? "chat" : "git")),
+		onOpenShortcuts: () => setShowShortcutsDialog((prev) => !prev),
 		isWorking,
 	});
 
@@ -2146,10 +2165,11 @@ export function App() {
 				void createConversation("work", undefined);
 			}}
 			onOpenSettings={() => setView("capabilities")}
+			onOpenShortcuts={() => setShowShortcutsDialog((prev) => !prev)}
 			onSend={sendMessage}
 			onSteer={steerMessage}
 			onFollowUp={followUpMessage}
-			onAbort={handleAbort}
+			onAbort={handleButtonAbort}
 			onRenameConversation={(target) => {
 				const inst = target ?? selectedAgentInstance;
 				if (inst) setRenamingConversation(inst);
@@ -2322,6 +2342,11 @@ export function App() {
 					onDelete={removeSelectedProject}
 				/>
 			)}
+
+			<ShortcutsDialog
+				isOpen={showShortcutsDialog}
+				onClose={() => setShowShortcutsDialog(false)}
+			/>
 
 			{activeConversationUiRequest && (
 				<ConversationUiDialog

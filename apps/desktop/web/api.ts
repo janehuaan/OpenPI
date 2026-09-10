@@ -26,6 +26,7 @@ import type {
 	GitStatusResult,
 	ImageContent,
 	MediaSaveInput,
+	ModelProbeResult,
 	ModelProviderConfig,
 	PortProcessInfo,
 	ProviderPingResult,
@@ -72,7 +73,7 @@ const NON_RETRYABLE_CHANNELS = new Set([
 	"create_conversation",
 ]);
 
-async function call<T>(channel: string, args?: unknown, maxRetries = 2): Promise<T> {
+async function call<T>(channel: string, args?: unknown, maxRetries = 4): Promise<T> {
 	const api = bridge();
 	if (!api) throw new Error("OpenPI desktop bridge unavailable. Launch with Electron.");
 
@@ -136,7 +137,7 @@ export const desktopApi = {
 		call<boolean>("follow_up_conversation", { instanceId, message, images }),
 	clearConversationQueue: (instanceId: string) =>
 		call<{ steering: string[]; followUp: string[] }>("clear_conversation_queue", { instanceId }),
-	abortConversation: (instanceId: string) => call<boolean>("abort_conversation", { instanceId }),
+	abortConversation: (instanceId: string, reason?: string) => call<boolean>("abort_conversation", { instanceId, reason }),
 	compactConversation: (instanceId: string, customInstructions?: string) =>
 		call<unknown>("compact_conversation", { instanceId, customInstructions }),
 	renameConversation: (instanceId: string, name: string) =>
@@ -265,6 +266,10 @@ export const desktopApi = {
 	},
 	pingModelProvider: (params: { providerId?: string; baseUrl: string; apiKey?: string }) =>
 		call<ProviderPingResult>("ping_model_provider", params),
+	probeModelCapabilities: (params: { providerId?: string; modelId: string; baseUrl?: string; apiKey?: string }) =>
+		call<ModelProbeResult>("probe_model_capabilities", params),
+	batchProbeProviderModels: (params: { providerId: string; modelIds?: string[]; baseUrl?: string; apiKey?: string }) =>
+		call<{ results: ModelProbeResult[]; count: number }>("batch_probe_provider_models", params),
 	getMediaCapabilities: () => call<AgnesMediaCapabilities>("get_media_capabilities"),
 	generateImage: (input: AgnesImageRequest) => call<AgnesImageResult>("generate_image", input),
 	createVideo: (input: AgnesVideoRequest) => call<AgnesVideoResult>("create_video", input),

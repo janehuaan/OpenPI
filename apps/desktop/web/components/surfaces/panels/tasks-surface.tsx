@@ -83,8 +83,8 @@ export function TasksSurface({
 				) : (
 					<button
 						className="icon-button quiet mobile-only"
-						title="Open conversations"
-						aria-label="Open conversations"
+						title="打开对话列表"
+						aria-label="打开对话列表"
 						onClick={onOpenSidebar}
 					>
 						<Menu size={18} />

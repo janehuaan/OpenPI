@@ -10,27 +10,34 @@ export function ReasoningBlock({
 	isWorking?: boolean;
 	defaultOpen?: boolean;
 }) {
-	const [isOpen, setIsOpen] = useState(isWorking || defaultOpen);
+	const [isOpen, setIsOpen] = useState(isWorking && defaultOpen);
+	const [userToggled, setUserToggled] = useState(false);
 	const charCount = reasoning.length;
 
+	// When generation completes or text arrives, auto-collapse unless user explicitly toggled it open
 	useEffect(() => {
-		if (isWorking) {
-			setIsOpen(true);
-		} else if (defaultOpen) {
-			setIsOpen(true);
+		if (!userToggled) {
+			setIsOpen(isWorking && defaultOpen);
 		}
-	}, [isWorking, defaultOpen]);
+	}, [isWorking, defaultOpen, userToggled]);
 
 	return (
 		<details
 			className={`message-reasoning ${isWorking ? "is-thinking" : ""}`}
 			open={isOpen}
-			onToggle={(e) => setIsOpen((e.target as HTMLDetailsElement).open)}
+			onToggle={(e) => {
+				setUserToggled(true);
+				setIsOpen((e.target as HTMLDetailsElement).open);
+			}}
 		>
 			<summary>
 				<BrainCircuit size={13} className="reasoning-brain-icon" />
 				<span className="reasoning-label">
-					{isWorking ? "正在深度思考…" : `思考过程 (${charCount} 字)`}
+					{isWorking
+						? "正在深度思考…"
+						: isOpen
+							? `思考过程 (${charCount} 字)`
+							: `已深度思考 (${charCount} 字) · 点击查看`}
 				</span>
 				<ChevronDown
 					size={13}

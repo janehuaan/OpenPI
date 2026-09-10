@@ -205,14 +205,18 @@ async function navigate(url: string): Promise<void> {
 	await delay(800);
 }
 
-async function shutdown(): Promise<void> {
+export async function shutdown(): Promise<void> {
 	if (!session) return;
 	try {
 		session.page.ws.close();
 	} catch {
 		// ignore
 	}
-	session.process.kill("SIGTERM");
+	try {
+		session.process.kill("SIGTERM");
+	} catch {
+		// ignore
+	}
 	try {
 		rmSync(session.userDataDir, { recursive: true, force: true });
 	} catch {
@@ -220,6 +224,21 @@ async function shutdown(): Promise<void> {
 	}
 	session = undefined;
 }
+
+process.once("exit", () => {
+	if (session) {
+		try {
+			session.process.kill("SIGKILL");
+		} catch {
+			// ignore
+		}
+		try {
+			rmSync(session.userDataDir, { recursive: true, force: true });
+		} catch {
+			// ignore
+		}
+	}
+});
 
 // ============================================================================
 // Page JS snippets (serialized helpers)
@@ -350,6 +369,10 @@ async function ensureBrowser(headless: boolean): Promise<void> {
 }
 
 export default function (pi: ExtensionAPI): void {
+	pi.on("session_shutdown", async () => {
+		await shutdown();
+	});
+
 	pi.registerTool({
 		name: "browser",
 		label: "浏览器自动化",

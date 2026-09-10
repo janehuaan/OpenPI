@@ -80,6 +80,18 @@ describe("keybindings", () => {
 			expect(matchKeybinding({ key: "k", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
 			expect(matchKeybinding({ key: "Enter", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
 		});
+
+		it("matches Cmd/Ctrl + / and Cmd/Ctrl + ? for open_shortcuts", () => {
+			expect(matchKeybinding({ key: "/", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false })).toBe(
+				"open_shortcuts",
+			);
+			expect(matchKeybinding({ key: "?", metaKey: true, ctrlKey: false, shiftKey: true, altKey: false })).toBe(
+				"open_shortcuts",
+			);
+			expect(matchKeybinding({ key: "/", metaKey: false, ctrlKey: true, shiftKey: false, altKey: false })).toBe(
+				"open_shortcuts",
+			);
+		});
 	});
 
 	describe("handleKeybinding", () => {
@@ -122,7 +134,38 @@ describe("keybindings", () => {
 
 			expect(handled).toBe(true);
 			expect(event.preventDefault).toHaveBeenCalledTimes(1);
-			expect(onAbort).toHaveBeenCalledTimes(1);
+			expect(onAbort).toHaveBeenCalledWith("escape");
+		});
+
+		it("does not call onAbort on Escape when user is composing with an IME", () => {
+			const onAbort = vi.fn();
+			const event = createMockEvent({ key: "Escape", isComposing: true });
+			const handled = handleKeybinding(event, { onAbort, isWorking: true });
+
+			expect(handled).toBe(false);
+			expect(event.preventDefault).not.toHaveBeenCalled();
+			expect(onAbort).not.toHaveBeenCalled();
+		});
+
+		it("does not call onAbort on Escape when focus is inside textarea or input", () => {
+			const onAbort = vi.fn();
+			const textarea = { tagName: "TEXTAREA", isContentEditable: false, closest: () => null } as unknown as HTMLElement;
+			const event = createMockEvent({ key: "Escape", target: textarea });
+			const handled = handleKeybinding(event, { onAbort, isWorking: true });
+
+			expect(handled).toBe(false);
+			expect(event.preventDefault).not.toHaveBeenCalled();
+			expect(onAbort).not.toHaveBeenCalled();
+		});
+
+		it("calls onAbort on Cmd+. when isWorking is true even from inside inputs", () => {
+			const onAbort = vi.fn();
+			const event = createMockEvent({ key: ".", metaKey: true });
+			const handled = handleKeybinding(event, { onAbort, isWorking: true });
+
+			expect(handled).toBe(true);
+			expect(event.preventDefault).toHaveBeenCalledTimes(1);
+			expect(onAbort).toHaveBeenCalledWith("cmd_dot");
 		});
 
 		it("does not call onAbort when isWorking is false", () => {
@@ -153,6 +196,16 @@ describe("keybindings", () => {
 			expect(handled).toBe(true);
 			expect(event.preventDefault).toHaveBeenCalledTimes(1);
 			expect(onExportMarkdown).toHaveBeenCalledTimes(1);
+		});
+
+		it("calls onOpenShortcuts and prevents default on Cmd+/", () => {
+			const onOpenShortcuts = vi.fn();
+			const event = createMockEvent({ key: "/", metaKey: true });
+			const handled = handleKeybinding(event, { onOpenShortcuts });
+
+			expect(handled).toBe(true);
+			expect(event.preventDefault).toHaveBeenCalledTimes(1);
+			expect(onOpenShortcuts).toHaveBeenCalledTimes(1);
 		});
 
 		it("does nothing when handler is missing", () => {

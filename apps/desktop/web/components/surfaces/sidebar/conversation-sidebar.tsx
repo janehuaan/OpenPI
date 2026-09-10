@@ -149,7 +149,7 @@ export function ConversationSidebar({
 			<div className="sidebar-title">
 				<div className="brand-lockup">
 					<span className="brand-copy">
-						<strong>Spaces</strong>
+						<strong>OpenPI</strong>
 					</span>
 				</div>
 				<button
@@ -168,7 +168,7 @@ export function ConversationSidebar({
 			</div>
 			<div className="reference-sidebar-scroll">
 				<div className="sidebar-section-label reference-section-heading">
-					<span>Spaces</span>
+					<span>项目工程</span>
 				</div>
 				<div className="spaces-list">
 					{spaces.map((space) => (
@@ -191,12 +191,12 @@ export function ConversationSidebar({
 					{spaces.length === 0 && <span className="sidebar-inline-empty">还没有工作区</span>}
 				</div>
 				<button type="button" className="sidebar-more-row" onClick={() => onNavigate?.("capabilities")}>
-					<span>More</span>
+					<span>更多扩展</span>
 					<ChevronRight size={14} />
 				</button>
 
 				<div className="sidebar-section-label reference-section-heading recent-heading">
-					<span>Recent Sessions</span>
+					<span>最近会话</span>
 					<button
 						className="icon-button quiet"
 						type="button"

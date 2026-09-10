@@ -6,6 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -28,6 +29,8 @@ import type {
 } from "@openpi/shared";
 import { agentDir, defaultWorkspace, sessionsDir } from "@openpi/daemon";
 import { eventChannelName, invokeChannelName, type EventChannel, type InvokeChannel } from "./channels.ts";
+import { queryDynamicRegistry } from "./model-specs-registry.ts";
+import { probeSingleModel, batchProbeModels, type ModelProbeResult } from "./model-prober.ts";
 import {
 	currentClient,
 	disconnect,
@@ -49,6 +52,7 @@ import {
 	writeSystemClipboard,
 } from "./system-ops.ts";
 import { toggleHudWindow } from "./hud.ts";
+import { isModelOutageOrRateLimitError, pickCascadeFallbackModel } from "./model-cascade.ts";
 
 function readModelsConfig(): { providers: Record<string, any> } {
 	const file = join(agentDir(), "models.json");
@@ -426,193 +430,91 @@ async function scanWorkspaceSummary(cwd: string): Promise<{ fileCount: number; f
 	return { fileCount, files: sorted, truncated };
 }
 
+function getStoreModelSpecs(modelId: string): { contextWindow: number; maxTokens: number; reasoning?: boolean } | undefined {
+	try {
+		const target = modelId.toLowerCase();
+		// 1. Check user original ~/.pi/agent/models.json or ~/.openpi/agent/models.json
+		for (const p of [join(homedir(), ".pi", "agent", "models.json"), join(agentDir(), "models.json")]) {
+			if (existsSync(p)) {
+				const cfg = JSON.parse(readFileSync(p, "utf8"));
+				for (const prov of Object.values(cfg?.providers ?? {}) as any[]) {
+					if (prov && Array.isArray(prov.models)) {
+						for (const m of prov.models) {
+							if (typeof m === "object" && m && typeof m.id === "string") {
+								if (m.id.toLowerCase() === target && typeof m.contextWindow === "number") {
+									return { contextWindow: m.contextWindow, maxTokens: m.maxTokens || 65536, reasoning: m.reasoning };
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Check models-store.json
+		const storeFile = join(agentDir(), "models-store.json");
+		if (existsSync(storeFile)) {
+			const store = JSON.parse(readFileSync(storeFile, "utf8"));
+			for (const prov of Object.values(store) as any[]) {
+				if (prov && Array.isArray(prov.models)) {
+					for (const m of prov.models) {
+						const mId = (m.id || "").toLowerCase();
+						const shortId = mId.includes("/") ? mId.split("/")[1] : mId;
+						if ((mId === target || shortId === target) && typeof m.contextWindow === "number") {
+							return { contextWindow: m.contextWindow, maxTokens: m.maxTokens || 65536, reasoning: m.reasoning };
+						}
+					}
+				}
+			}
+		}
+	} catch {}
+	return undefined;
+}
+
 function resolveModelSpecs(modelId: string, pCfg?: any): { contextWindow: number; maxTokens: number } {
-	const id = modelId.toLowerCase();
 	const pCtx = typeof pCfg?.contextWindow === "number" && pCfg.contextWindow > 0 ? pCfg.contextWindow : undefined;
 	const pMax = typeof pCfg?.maxTokens === "number" && pCfg.maxTokens > 0 ? pCfg.maxTokens : undefined;
 
-	// Gemini / Agnes models (1M context, 64k output default)
-	if (
-		id.includes("gemini-1.5-pro") ||
-		id.includes("gemini-2.0-flash") ||
-		id.includes("gemini-2.5-flash") ||
-		id.includes("agnes-2.5-flash") ||
-		id.includes("agnes-2.0-flash") ||
-		id.includes("agnes")
-	) {
+	// 1. User ground-truth store (~/.openpi/agent/models.json or models-store.json)
+	const fromStore = getStoreModelSpecs(modelId);
+	if (fromStore) {
 		return {
-			contextWindow: pCtx ?? 1048576,
-			maxTokens: pMax ?? 65536,
-		};
-	}
-	if (id.includes("gemini-1.5-flash") || id.includes("gemini-flash")) {
-		return {
-			contextWindow: pCtx ?? 1048576,
-			maxTokens: pMax ?? 8192,
+			contextWindow: fromStore.contextWindow,
+			maxTokens: fromStore.maxTokens,
 		};
 	}
 
-	// Claude Opus 4.8 / 5 (1M context)
-	if (id.includes("claude-opus-5") || id.includes("claude-opus-4")) {
+	// 2. Dynamic online/cached registry (models.dev API without hardcoded if-else trees)
+	const fromRegistry = queryDynamicRegistry(modelId);
+	if (fromRegistry) {
 		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 128000,
-		};
-	}
-	// Claude 4.5 / 4.6 / Fable / Sonnet 4
-	if (id.includes("claude-sonnet-4") || id.includes("claude-fable")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 64000,
-		};
-	}
-	// Gemini models (Flash, Pro)
-	if (id.includes("gemini")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? (id.includes("flash") ? 65536 : 131072),
-		};
-	}
-	if (id.includes("claude-3-7") || id.includes("claude-3.7")) {
-		return {
-			contextWindow: pCtx ?? 200000,
-			maxTokens: pMax ?? 64000,
-		};
-	}
-	if (id.includes("claude-3-5") || id.includes("claude-3.5") || id.includes("claude-3-opus") || id.includes("claude-3")) {
-		return {
-			contextWindow: pCtx ?? 200000,
-			maxTokens: pMax ?? 8192,
+			contextWindow: pCtx ?? fromRegistry.contextWindow,
+			maxTokens: pMax ?? fromRegistry.maxTokens,
 		};
 	}
 
-	// DeepSeek models (V4 / V3 / R1)
-	if (id.includes("deepseek")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? (id.includes("flash") ? 384000 : 128000),
-		};
-	}
-
-	// SenseNova models (商汤)
-	if (id.includes("sensenova") || id.includes("u1")) {
-		return {
-			contextWindow: pCtx ?? 262144,
-			maxTokens: pMax ?? 65536,
-		};
-	}
-
-	// Kimi models (Moonshot / Kimi / K3)
-	if (id.includes("kimi") || id.includes("moonshot")) {
-		return {
-			contextWindow: pCtx ?? (id.includes("k3") ? 1000000 : 262144),
-			maxTokens: pMax ?? (id.includes("k3") ? 131072 : 64000),
-		};
-	}
-
-	// MiniMax models
-	if (id.includes("minimax")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 200000,
-		};
-	}
-
-	// GLM 5 series
-	if (id.includes("glm-5")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 131072,
-		};
-	}
-
-	// Qwen 3 series / QwQ
-	if (id.includes("qwen3") || id.includes("qwen-3") || id.includes("qwq")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 131072,
-		};
-	}
-
-	// Standard Qwen models
-	if (id.includes("qwen")) {
-		return {
-			contextWindow: pCtx ?? 131072,
-			maxTokens: pMax ?? 16384,
-		};
-	}
-
-	// Standard GLM models
-	if (id.includes("glm")) {
-		return {
-			contextWindow: pCtx ?? 128000,
-			maxTokens: pMax ?? 8192,
-		};
-	}
-
-	// GPT-5 / GPT-5.6 / Sol / Codex
-	if (id.includes("gpt-5")) {
-		return {
-			contextWindow: pCtx ?? 1000000,
-			maxTokens: pMax ?? 128000,
-		};
-	}
-
-	// GPT-4o / GPT-4o-mini
-	if (id.includes("gpt-4o")) {
-		return {
-			contextWindow: pCtx ?? 128000,
-			maxTokens: pMax ?? 16384,
-		};
-	}
-
-	// o1 / o3
-	if (id.includes("o1") || id.includes("o3")) {
-		return {
-			contextWindow: pCtx ?? 200000,
-			maxTokens: pMax ?? 100000,
-		};
-	}
-
+	// 3. Fallback to provider default context window or 1M
+	const fallbackCtx = pCtx ?? 1000000;
 	return {
-		contextWindow: pCtx ?? 128000,
-		maxTokens: pMax ?? 8192,
+		contextWindow: fallbackCtx,
+		maxTokens: pMax ?? Math.min(fallbackCtx, 65536),
 	};
 }
 
 export function isModelReasoningCapable(id: string, provider: string, declaredReasoning?: boolean): boolean {
 	if (typeof declaredReasoning === "boolean") return declaredReasoning;
+	const fromStore = getStoreModelSpecs(id);
+	if (typeof fromStore?.reasoning === "boolean") return fromStore.reasoning;
+	const fromRegistry = queryDynamicRegistry(id);
+	if (typeof fromRegistry?.reasoning === "boolean") return fromRegistry.reasoning;
 	const idLower = (id || "").toLowerCase();
-	const provLower = (provider || "").toLowerCase();
-
-	if (
-		provLower.includes("agnes") ||
-		idLower.includes("agnes") ||
-		provLower.includes("sensenova") ||
-		provLower.includes("商汤") ||
-		idLower.includes("sensenova")
-	) {
-		return true;
-	}
-
 	return (
 		idLower.includes("thinking") ||
 		idLower.includes("reason") ||
 		idLower.includes("r1") ||
 		idLower.includes("qwq") ||
-		idLower.startsWith("o1") ||
-		idLower.startsWith("o3") ||
-		idLower.includes("claude-3-7") ||
-		idLower.includes("claude-opus-5") ||
-		idLower.includes("claude-opus-4") ||
-		idLower.includes("deepseek") ||
-		idLower.includes("kimi") ||
-		idLower.includes("minimax") ||
-		idLower.includes("glm-5") ||
-		idLower.includes("qwen3") ||
-		idLower.includes("mimo") ||
-		idLower.includes("seed") ||
-		idLower.includes("gemini")
+		idLower.includes("o1") ||
+		idLower.includes("o3")
 	);
 }
 
@@ -1022,6 +924,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 	const setupStream = async (instanceId: string) => {
 		const client = await getClient();
 		attachClient(client);
+		if (streamSubscriptions.has(instanceId)) return;
 		streamSubscriptions.add(instanceId);
 		await client.request({ type: "subscribe", sessionId: instanceId }).catch(() => {});
 	};
@@ -1366,6 +1269,43 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 						sessionId: instanceId,
 						command: { type: "steer", message: finalMessage, images: finalImages },
 					});
+				} else if (isModelOutageOrRateLimitError(err)) {
+					// Model Cascade Fallback: automatically switch to alternate model and retry
+					try {
+						const available = await getAvailableModelsHelper(client, instanceId);
+						const curState = (await client.request({
+							type: "rpc",
+							sessionId: instanceId,
+							command: { type: "get_state" },
+						}).catch(() => null)) as any;
+						const fallback = pickCascadeFallbackModel(curState?.model, available);
+						if (fallback) {
+							await client.request({
+								type: "rpc",
+								sessionId: instanceId,
+								command: { type: "set_model", provider: fallback.provider, modelId: fallback.id },
+							});
+							send("conversation-event", {
+								instanceId,
+								event: {
+									type: "model_fallback_triggered",
+									previousModel: curState?.model,
+									fallbackModel: fallback,
+									reason: errMsg,
+								},
+							});
+							// Re-attempt prompt with the fallback model
+							await client.request({
+								type: "rpc",
+								sessionId: instanceId,
+								command: { type: "prompt", message: finalMessage, images: finalImages },
+							});
+							return true;
+						}
+					} catch (cascadeErr) {
+						console.warn("[electron] Model cascade fallback failed:", cascadeErr);
+					}
+					throw err;
 				} else {
 					throw err;
 				}
@@ -1434,7 +1374,8 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			});
 		},
 
-		abort_conversation: async ({ instanceId }: { instanceId: string }) => {
+		abort_conversation: async ({ instanceId, reason }: { instanceId: string; reason?: string }) => {
+			console.log(`[IPC:abort_conversation] Aborting instance ${instanceId}, reason: ${reason || "unspecified"}`);
 			const client = await getClient();
 			await client
 				.request({
@@ -1936,23 +1877,54 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				const id = typeof rm === "string" ? rm : rm.id;
 				if (!id) continue;
 				const existing = existingMap.get(id);
-				if (existing) {
-					mergedModels.push({
-						...existing,
-						cost: existing.cost && typeof existing.cost === "object" ? existing.cost : defaultCost,
+				const specs = resolveModelSpecs(id, provider);
+				const reasoning = isModelReasoningCapable(id, providerId ?? "", rm.reasoning ?? existing?.reasoning);
+
+				// Remote API context fields (support OpenAI / OneAPI / NewAPI proxy fields)
+				const remoteCtx = typeof rm.context_window === "number" ? rm.context_window
+					: typeof rm.context_length === "number" ? rm.context_length
+					: typeof rm.contextWindow === "number" ? rm.contextWindow
+					: undefined;
+
+				const contextWindow = remoteCtx ?? existing?.contextWindow ?? specs.contextWindow;
+				const maxTokens = (typeof rm.max_tokens === "number" ? rm.max_tokens
+					: typeof rm.maxTokens === "number" ? rm.maxTokens : undefined)
+					?? existing?.maxTokens ?? specs.maxTokens;
+
+				mergedModels.push({
+					id,
+					name: existing?.name || rm.name || formatName(id),
+					reasoning,
+					cost: existing?.cost && typeof existing.cost === "object" ? existing.cost : defaultCost,
+					contextWindow,
+					maxTokens,
+					input: Array.isArray(existing?.input) ? existing.input : (Array.isArray(rm.input) ? rm.input : ["text", "image"]),
+				});
+			}
+
+			// Automatically probe all discovered models to obtain live tested capabilities
+			if (mergedModels.length > 0) {
+				try {
+					const targetIds = mergedModels.map((m) => m.id);
+					const probeResults = await batchProbeModels({
+						baseUrl: resolvedBaseUrl,
+						apiKey: effectiveApiKey,
+						models: targetIds,
+						defaultContext: provider.contextWindow || 1000000,
+						concurrency: 8,
 					});
-				} else {
-					const specs = resolveModelSpecs(id, provider);
-					const reasoning = isModelReasoningCapable(id, providerId ?? "", rm.reasoning);
-					mergedModels.push({
-						id,
-						name: rm.name || formatName(id),
-						reasoning,
-						cost: rm.cost && typeof rm.cost === "object" ? rm.cost : defaultCost,
-						contextWindow: typeof rm.contextWindow === "number" ? rm.contextWindow : specs.contextWindow,
-						maxTokens: typeof rm.maxTokens === "number" ? rm.maxTokens : specs.maxTokens,
-						input: Array.isArray(rm.input) ? rm.input : ["text", "image"],
-					});
+					const probeMap = new Map(probeResults.map((r) => [r.modelId, r]));
+					for (const m of mergedModels) {
+						const probed = probeMap.get(m.id);
+						if (probed && probed.ok) {
+							m.contextWindow = probed.contextWindow;
+							m.maxTokens = probed.maxTokens;
+							m.reasoning = probed.reasoning;
+							m.input = probed.input;
+						}
+					}
+				} catch (probeErr) {
+					console.warn("[fetch_provider_remote_models] Auto-probe fallback:", probeErr);
 				}
 			}
 
@@ -2042,6 +2014,94 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				status: lastStatus || 500,
 				message: lastError || "连接超时或不可达",
 				resolvedBaseUrl,
+			};
+		},
+
+		probe_model_capabilities: async ({ providerId, modelId, baseUrl, apiKey }: any = {}) => {
+			const current = readModelsConfig();
+			const provider = (providerId ? current.providers[providerId] : {}) ?? {};
+			const effectiveBaseUrl = (baseUrl || provider.baseUrl || "").trim();
+			const effectiveApiKey = (apiKey || provider.apiKey || "").trim();
+			const defaultContext = provider.contextWindow || 1000000;
+
+			if (!effectiveBaseUrl || !modelId) {
+				throw new Error("缺少 Base URL 或 模型 ID");
+			}
+
+			const probeResult = await probeSingleModel({
+				baseUrl: effectiveBaseUrl,
+				apiKey: effectiveApiKey,
+				modelId,
+				defaultContext,
+			});
+
+			if (providerId && current.providers[providerId] && Array.isArray(current.providers[providerId].models)) {
+				const models = current.providers[providerId].models;
+				const idx = models.findIndex((m: any) => (typeof m === "string" ? m : m.id) === modelId);
+				if (idx >= 0) {
+					const existing = typeof models[idx] === "string" ? { id: modelId, name: modelId } : { ...models[idx] };
+					models[idx] = {
+						...existing,
+						contextWindow: probeResult.contextWindow,
+						maxTokens: probeResult.maxTokens,
+						reasoning: probeResult.reasoning,
+						input: probeResult.input,
+					};
+					writeModelsConfig(current);
+				}
+			}
+
+			return probeResult;
+		},
+
+		batch_probe_provider_models: async ({ providerId, modelIds, baseUrl, apiKey }: any = {}) => {
+			const current = readModelsConfig();
+			const provider = (providerId ? current.providers[providerId] : {}) ?? {};
+			const effectiveBaseUrl = (baseUrl || provider.baseUrl || "").trim();
+			const effectiveApiKey = (apiKey || provider.apiKey || "").trim();
+			const defaultContext = provider.contextWindow || 1000000;
+
+			if (!effectiveBaseUrl) {
+				throw new Error("服务商未配置 Base URL");
+			}
+
+			const targetIds: string[] = Array.isArray(modelIds) && modelIds.length > 0
+				? modelIds
+				: (provider.models || []).map((m: any) => (typeof m === "string" ? m : m.id));
+
+			if (targetIds.length === 0) {
+				return { results: [], count: 0 };
+			}
+
+			const results = await batchProbeModels({
+				baseUrl: effectiveBaseUrl,
+				apiKey: effectiveApiKey,
+				models: targetIds,
+				defaultContext,
+				concurrency: 4,
+			});
+
+			if (providerId && current.providers[providerId] && Array.isArray(current.providers[providerId].models)) {
+				const resultMap = new Map(results.map((r) => [r.modelId, r]));
+				current.providers[providerId].models = current.providers[providerId].models.map((m: any) => {
+					const id = typeof m === "string" ? m : m.id;
+					const probed = resultMap.get(id);
+					if (!probed) return m;
+					const existing = typeof m === "string" ? { id, name: id } : { ...m };
+					return {
+						...existing,
+						contextWindow: probed.contextWindow,
+						maxTokens: probed.maxTokens,
+						reasoning: probed.reasoning,
+						input: probed.input,
+					};
+				});
+				writeModelsConfig(current);
+			}
+
+			return {
+				results,
+				count: results.length,
 			};
 		},
 

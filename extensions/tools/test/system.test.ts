@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import registerSystemTools, {
+	killProcess,
 	parseDfOutput,
 	parseLsofOutput,
 	parsePmsetBattery,
@@ -123,4 +124,18 @@ describe("System Tools Extension Registration", () => {
 		expect(res.details.telemetry.cpu.cores).toBeGreaterThan(0);
 		expect(res.details.telemetry.memory.totalGb).toBeGreaterThan(0);
 	});
+
+	describe("killProcess PID Safety Firewall", () => {
+		it("refuses to kill PID <= 1", async () => {
+			await expect(killProcess(0)).rejects.toThrow("Invalid or protected PID");
+			await expect(killProcess(1)).rejects.toThrow("Invalid or protected PID");
+			await expect(killProcess(-10)).rejects.toThrow("Invalid or protected PID");
+		});
+
+		it("refuses to kill current agent process or parent process", async () => {
+			await expect(killProcess(process.pid)).rejects.toThrow("Refusing to terminate current process or parent process");
+			await expect(killProcess(process.ppid)).rejects.toThrow("Refusing to terminate current process or parent process");
+		});
+	});
 });
+

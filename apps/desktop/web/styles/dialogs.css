@@ -166,6 +166,36 @@
 .model-form-field input::placeholder {
 	color: var(--text-tertiary);
 }
+.model-input-with-action {
+	position: relative;
+	display: flex;
+	align-items: center;
+	width: 100%;
+}
+.model-input-with-action input {
+	width: 100%;
+	padding-right: 36px;
+}
+.model-input-action-btn {
+	position: absolute;
+	right: 8px;
+	top: 50%;
+	transform: translateY(-50%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: none;
+	padding: 4px;
+	border-radius: var(--radius-sm, 4px);
+	color: var(--text-tertiary);
+	cursor: pointer;
+	transition: color 0.15s ease, background-color 0.15s ease;
+}
+.model-input-action-btn:hover {
+	color: var(--text);
+	background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
 .model-form-actions {
 	display: flex;
 	justify-content: flex-end;

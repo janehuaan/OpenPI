@@ -28,6 +28,8 @@ export interface Connection {
 	pushEvent(sessionId: string, event: PiRpcEvent): void;
 	/** Unsubscribe callbacks to run when this connection closes. */
 	cleanups: Set<() => void>;
+	/** Active session subscriptions for deduplication */
+	subscriptions?: Map<string, () => void>;
 }
 
 export function startServer(handler: RequestHandler): Promise<Server> {

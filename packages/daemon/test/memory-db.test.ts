@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test, { describe, it } from "node:test";
 import { MemoryDb } from "../src/memory/memory-db.ts";
 
@@ -106,4 +109,32 @@ describe("MemoryDb SQLite State Machine", () => {
 
 		db.close();
 	});
+
+	it("enables WAL mode and handles concurrent readers and writers on file DB", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "memory-db-wal-"));
+		const dbFile = join(tempDir, "test-wal.db");
+
+		try {
+			const db1 = new MemoryDb(dbFile);
+			const db2 = new MemoryDb(dbFile);
+
+			// Both can write and read simultaneously without SQLITE_BUSY lock errors
+			db1.enqueueJob("memory_stage1", "thread-wal-1", { inputWatermark: 100 });
+			db2.enqueueJob("memory_stage1", "thread-wal-2", { inputWatermark: 200 });
+
+			const stats1 = db1.getJobStats();
+			const stats2 = db2.getJobStats();
+
+			assert.equal(stats1.pending, 2);
+			assert.equal(stats2.pending, 2);
+
+			db1.close();
+			db2.close();
+		} finally {
+			try {
+				rmSync(tempDir, { recursive: true, force: true });
+			} catch {}
+		}
+	});
 });
+

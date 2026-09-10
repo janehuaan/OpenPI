@@ -9,7 +9,7 @@ import {
 	Wrench,
 	X,
 } from "../../icons.tsx";
-import { fmtTokens, shortWorkspacePath } from "../../../lib/helpers";
+import { fmtTokens, shortWorkspacePath, thinkingLevelLabel } from "../../../lib/helpers";
 import type {
 	ConversationCapabilities,
 	ConversationMessage,
@@ -253,7 +253,7 @@ export function ContextPanel({
 				<>
 					<section className="context-section">
 						<div className="context-section-title">
-							<span>Workspace</span>
+							<span>工作空间</span>
 						</div>
 						<div className="context-workspace-card">
 							<span className="context-workspace-icon">
@@ -269,48 +269,54 @@ export function ContextPanel({
 						<div className="context-count-grid">
 							<div>
 								<strong>{fileCount || "—"}</strong>
-								<span>Files</span>
+								<span>文件数</span>
 							</div>
 							<div>
 								<strong>{toolCount || "—"}</strong>
-								<span>Tools</span>
+								<span>工具调用</span>
 							</div>
 							<div>
 								<strong>{memoryEntries.length || "—"}</strong>
-								<span>Memories</span>
+								<span>记忆沉淀</span>
 							</div>
 						</div>
 					</section>
 
 					<section className="context-section">
 						<div className="context-section-title">
-							<span>Environment</span>
+							<span>环境与配置</span>
 						</div>
 						<div className="context-fact-list">
 							<div>
-								<span>Platform</span>
-								<strong>Desktop</strong>
+								<span>运行环境</span>
+								<strong>macOS 桌面端</strong>
 							</div>
 							<div>
-								<span>Mode</span>
-								<strong>{conversation?.instance.mode === "code" ? "Code" : "Work"}</strong>
+								<span>智能体模式</span>
+								<strong>
+									{conversation?.instance.mode === "code"
+										? "Code 编程模式"
+										: conversation?.instance.mode === "personal"
+											? "Personal 个人模式"
+											: "Chat 通用对话"}
+								</strong>
 							</div>
 							<div>
-								<span>Model</span>
-								<strong>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "Default"}</strong>
+								<span>主力模型</span>
+								<strong>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "默认主力模型"}</strong>
 							</div>
 							<div>
-								<span>Thinking</span>
-								<strong>{conversation?.state.thinkingLevel ?? "—"}</strong>
+								<span>思考深度</span>
+								<strong>{thinkingLevelLabel(conversation?.state.thinkingLevel)}</strong>
 							</div>
 						</div>
 					</section>
 
 					<section className="context-section">
 						<div className="context-section-title">
-							<span>Active Tools</span>
+							<span>活跃工具</span>
 							<span className="context-link" onClick={onShowTasks}>
-								Manage Tools <ChevronRight size={13} />
+								管理工具 <ChevronRight size={13} />
 							</span>
 						</div>
 						<div className="context-tool-list">
@@ -332,8 +338,8 @@ export function ContextPanel({
 
 					<section className="context-section">
 						<div className="context-section-title">
-							<span>Related Files</span>
-							<span className="context-link">{fileCount > 0 ? `Show All (${fileCount})` : "—"}</span>
+							<span>关联文件</span>
+							<span className="context-link">{fileCount > 0 ? `查看全部 (${fileCount})` : "—"}</span>
 						</div>
 						<div className="context-file-list">
 							{fileEntries.slice(0, 5).map((entry) => (
@@ -349,9 +355,9 @@ export function ContextPanel({
 
 					<section className="context-section">
 						<div className="context-section-title">
-							<span>Memory</span>
+							<span>会话记忆</span>
 							<span className="context-link">
-								{memoryEntries.length > 0 ? `Show All (${memoryEntries.length})` : "—"}
+								{memoryEntries.length > 0 ? `查看全部 (${memoryEntries.length})` : "—"}
 							</span>
 						</div>
 						<div className="context-memory-list">

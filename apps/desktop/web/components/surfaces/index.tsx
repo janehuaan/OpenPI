@@ -9,6 +9,7 @@ export { DeleteProjectDialog, type DeleteProjectTarget } from "./dialogs/delete-
 export { ConversationUiDialog } from "./dialogs/conversation-ui-dialog";
 export { CreateTaskDialog } from "./dialogs/create-task-dialog";
 export { QuickSaveMemoryDialog, type QuickSaveMemoryDialogProps } from "./dialogs/quick-save-memory-dialog";
+export { ShortcutsDialog, type ShortcutsDialogProps } from "./dialogs/shortcuts-dialog";
 
 // Panels
 export { ContextPanel, TokenCompositionBar, MetricCard } from "./panels/context-panel";

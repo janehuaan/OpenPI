@@ -45,7 +45,7 @@ export function ClaudeCodeRecapCard({
 			{recap && (
 				<div className="claude-recap-header">
 					<Sparkles size={12} className="claude-recap-icon" />
-					<span className="claude-recap-badge">Recap</span>
+					<span className="claude-recap-badge">本轮复盘</span>
 					<span className="claude-recap-text">{recap}</span>
 				</div>
 			)}

@@ -250,7 +250,10 @@ export async function getListeningPorts(specificPort?: number): Promise<PortEntr
 }
 
 export async function killProcess(pid: number, signal: "SIGTERM" | "SIGKILL" = "SIGKILL"): Promise<boolean> {
-	if (!pid || pid <= 1) throw new Error("Invalid or protected PID");
+	if (!pid || pid <= 1) throw new Error(`Invalid or protected PID: ${pid}`);
+	if (pid === process.pid || pid === process.ppid) {
+		throw new Error(`Refusing to terminate current process or parent process (PID ${pid})`);
+	}
 	process.kill(pid, signal);
 	return true;
 }

@@ -220,15 +220,16 @@ export function normalizeConversationModels(raw: unknown): ConversationModelOpti
 	return out;
 }
 
-export function thinkingLevelLabel(level: ThinkingLevel): string {
-	const labels: Record<ThinkingLevel, string> = {
-		off: "off",
-		minimal: "minimal",
-		low: "low",
-		medium: "medium",
-		high: "high",
-		xhigh: "xhigh",
-		max: "max",
+export function thinkingLevelLabel(level?: ThinkingLevel | string): string {
+	if (!level) return "—";
+	const labels: Record<string, string> = {
+		off: "关闭 (off)",
+		minimal: "极低 (minimal)",
+		low: "轻度 (low)",
+		medium: "标准 (medium)",
+		high: "深度 (high)",
+		xhigh: "极高 (xhigh)",
+		max: "最大 (max)",
 	};
 	return labels[level] ?? level;
 }
@@ -1067,8 +1068,17 @@ export function getRunningToolOutput(tool: RunningTool): string | undefined {
 	return undefined;
 }
 
-export const fmtTokens = (n: number): string =>
-	n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k` : String(n);
+export const fmtTokens = (n: number): string => {
+	if (n >= 1_000_000) {
+		const m = n / 1_000_000;
+		return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
+	}
+	if (n >= 1_000) {
+		const k = n / 1_000;
+		return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`;
+	}
+	return String(n);
+};
 
 export const fmtCost = (n: number): string => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
 

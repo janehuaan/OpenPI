@@ -6,15 +6,17 @@ export type KeybindingAction =
 	| "abort"
 	| "open_settings"
 	| "export_markdown"
-	| "toggle_git";
+	| "toggle_git"
+	| "open_shortcuts";
 
 export interface KeybindingHandlers {
 	onNewConversation?: () => void;
 	onToggleSidebar?: () => void;
-	onAbort?: () => void;
+	onAbort?: (source: "escape" | "cmd_dot") => void;
 	onOpenSettings?: () => void;
 	onExportMarkdown?: () => void;
 	onToggleGit?: () => void;
+	onOpenShortcuts?: () => void;
 	isWorking?: boolean;
 }
 
@@ -38,6 +40,11 @@ export function matchKeybinding(
 		// Cmd/Ctrl + Shift + G
 		if (event.shiftKey && key === "g") {
 			return "toggle_git";
+		}
+
+		// Cmd/Ctrl + / or Cmd/Ctrl + ?
+		if (key === "/" || key === "?") {
+			return "open_shortcuts";
 		}
 
 		// Non-shift combinations
@@ -89,9 +96,29 @@ export function handleKeybinding(
 			break;
 		case "abort":
 			if (handlers.onAbort) {
-				// Safety check: If Escape was pressed, do not abort if an interactive overlay (modal, popover, menu, file-picker) is active
-				if (event.key === "Escape") {
+				const isEscape = event.key === "Escape";
+				// Safety check: Never abort if user is composing with an IME (Chinese Pinyin, Japanese, etc.)
+				if (event.isComposing || (event as any).nativeEvent?.isComposing) {
+					return false;
+				}
+
+				// If Escape was pressed:
+				if (isEscape) {
 					if (event.defaultPrevented) return false;
+
+					// Never abort on Escape if focus is in an input, textarea, button, or contenteditable
+					const target = event.target as HTMLElement | null;
+					if (
+						target &&
+						(target.tagName === "INPUT" ||
+							target.tagName === "TEXTAREA" ||
+							target.isContentEditable ||
+							target.closest?.("input, textarea, [contenteditable='true'], select, button"))
+					) {
+						return false;
+					}
+
+					// Never abort if an interactive overlay (modal, popover, menu, file-picker) is active
 					if (typeof document !== "undefined") {
 						const hasOverlay = document.querySelector(
 							"[data-radix-popper-content-wrapper], .dialog-overlay, [role='dialog'], [role='menu'], .reference-slash-menu, .reference-file-picker, .model-popover",
@@ -100,7 +127,7 @@ export function handleKeybinding(
 					}
 				}
 				event.preventDefault();
-				handlers.onAbort();
+				handlers.onAbort(isEscape ? "escape" : "cmd_dot");
 				return true;
 			}
 			break;
@@ -122,6 +149,13 @@ export function handleKeybinding(
 			if (handlers.onToggleGit) {
 				event.preventDefault();
 				handlers.onToggleGit();
+				return true;
+			}
+			break;
+		case "open_shortcuts":
+			if (handlers.onOpenShortcuts) {
+				event.preventDefault();
+				handlers.onOpenShortcuts();
 				return true;
 			}
 			break;

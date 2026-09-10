@@ -466,7 +466,7 @@ export class Supervisor {
 	private saveRecords(): void {
 		// Write-then-rename so a crash mid-write cannot truncate the list.
 		const file = instancesPath();
-		const temp = `${file}.tmp`;
+		const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
 		writeFileSync(temp, JSON.stringify([...this.records.values()], null, 2), "utf8");
 		renameSync(temp, file);
 	}

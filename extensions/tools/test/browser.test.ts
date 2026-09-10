@@ -81,3 +81,27 @@ describe("resolveElementExpression", () => {
 		expect(expression).toContain("byText(document)");
 	});
 });
+
+describe("Browser Lifecycle & Teardown", () => {
+	it("registers session_shutdown listener and browser tool", async () => {
+		const { default: registerBrowser, shutdown } = await import("../src/browser.ts");
+		const listeners = new Map<string, Function>();
+		const registeredTools: any[] = [];
+		const mockPi: any = {
+			on: (event: string, handler: Function) => {
+				listeners.set(event, handler);
+			},
+			registerTool: (tool: any) => {
+				registeredTools.push(tool);
+			},
+		};
+
+		registerBrowser(mockPi);
+		expect(listeners.has("session_shutdown")).toBe(true);
+		expect(registeredTools.some((t) => t.name === "browser")).toBe(true);
+
+		// Verifying shutdown does not throw when no session is active
+		await expect(shutdown()).resolves.toBeUndefined();
+	});
+});
+

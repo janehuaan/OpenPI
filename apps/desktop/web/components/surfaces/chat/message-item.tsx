@@ -119,32 +119,60 @@ export function MessageItem({
 				</div>
 				<div className="message-stack">
 					<div className="message-body">
-						{calls.map((call, index) => (
-							<details className={`tool-trace ${message.isError ? "error" : ""}`} key={`${call.name}-${index}`}>
-								<summary>
-									<span>
-										<Wrench size={14} />
-										{call.name}
-									</span>
-									<span className="tool-trace-status">
-										{message.isError ? (
-											<>
-												<CircleStop size={13} className="trace-icon error" />
-												失败
-											</>
-										) : (
-											<>
-												<Check size={13} className="trace-icon ok" />
-												完成
-											</>
-										)}
-										<ChevronRight size={14} />
-									</span>
-								</summary>
-								{call.detail && <pre>{call.detail}</pre>}
-								{images.length > 0 && <MessageImages images={images} />}
-							</details>
-						))}
+						{calls.map((call, index) => {
+							const detailText = call.detail || "";
+							const foldedMatch = detailText.match(/~([0-9]+)\s+tokens\s+saved/);
+							const isAssertionBlocked = detailText.includes("[Assertion Gate]");
+							const isRollbackTriggered = detailText.includes("[Physical Rollback]");
+							const isSubagent = call.name === "subagent";
+
+							return (
+								<details className={`tool-trace ${message.isError ? "error" : ""}`} key={`${call.name}-${index}`}>
+									<summary>
+										<span className="flex items-center gap-1.5">
+											<Wrench size={14} />
+											{call.name}
+											{foldedMatch && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="输出已脱水提纯，防止上下文溢出">
+													⚡ 省 {foldedMatch[1]} Tokens
+												</span>
+											)}
+											{isAssertionBlocked && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20" title="底层物理门禁捕获异常并拦截">
+													🛡️ 物理门禁拦截
+												</span>
+											)}
+											{isRollbackTriggered && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="连续错误熔断，工作区已自动物理回滚">
+													⚓ 自动物理回滚
+												</span>
+											)}
+											{isSubagent && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20">
+													🤖 独立子任务
+												</span>
+											)}
+										</span>
+										<span className="tool-trace-status">
+											{message.isError ? (
+												<>
+													<CircleStop size={13} className="trace-icon error" />
+													失败
+												</>
+											) : (
+												<>
+													<Check size={13} className="trace-icon ok" />
+													完成
+												</>
+											)}
+											<ChevronRight size={14} />
+										</span>
+									</summary>
+									{call.detail && <pre>{call.detail}</pre>}
+									{images.length > 0 && <MessageImages images={images} />}
+								</details>
+							);
+						})}
 					</div>
 				</div>
 			</article>

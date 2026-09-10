@@ -365,7 +365,26 @@ export interface ModelProviderConfig {
 	api?: string;
 	headers?: Record<string, string>;
 	authHeader?: boolean;
+	contextWindow?: number;
 	models?: ModelDefinition[];
+}
+
+export interface ModelProbeResult {
+	modelId: string;
+	ok: boolean;
+	latencyMs: number;
+	contextWindow: number;
+	maxTokens: number;
+	reasoning: boolean;
+	input: string[];
+	error?: string;
+	probedAt: number;
+	details?: {
+		visionSupport: boolean;
+		detectedMaxTokens?: number;
+		detectedContext?: number;
+		reasoningTokensDetected?: boolean;
+	};
 }
 
 /** A single model from the pi.dev catalog (get_available_models), with cost metadata. */

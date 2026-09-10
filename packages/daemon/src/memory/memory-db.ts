@@ -67,6 +67,10 @@ export class MemoryDb {
 
 	private initSchema(): void {
 		this.db.exec(`
+			PRAGMA journal_mode = WAL;
+			PRAGMA synchronous = NORMAL;
+			PRAGMA busy_timeout = 5000;
+
 			CREATE TABLE IF NOT EXISTS stage1_outputs (
 				thread_id TEXT PRIMARY KEY,
 				source_updated_at INTEGER NOT NULL,

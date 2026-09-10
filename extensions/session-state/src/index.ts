@@ -16,7 +16,7 @@
 
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { uuidv7 } from "@earendil-works/pi-ai";
+import { randomUUID } from "node:crypto";
 import { buildCheckpointPrompt, checkpointFromSummary } from "./compaction.ts";
 import {
 	compactCheckpoint,
@@ -49,6 +49,11 @@ import {
 } from "./task-state.ts";
 import { ThrashingGuardrail } from "./guardrail.ts";
 import { pruneHistoricalToolOutputs } from "./context-pruner.ts";
+import { depoisonToolOutput } from "./active-depoisoner.ts";
+import { SyntaxAssertionGate } from "./syntax-assertion-gate.ts";
+import { createSnapshot, rollbackToSnapshot } from "./workspace-snapshot.ts";
+import { checkSecurityRisk } from "./security-guardrail.ts";
+import { assessAndBudgetMessages } from "./context-budget.ts";
 
 const StepSchema = Type.Object({
 	content: Type.String({ description: "What this step does" }),
@@ -103,6 +108,8 @@ export default function sessionStateExtension(pi: ExtensionAPI) {
 	const sessionStartedAt = new Map<string, number>();
 	const toolCallStartedAt = new Map<string, number>();
 	const guardrail = new ThrashingGuardrail({ maxConsecutiveFailures: 3 });
+	const syntaxGate = new SyntaxAssertionGate();
+	const activeWorkspaceSnapshots = new Map<string, string>();
 
 	pi.registerTool({
 		name: "task",
@@ -299,9 +306,26 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 
 		// Prune older historical tool outputs before model execution
 		const pruneResult = pruneHistoricalToolOutputs(event.messages as any[]);
-		const baseMessages = pruneResult.messages as typeof event.messages;
+		let baseMessages = pruneResult.messages as typeof event.messages;
 
-		if (additions.length === 0 && pruneResult.foldedCount === 0) return;
+		// Assess Token Budget & Trigger Micro-Compaction if near context limit
+		const modelContextWindow = ctx.model?.contextWindow;
+		const budget = assessAndBudgetMessages(baseMessages, modelContextWindow);
+		if (budget.warning) {
+			pi.appendEntry("openpi:context-budget-alert", {
+				estimatedTokens: budget.estimatedTokens,
+				contextWindow: budget.contextWindow,
+				ratio: budget.ratio,
+				compacted: budget.compacted,
+				foldedTurns: budget.foldedTurns,
+				at: new Date().toISOString(),
+			});
+		}
+		if (budget.compacted && budget.messages) {
+			baseMessages = budget.messages as typeof event.messages;
+		}
+
+		if (additions.length === 0 && pruneResult.foldedCount === 0 && !budget.compacted) return;
 
 		if (additions.length === 0) {
 			return { messages: baseMessages };
@@ -351,7 +375,7 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 						},
 					],
 				},
-				{ maxTokens: 8192, signal, cacheRetention: "none", sessionId: uuidv7() },
+				{ maxTokens: 8192, signal, cacheRetention: "none", sessionId: randomUUID() },
 			);
 
 			const text = response.content
@@ -414,6 +438,12 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 		sessionStartedAt.set(sessionId, Date.now());
 		appendEvent(ctx.cwd, sessionStartEvent(sessionId, ctx.cwd, ctx.model?.id));
 
+		// Take initial workspace snapshot
+		const snap = createSnapshot(ctx.cwd, `session-start-${sessionId.slice(0, 8)}`);
+		if (snap) {
+			activeWorkspaceSnapshots.set(sessionId, snap.id);
+		}
+
 		// Surface resumable state so the desktop can show it before the first turn.
 		const task = loadTaskState(ctx.cwd, sessionId);
 		const checkpoint = loadCheckpoint(ctx.cwd, sessionId);
@@ -436,19 +466,50 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		const sessionId = ctx.sessionManager.getSessionId();
 		toolCallStartedAt.set(event.toolCallId, Date.now());
-		appendEvent(ctx.cwd, toolCallEvent(ctx.sessionManager.getSessionId(), event.toolName, event.input));
-		const check = guardrail.checkToolCall(event.toolName, event.input);
-		if (check.block) {
-			pi.appendEntry("openpi:guardrail-trigger", {
+		appendEvent(ctx.cwd, toolCallEvent(sessionId, event.toolName, event.input));
+
+		// Security Command Guardrail: intercept destructive system/disk/root commands
+		const security = checkSecurityRisk(event.toolName, event.input);
+		if (security.block && security.reason) {
+			pi.appendEntry("openpi:security-guardrail-trigger", {
 				toolName: event.toolName,
-				failures: check.consecutiveFailures,
-				reason: check.reason,
+				category: security.category,
+				command: security.command,
+				reason: security.reason,
 				at: new Date().toISOString(),
 			});
 			return {
 				block: true,
-				reason: check.reason,
+				reason: security.reason,
+			};
+		}
+
+		syntaxGate.capturePreTool(event.toolName, event.input, ctx.cwd);
+		const check = guardrail.checkToolCall(event.toolName, event.input);
+		if (check.block) {
+			// Trigger physical rollback if a workspace snapshot anchor exists
+			let rollbackNotice = "";
+			const anchorCommit = activeWorkspaceSnapshots.get(sessionId);
+			if (anchorCommit) {
+				const rb = rollbackToSnapshot(ctx.cwd, anchorCommit);
+				if (rb.restored) {
+					rollbackNotice = "\n[Physical Rollback]: Workspace has been automatically reverted to clean anchor state to prevent corruption. Your current strategy is deadlocked. You MUST discard your current approach and attempt an entirely different solution.";
+				}
+			}
+
+			const fullReason = `${check.reason}${rollbackNotice}`;
+			pi.appendEntry("openpi:guardrail-trigger", {
+				toolName: event.toolName,
+				failures: check.consecutiveFailures,
+				reason: fullReason,
+				rolledBack: Boolean(rollbackNotice),
+				at: new Date().toISOString(),
+			});
+			return {
+				block: true,
+				reason: fullReason,
 			};
 		}
 	});
@@ -456,14 +517,52 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 	pi.on("tool_result", async (event, ctx) => {
 		const startedAt = toolCallStartedAt.get(event.toolCallId);
 		toolCallStartedAt.delete(event.toolCallId);
-		const errorText = event.isError
-			? event.content
+
+		// 1. Physical Syntax & Mutation Assertion Gate
+		const assertion = syntaxGate.verifyPostTool(event.toolName, event.input, ctx.cwd, Boolean(event.isError));
+		let effectiveContent = event.content;
+		let effectiveIsError = Boolean(event.isError);
+
+		if (!assertion.passed && assertion.message) {
+			effectiveIsError = true;
+			effectiveContent = [{ type: "text", text: assertion.message }];
+			pi.appendEntry("openpi:assertion-gate-trigger", {
+				toolName: event.toolName,
+				message: assertion.message,
+				at: new Date().toISOString(),
+			});
+		} else {
+			// 2. Active Stream De-poisoner & Error Extractor
+			let hasDepoisoned = false;
+			effectiveContent = event.content.map((part) => {
+				if (part.type === "text" && typeof part.text === "string") {
+					const res = depoisonToolOutput(part.text, event.toolName, effectiveIsError);
+					if (res.depoisoned) {
+						hasDepoisoned = true;
+						return { type: "text", text: res.text };
+					}
+				}
+				return part;
+			});
+
+			if (hasDepoisoned) {
+				pi.appendEntry("openpi:depoisoner-trigger", {
+					toolName: event.toolName,
+					isError: effectiveIsError,
+					at: new Date().toISOString(),
+				});
+			}
+		}
+
+		const errorText = effectiveIsError
+			? effectiveContent
 					.filter((part): part is { type: "text"; text: string } => part.type === "text")
 					.map((part) => part.text)
 					.join("\n")
 			: undefined;
-		guardrail.recordToolResult(event.toolName, event.input, Boolean(event.isError), errorText);
-		const resultBytes = event.content.reduce(
+		guardrail.recordToolResult(event.toolName, event.input, effectiveIsError, errorText);
+
+		const resultBytes = effectiveContent.reduce(
 			(total, part) => total + (part.type === "text" ? part.text.length : 0),
 			0,
 		);
@@ -471,10 +570,18 @@ attach evidence (a command that passed, files changed) rather than asserting suc
 			ctx.cwd,
 			toolResultEvent(ctx.sessionManager.getSessionId(), event.toolName, {
 				durationMs: startedAt ? Date.now() - startedAt : undefined,
-				isError: event.isError,
+				isError: effectiveIsError,
 				resultBytes,
 			}),
 		);
+
+		// Return modified payload if assertion tripped or content was depoisoned
+		if (effectiveIsError !== Boolean(event.isError) || effectiveContent !== event.content) {
+			return {
+				content: effectiveContent,
+				isError: effectiveIsError,
+			};
+		}
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {

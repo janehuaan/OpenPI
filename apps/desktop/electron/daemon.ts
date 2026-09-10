@@ -162,7 +162,7 @@ export function currentClient(): DaemonClient | undefined {
  */
 export async function requestDaemon(
 	request: ClientRequestInput,
-	retries = 3,
+	retries = 5,
 ): Promise<unknown> {
 	let delay = 350;
 	for (let attempt = 0; attempt <= retries; attempt++) {

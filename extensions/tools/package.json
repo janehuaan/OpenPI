@@ -1,6 +1,6 @@
 {
   "name": "@openpi/extension-tools",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Zero-dependency personal-agent toolbelt: web search/fetch, code search, knowledge base, session tasks, browser, GitHub, feeds",

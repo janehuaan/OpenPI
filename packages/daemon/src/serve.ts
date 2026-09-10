@@ -265,13 +265,24 @@ export async function serve(): Promise<void> {
 			case "rename_session":
 				return supervisor.rename(request.sessionId, request.name);
 			case "subscribe": {
+				if (!connection.subscriptions) connection.subscriptions = new Map();
+				const existing = connection.subscriptions.get(request.sessionId);
+				if (existing) {
+					existing();
+					connection.cleanups.delete(existing);
+				}
 				const unsubscribe = supervisor.subscribe(request.sessionId, (sessionId, event) => {
 					connection.pushEvent(sessionId, event);
 				});
+				connection.subscriptions.set(request.sessionId, unsubscribe);
 				connection.cleanups.add(unsubscribe);
 				return { subscribed: request.sessionId };
 			}
 			case "unsubscribe":
+				if (connection.subscriptions) {
+					for (const unsub of connection.subscriptions.values()) unsub();
+					connection.subscriptions.clear();
+				}
 				for (const cleanup of connection.cleanups) cleanup();
 				connection.cleanups.clear();
 				return { ok: true };

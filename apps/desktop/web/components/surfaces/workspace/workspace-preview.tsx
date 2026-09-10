@@ -128,6 +128,7 @@ import {
 	Github,
 	History,
 	Image as ImageIcon,
+	Keyboard,
 	ListTodo,
 	LogIn,
 	Menu,
@@ -146,6 +147,7 @@ import {
 	Plus,
 	Quote,
 	RefreshCw,
+	RotateCcw,
 	Save,
 	Search,
 	Send,
@@ -186,6 +188,16 @@ function shortModelName(name: string): string {
 function hasVisionContext(content: unknown): boolean {
 	return contentText(content).includes("<openpi-vision-context");
 }
+
+const THINKING_SHORT_ZH: Record<string, string> = {
+	off: "关闭",
+	minimal: "极低",
+	low: "轻度",
+	medium: "标准",
+	high: "深度",
+	xhigh: "极高",
+	max: "最大",
+};
 
 export function ReferenceWorkspacePreview({
 	projectInstances,
@@ -239,6 +251,7 @@ export function ReferenceWorkspacePreview({
 	prefillDraft,
 	activeView,
 	customContent,
+	onOpenShortcuts,
 }: {
 	projectInstances: AgentInstance[];
 	chatInstances: AgentInstance[];
@@ -291,6 +304,7 @@ export function ReferenceWorkspacePreview({
 	prefillDraft?: { id: string; text: string; images?: string[] };
 	activeView?: string;
 	customContent?: ReactNode;
+	onOpenShortcuts?: () => void;
 }) {
 	const initialKey = selectedInstanceId ?? "__new_draft__";
 	const [draft, setDraft] = useState(() => draftStore.getDraft(initialKey)?.text ?? "");
@@ -376,6 +390,15 @@ export function ReferenceWorkspacePreview({
 		}
 	}, [prefillDraft]);
 	const [attachmentNotice, setAttachmentNotice] = useState<string>();
+
+	useEffect(() => {
+		if (!attachmentNotice) return;
+		const timer = setTimeout(() => {
+			setAttachmentNotice(undefined);
+		}, 4000);
+		return () => clearTimeout(timer);
+	}, [attachmentNotice]);
+
 	const [contextPickerOpen, setContextPickerOpen] = useState(false);
 	const [modelMenuOpen, setModelMenuOpen] = useState(false);
 	const [slashOpen, setSlashOpen] = useState(false);
@@ -445,6 +468,22 @@ export function ReferenceWorkspacePreview({
 	const storedMessages = conversation?.messages ?? [];
 	const messages = optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
 	const isWorking = Boolean(conversation?.state.isStreaming || sending || optimisticMessage || runningTools.length > 0);
+
+	const workingStartedAtRef = useRef<number>(0);
+	useEffect(() => {
+		if (isWorking) {
+			workingStartedAtRef.current = Date.now();
+		}
+	}, [isWorking]);
+
+	const handleSafeAbort = useCallback(() => {
+		// Prevent accidental misfires: ignore abort clicks within 800ms of generation start
+		if (Date.now() - workingStartedAtRef.current < 800) {
+			console.warn("[WorkspacePreview] Ignored rapid abort click within 800ms grace period");
+			return;
+		}
+		onAbort();
+	}, [onAbort]);
 	const topSuggestion = useMemo(() => extractLatestSuggestions(messages, todoState)[0], [messages, todoState]);
 
 	const feedItems = useMemo(() => {
@@ -1259,6 +1298,8 @@ export function ReferenceWorkspacePreview({
 			setSlashOpen(false);
 			return;
 		}
+		(document.activeElement as HTMLElement)?.blur();
+		draftInput.current?.focus();
 		await onSend(message, attachments, documents);
 		draftStore.clearDraft(activeKey);
 		setDraft("");
@@ -1380,7 +1421,7 @@ export function ReferenceWorkspacePreview({
 					</div>
 
 					<div className="reference-label">
-						<span>Projects</span>
+						<span>项目工程</span>
 						<div className="reference-section-actions">
 							<button type="button" title="选择项目" aria-label="选择项目" onClick={() => void selectProject()}>
 								<FolderPlus size={14} />
@@ -1544,7 +1585,7 @@ export function ReferenceWorkspacePreview({
 						</button>
 					)}
 					<div className="reference-label recent">
-						<span>Chats</span>
+						<span>最近会话</span>
 						<span className="reference-label-count">({filteredChats.length})</span>
 						<button
 							type="button"
@@ -1797,7 +1838,10 @@ export function ReferenceWorkspacePreview({
 									<button
 										type="button"
 										className="reference-draft-chip"
-										onClick={() => setDraft("帮我检查当前项目的代码结构并提出优化建议")}
+										onClick={() => {
+											setDraft("帮我检查当前项目的代码结构并提出优化建议");
+											draftInput.current?.focus();
+										}}
 									>
 										<span className="reference-chip-icon">🔍</span>
 										<span>审查项目架构</span>
@@ -1805,7 +1849,10 @@ export function ReferenceWorkspacePreview({
 									<button
 										type="button"
 										className="reference-draft-chip"
-										onClick={() => setDraft("编写一个单元测试来覆盖核心逻辑")}
+										onClick={() => {
+											setDraft("编写一个单元测试来覆盖核心逻辑");
+											draftInput.current?.focus();
+										}}
 									>
 										<span className="reference-chip-icon">🧪</span>
 										<span>编写单元测试</span>
@@ -1813,7 +1860,10 @@ export function ReferenceWorkspacePreview({
 									<button
 										type="button"
 										className="reference-draft-chip"
-										onClick={() => setDraft("解释当前项目的构建与打包配置流程")}
+										onClick={() => {
+											setDraft("解释当前项目的构建与打包配置流程");
+											draftInput.current?.focus();
+										}}
 									>
 										<span className="reference-chip-icon">📦</span>
 										<span>构建与打包解析</span>
@@ -1960,9 +2010,33 @@ export function ReferenceWorkspacePreview({
 													<div className="reference-aborted-notice">
 														<span className="aborted-dot" />
 														<span>生成已终止</span>
+														{item.isLatestAssistant && lastUserPrompt && !isWorking && (
+															<button
+																type="button"
+																className="reference-inline-retry-btn"
+																onClick={() => void onSend(lastUserPrompt, [], [])}
+																title="重新运行当前提问"
+															>
+																<RotateCcw size={11} />
+																<span>重试</span>
+															</button>
+														)}
 													</div>
 												) : (
-													<div className="reference-error-box">{item.message.errorMessage}</div>
+													<div className="reference-error-box">
+														<div className="reference-error-text">{item.message.errorMessage}</div>
+														{item.isLatestAssistant && lastUserPrompt && !isWorking && (
+															<button
+																type="button"
+																className="reference-error-retry-btn"
+																onClick={() => void onSend(lastUserPrompt, [], [])}
+																title="重新尝试请求"
+															>
+																<RotateCcw size={11} />
+																<span>重试</span>
+															</button>
+														)}
+													</div>
 												)
 											)}
 											{text && !isWorking && (
@@ -2177,7 +2251,7 @@ export function ReferenceWorkspacePreview({
 											<>
 												<span className="reference-model-sep">·</span>
 												<span className="reference-model-thinking">
-													{conversation.state.thinkingLevel}
+													{THINKING_SHORT_ZH[conversation.state.thinkingLevel] ?? conversation.state.thinkingLevel}思考
 												</span>
 											</>
 										)}
@@ -2204,7 +2278,7 @@ export function ReferenceWorkspacePreview({
 															onThinkingLevelChange(level);
 														}}
 													>
-														{level}
+														{THINKING_SHORT_ZH[level] ?? level}
 													</button>
 												))}
 											</div>
@@ -2212,7 +2286,7 @@ export function ReferenceWorkspacePreview({
 									)}
 									<div className="model-popover-section">
 										<span className="model-popover-label">模型</span>
-										<Command label="Select model" loop>
+										<Command label="选择模型" loop>
 											<CommandInput placeholder="搜索模型" />
 											<CommandList>
 												<CommandEmpty>没有匹配的模型</CommandEmpty>
@@ -2318,10 +2392,11 @@ export function ReferenceWorkspacePreview({
 									) : null}
 									<button
 										type="button"
+										tabIndex={-1}
 										className="reference-send working"
 										title="停止生成"
 										aria-label="停止生成"
-										onClick={onAbort}
+										onClick={handleSafeAbort}
 									>
 										<Square size={13} fill="currentColor" />
 									</button>
@@ -2370,8 +2445,18 @@ export function ReferenceWorkspacePreview({
 			{!customContent && (
 			<aside className="reference-context">
 				<header>
-					<strong>Context</strong>
+					<strong>会话上下文</strong>
 					<span>
+						{onOpenShortcuts && (
+							<button
+								type="button"
+								title="快捷键指南 (⌘/)"
+								aria-label="快捷键指南"
+								onClick={onOpenShortcuts}
+							>
+								<Keyboard size={14} />
+							</button>
+						)}
 						<Pin size={14} />
 						<button
 							type="button"
@@ -2383,14 +2468,14 @@ export function ReferenceWorkspacePreview({
 						</button>
 					</span>
 				</header>
-				<ReferenceContextCard title="Workspace">
+				<ReferenceContextCard title="工作空间">
 					<div className="reference-context-workspace">
 						<span className="reference-title-folder">
 							<Folder size={22} />
 						</span>
 						<div>
-							<strong>{workspace?.split(/[\\/]/).filter(Boolean).at(-1) ?? "No workspace"}</strong>
-							<small>{workspace ? shortWorkspacePath(workspace) : "Select a conversation"}</small>
+							<strong>{workspace?.split(/[\\/]/).filter(Boolean).at(-1) ?? "未选工作区"}</strong>
+							<small>{workspace ? shortWorkspacePath(workspace) : "选择会话后显示"}</small>
 						</div>
 					</div>
 					<div className="reference-context-counts">
@@ -2400,25 +2485,38 @@ export function ReferenceWorkspacePreview({
 									? `${workspaceSummary.fileCount}${workspaceSummary.truncated ? "+" : ""}`
 									: "--"}
 							</strong>
-							<span>Files</span>
+							<span>文件数</span>
 						</div>
 						<div>
-							<strong style={{ textTransform: "capitalize" }}>{conversation?.instance.mode || "Work"}</strong>
-							<span>Mode</span>
+							<strong style={{ textTransform: "capitalize" }}>
+								{conversation?.instance.mode === "code"
+									? "编程"
+									: conversation?.instance.mode === "personal"
+										? "个人"
+										: "通用"}
+							</strong>
+							<span>模式</span>
 						</div>
 						<div>
 							<strong>{memoryCount}</strong>
-							<span>Memories</span>
+							<span>记忆条目</span>
 						</div>
 					</div>
 				</ReferenceContextCard>
-				<ReferenceContextCard title="Environment">
+				<ReferenceContextCard title="环境与配置">
 					<div className="reference-environment">
 						<span>
-							Agent <strong style={{ textTransform: "capitalize" }}>{conversation?.instance.mode ?? "--"}</strong>
+							运行模式{" "}
+							<strong>
+								{conversation?.instance.mode === "code"
+									? "Code 编程"
+									: conversation?.instance.mode === "personal"
+										? "Personal 个人"
+										: "Chat 通用"}
+							</strong>
 						</span>
 						<span>
-							Model <strong>{currentModel?.name ?? conversation?.state.model?.name ?? conversation?.state.model?.id ?? "--"}</strong>
+							主力模型 <strong>{currentModel?.name ?? conversation?.state.model?.name ?? conversation?.state.model?.id ?? "--"}</strong>
 						</span>
 						<span>
 							上下文窗口 <strong>{contextWindow > 0 ? fmtTokens(contextWindow) : "--"}</strong>
@@ -2429,12 +2527,12 @@ export function ReferenceWorkspacePreview({
 							</span>
 						)}
 						<span>
-							Session <strong>{conversation?.state.sessionId.slice(0, 8) ?? "--"}</strong>
+							会话 ID <strong>{conversation?.state.sessionId.slice(0, 8) ?? "--"}</strong>
 						</span>
 						<span>
-							Status{" "}
+							运行状态{" "}
 							<strong className={`ref-status-indicator ${conversation?.state.isStreaming ? "working" : "idle"}`}>
-								<span className="ref-status-dot" /> {conversation?.state.isStreaming ? "Working" : "Idle"}
+								<span className="ref-status-dot" /> {conversation?.state.isStreaming ? "运行中" : "空闲就绪"}
 							</strong>
 						</span>
 					</div>
@@ -2497,17 +2595,17 @@ export function ReferenceWorkspacePreview({
 					)}
 				</ReferenceContextCard>
 				{runningTools.length > 0 && (
-					<ReferenceContextCard title="Running Tools">
+					<ReferenceContextCard title="运行中工具">
 						<div className="reference-tool-list">
 							{runningTools.map((tool, idx) => (
 								<span key={`${tool.toolCallId || "tool"}-${idx}`}>
-									<Terminal size={14} /> {tool.toolName} <em>Running</em>
+									<Terminal size={14} /> {tool.toolName} <em>运行中</em>
 								</span>
 							))}
 						</div>
 					</ReferenceContextCard>
 				)}
-				<ReferenceContextCard title="Related Files">
+				<ReferenceContextCard title="关联文件">
 					<div className="reference-file-list">
 						{relatedFiles.slice(0, showAllFiles ? relatedFiles.length : 5).map((file) => {
 							const basename = file.split(/[\\/]/).pop() ?? file;
@@ -2547,15 +2645,15 @@ export function ReferenceWorkspacePreview({
 							className="reference-context-link"
 							onClick={() => setShowAllFiles((value) => !value)}
 						>
-							{showAllFiles ? "收起 (Show Less)" : `显示全部 (${relatedFiles.length})`}
+							{showAllFiles ? "收起列表" : `显示全部 (${relatedFiles.length})`}
 						</button>
 					)}
 				</ReferenceContextCard>
-				<ReferenceContextCard title="Memory">
+				<ReferenceContextCard title="长期记忆">
 					<label className="reference-memory-search">
 						<Search size={12} />
 						<input
-							placeholder="Search memory"
+							placeholder="搜索记忆条目…"
 							value={memoryQuery ?? ""}
 							onChange={(event) => setMemoryQuery(event.target.value)}
 						/>
@@ -2566,7 +2664,7 @@ export function ReferenceWorkspacePreview({
 						))}
 					</div>
 					<button type="button" className="reference-context-link">
-						Show All ({memoryCount})
+						查看全部记忆 ({memoryCount})
 					</button>
 				</ReferenceContextCard>
 				{gitStatus?.isRepo && (
