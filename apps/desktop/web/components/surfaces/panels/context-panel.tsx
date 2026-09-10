@@ -4,11 +4,13 @@ import {
 	FileText,
 	Folder,
 	GitBranch,
+	Layers,
 	ListTodo,
 	Terminal,
 	Wrench,
 	X,
-} from "../../icons.tsx";
+} from "../../icons";
+import { SymbolGraphPanel } from "./symbol-graph-panel";
 import { fmtTokens, shortWorkspacePath, thinkingLevelLabel } from "../../../lib/helpers";
 import type {
 	ConversationCapabilities,
@@ -83,11 +85,12 @@ export function MetricCard({ label, value, unit }: { label: string; value: strin
 	);
 }
 
-type ContextTab = "overview" | "files" | "changes" | "terminal";
+type ContextTab = "overview" | "files" | "symbols" | "changes" | "terminal";
 
 const CONTEXT_TABS: Array<{ id: ContextTab; label: string; icon: typeof ListTodo }> = [
 	{ id: "overview", label: "概览", icon: ListTodo },
 	{ id: "files", label: "文件", icon: FileText },
+	{ id: "symbols", label: "符号图谱", icon: Layers },
 	{ id: "changes", label: "改动", icon: GitBranch },
 	{ id: "terminal", label: "终端", icon: Terminal },
 ];
@@ -410,6 +413,10 @@ export function ContextPanel({
 						</div>
 					)}
 				</section>
+			)}
+
+			{tab === "symbols" && (
+				<SymbolGraphPanel cwd={conversation?.instance.cwd} />
 			)}
 
 			{tab === "changes" && (

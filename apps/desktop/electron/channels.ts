@@ -87,6 +87,7 @@ export const INVOKE_CHANNELS = [
 	"update_app_settings",
 	"git_status",
 	"git_diff",
+	"apply_diff_hunks",
 	"git_stage",
 	"git_unstage",
 	"git_discard",
@@ -109,6 +110,8 @@ export const INVOKE_CHANNELS = [
 	"toggle_hud_window",
 	"probe_model_capabilities",
 	"batch_probe_provider_models",
+	"search_code_symbols",
+	"get_symbol_references",
 ] as const;
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number];

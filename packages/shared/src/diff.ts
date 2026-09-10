@@ -35,7 +35,6 @@ export function parseDiffLines(rawText: string): { lines: DiffLine[]; adds: numb
 
 	for (const raw of rawLines) {
 		if (raw.startsWith("@@") && raw.includes("@@")) {
-			// e.g. @@ -12,4 +12,6 @@
 			const match = raw.match(/@@\s*-(\d+)(?:,\d+)?\s*\+(\d+)(?:,\d+)?\s*@@/);
 			if (match && match[1] && match[2]) {
 				oldCur = parseInt(match[1], 10);
@@ -138,7 +137,6 @@ export function parseDiffHunks(rawText: string): ParsedDiff {
 			headers.push(raw);
 		} else {
 			if (!currentHunk) {
-				// Naive diff without @@ line - create synthetic first hunk
 				hunkCounter++;
 				currentHunk = {
 					id: `hunk-${hunkCounter}-1-1`,
@@ -189,11 +187,6 @@ export function parseDiffHunks(rawText: string): ParsedDiff {
 	return { headers, hunks, totalAdds, totalDels };
 }
 
-/**
- * Surgically applies only accepted hunks to the original file source.
- * Rejected hunks are discarded (original lines kept).
- * Applying bottom-up prevents line index drift across multiple hunks.
- */
 export function applyHunksToSource(
 	sourceText: string,
 	hunks: DiffHunk[],
@@ -202,7 +195,6 @@ export function applyHunksToSource(
 	let appliedCount = 0;
 	let rejectedCount = 0;
 
-	// Sort hunks bottom-to-top by oldStart so replacements don't shift earlier line indices
 	const sortedHunks = [...hunks].sort((a, b) => b.oldStart - a.oldStart);
 
 	for (const hunk of sortedHunks) {
@@ -212,7 +204,6 @@ export function applyHunksToSource(
 		}
 
 		appliedCount++;
-		// Extract expected original lines (del + ctx) from hunk
 		const originalExpected: string[] = [];
 		const replacementLines: string[] = [];
 
@@ -231,10 +222,8 @@ export function applyHunksToSource(
 			}
 		}
 
-		// Find best target index around hunk.oldStart (1-based)
 		let targetIdx = Math.max(0, hunk.oldStart - 1);
 
-		// Fuzzy match if line numbers drifted slightly (+/- 15 lines)
 		if (originalExpected.length > 0 && targetIdx < lines.length) {
 			const expectedFirst = originalExpected[0];
 			if (lines[targetIdx] !== expectedFirst) {

@@ -1,6 +1,6 @@
 {
   "name": "@openpi/extension-tools",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Zero-dependency personal-agent toolbelt: web search/fetch, code search, knowledge base, session tasks, browser, GitHub, feeds",
@@ -20,7 +20,8 @@
       "./src/browser.ts",
       "./src/github.ts",
       "./src/auto-summary.ts",
-      "./src/system.ts"
+      "./src/system.ts",
+      "./src/code-symbols.ts"
     ],
     "skills": [
       "./skills"
@@ -33,6 +34,7 @@
     }
   },
   "dependencies": {
+    "@openpi/shared": "workspace:*",
     "typebox": "1.3.7"
   },
   "peerDependencies": {

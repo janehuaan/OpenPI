@@ -7,25 +7,29 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 import { type BrowserWindow, dialog, type IpcMain, Notification, shell } from "electron";
-import type {
-	AppOp,
-	ClientRequestInput,
-	CreateTaskInput,
-	CreateVideoInput,
-	GenerateImageInput,
-	HealthInfo,
-	MemoryScope,
-	PiRpcCommand,
-	SessionInfo,
-	SessionMode,
-	TaskWithRuns,
-	UserProfile,
+import {
+	type AppOp,
+	applyHunksToSource,
+	type ClientRequestInput,
+	type CreateTaskInput,
+	type CreateVideoInput,
+	type DiffHunk,
+	type GenerateImageInput,
+	type HealthInfo,
+	type MemoryScope,
+	type PiRpcCommand,
+	type SessionInfo,
+	type SessionMode,
+	type TaskWithRuns,
+	type UserProfile,
+	WorkspaceSymbolIndexer,
+	type SymbolKind,
 } from "@openpi/shared";
 import { agentDir, defaultWorkspace, sessionsDir } from "@openpi/daemon";
 import { eventChannelName, invokeChannelName, type EventChannel, type InvokeChannel } from "./channels.ts";
@@ -2285,6 +2289,39 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			}
 		},
 
+		apply_diff_hunks: async ({
+			cwd,
+			filename,
+			hunks,
+		}: {
+			cwd?: string;
+			filename: string;
+			hunks: DiffHunk[];
+		}) => {
+			const targetCwd = cwd || defaultWorkspace();
+			const filePath = isAbsolute(filename) ? filename : join(targetCwd, filename);
+			if (!existsSync(filePath)) {
+				return { success: false, error: `目标文件不存在: ${filePath}` };
+			}
+			try {
+				const originalContent = readFileSync(filePath, "utf8");
+				// Create safety backup file
+				const backupPath = `${filePath}.bak`;
+				writeFileSync(backupPath, originalContent, "utf8");
+
+				const { result, appliedCount, rejectedCount } = applyHunksToSource(originalContent, hunks);
+				writeFileSync(filePath, result, "utf8");
+				return {
+					success: true,
+					appliedCount,
+					rejectedCount,
+					backupPath,
+				};
+			} catch (err: any) {
+				return { success: false, error: err?.message || String(err) };
+			}
+		},
+
 		git_stage: async ({
 			cwd,
 			paths,
@@ -2532,6 +2569,47 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 
 		toggle_hud_window: async () => {
 			return toggleHudWindow(getWindow);
+		},
+
+		search_code_symbols: async ({
+			cwd,
+			query,
+			kind,
+			limit,
+		}: {
+			cwd?: string;
+			query: string;
+			kind?: SymbolKind;
+			limit?: number;
+		}) => {
+			const targetCwd = cwd || defaultWorkspace();
+			const indexer = new WorkspaceSymbolIndexer(targetCwd);
+			indexer.scanWorkspace(1500);
+			const symbols = indexer.search(query || "", { kind, limit: limit ?? 40 });
+			return {
+				symbols,
+				totalCount: symbols.length,
+				totalIndexed: indexer.symbolCount,
+				filesIndexed: indexer.fileCount,
+			};
+		},
+
+		get_symbol_references: async ({
+			cwd,
+			symbol,
+		}: {
+			cwd?: string;
+			symbol: string;
+		}) => {
+			const targetCwd = cwd || defaultWorkspace();
+			const indexer = new WorkspaceSymbolIndexer(targetCwd);
+			indexer.scanWorkspace(1500);
+			const references = indexer.findReferences(symbol || "");
+			return {
+				symbol,
+				references,
+				count: references.length,
+			};
 		},
 	};
 

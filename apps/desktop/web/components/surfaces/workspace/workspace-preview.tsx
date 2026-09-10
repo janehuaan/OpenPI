@@ -97,6 +97,10 @@ import type {
 	WorkspaceSummary,
 } from "../../../types";
 import { MiniDiffView } from "../../diff-viewer";
+import { LivePreviewPanel } from "./live-preview-panel";
+import { SwarmCanvas } from "./swarm-canvas";
+import { extractSwarmFromMessages } from "../../../lib/swarm-types";
+import { SymbolGraphPanel } from "../panels/symbol-graph-panel";
 import {
 	ArrowDown,
 	ArrowLeft,
@@ -126,6 +130,7 @@ import {
 	FolderPlus,
 	GitBranch,
 	Github,
+	Globe,
 	History,
 	Image as ImageIcon,
 	Keyboard,
@@ -161,10 +166,11 @@ import {
 	TerminalSquare,
 	Trash2,
 	UserRound,
+	Users,
 	WandSparkles,
 	Wrench,
 	X,
-} from "../../icons.tsx";
+} from "../../icons";
 import { ClaudeCodeRecapCard } from "../../recap-card";
 import { TodoPanel } from "../../todo-panel";
 import type { TodoState, GitStatusResult } from "../../../types";
@@ -366,6 +372,25 @@ export function ReferenceWorkspacePreview({
 		};
 	}, []);
 
+	const [livePreviewOpen, setLivePreviewOpen] = useState(false);
+	const [swarmCanvasOpen, setSwarmCanvasOpen] = useState(false);
+
+	const detectedHtml = useMemo(() => {
+		const msgs = conversation?.messages ?? [];
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const msg = msgs[i];
+			if (msg?.role === "assistant") {
+				const text = visibleMessageText(contentText(msg.content));
+				const htmlMatch = text.match(/```(?:html|xml|svg)\s*([\s\S]*?)```/i);
+				if (htmlMatch?.[1]) return htmlMatch[1];
+				if (text.includes("<!DOCTYPE html>") || (text.includes("<html") && text.includes("</html>"))) {
+					return text;
+				}
+			}
+		}
+		return undefined;
+	}, [conversation?.messages]);
+
 	useEffect(() => {
 		if (prefillDraft) {
 			if (prefillDraft.text) {
@@ -468,6 +493,15 @@ export function ReferenceWorkspacePreview({
 	const storedMessages = conversation?.messages ?? [];
 	const messages = optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
 	const isWorking = Boolean(conversation?.state.isStreaming || sending || optimisticMessage || runningTools.length > 0);
+
+	const currentModelName = conversation?.state.model?.name || conversation?.state.model?.id;
+	const swarmWorkflow = useMemo(() => {
+		return extractSwarmFromMessages(
+			messages,
+			currentModelName,
+			isWorking,
+		);
+	}, [messages, currentModelName, isWorking]);
 
 	const workingStartedAtRef = useRef<number>(0);
 	useEffect(() => {
@@ -1764,6 +1798,24 @@ export function ReferenceWorkspacePreview({
 						</button>
 						<button
 							type="button"
+							className={`reference-header-icon-btn ${livePreviewOpen ? "active" : ""}`}
+							title={livePreviewOpen ? "隐藏实时预览沙箱" : "打开实时预览沙箱 (HTML/Web)"}
+							aria-label="切换实时预览沙箱"
+							onClick={() => setLivePreviewOpen((prev) => !prev)}
+						>
+							<Globe size={16} />
+						</button>
+						<button
+							type="button"
+							className={`reference-header-icon-btn ${swarmCanvasOpen ? "active" : ""}`}
+							title={swarmCanvasOpen ? "隐藏多智能体协同泳道" : "打开多智能体协同泳道 (Swarm Canvas)"}
+							aria-label="切换多智能体协同泳道"
+							onClick={() => setSwarmCanvasOpen((prev) => !prev)}
+						>
+							<Users size={16} />
+						</button>
+						<button
+							type="button"
 							className={`reference-header-icon-btn ${contextPanelOpen ? "active" : ""}`}
 							title={contextPanelOpen ? "隐藏上下文面板 (⌘I)" : "显示上下文面板 (⌘I)"}
 							aria-label="切换上下文面板"
@@ -1822,7 +1874,9 @@ export function ReferenceWorkspacePreview({
 						</Popover>
 					</div>
 				</header>
-				<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
+				<div className="workspace-preview-split-container">
+					<div className="workspace-preview-chat-pane">
+						<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
 					<div className="reference-chat-view">
 						<TodoPanel state={todoState} />
 						{feedItems.length === 0 && (
@@ -2438,6 +2492,30 @@ export function ReferenceWorkspacePreview({
 					/>
 				</div>
 			</footer>
+					</div>
+					{livePreviewOpen && (
+						<LivePreviewPanel
+							isOpen={livePreviewOpen}
+							defaultHtml={detectedHtml}
+							onClose={() => setLivePreviewOpen(false)}
+							onInspectElement={(info) => {
+								setDraft((prev) => `${prev ? prev + " " : ""}[针对元素: <${info.selector}>] `);
+								draftInput.current?.focus();
+							}}
+						/>
+					)}
+					{swarmCanvasOpen && (
+						<SwarmCanvas
+							workflow={swarmWorkflow}
+							isOpen={swarmCanvasOpen}
+							onClose={() => setSwarmCanvasOpen(false)}
+							onAssignTask={(member) => {
+								setDraft((prev) => `${prev ? prev + " " : ""}@${member.role}: `);
+								draftInput.current?.focus();
+							}}
+						/>
+					)}
+				</div>
 					</>
 				)}
 			</main>
@@ -2648,6 +2726,15 @@ export function ReferenceWorkspacePreview({
 							{showAllFiles ? "收起列表" : `显示全部 (${relatedFiles.length})`}
 						</button>
 					)}
+				</ReferenceContextCard>
+				<ReferenceContextCard title="代码符号图谱">
+					<SymbolGraphPanel
+						cwd={workspace}
+						onInsertReference={(sym, file, line) => {
+							setDraft((prev) => `${prev ? prev + " " : ""}[针对符号: ${sym} (${file}:${line})] `);
+							draftInput.current?.focus();
+						}}
+					/>
 				</ReferenceContextCard>
 				<ReferenceContextCard title="长期记忆">
 					<label className="reference-memory-search">

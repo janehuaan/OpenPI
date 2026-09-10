@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isDiffContent, parseDiffLines } from "../lib/diff";
+import {
+	applyHunksToSource,
+	isDiffContent,
+	parseDiffHunks,
+	parseDiffLines,
+} from "../lib/diff";
 
 describe("isDiffContent", () => {
 	it("detects diff hunk headers", () => {
@@ -72,3 +77,94 @@ describe("parseDiffLines", () => {
 		expect(lines[5]?.newLineNo).toBe(13);
 	});
 });
+
+describe("Interactive Chunk-by-Chunk Diff (parseDiffHunks & applyHunksToSource)", () => {
+	const multiHunkDiff = `--- a/src/math.ts
++++ b/src/math.ts
+@@ -1,4 +1,4 @@
+-export function add(a: number, b: number) {
++export function add(a: number, b: number): number {
+   return a + b;
+ }
+@@ -10,4 +10,5 @@
+ export function multiply(a: number, b: number) {
+-  return a * b;
++  // fast multiply
++  return Math.imul(a, b);
+ }`;
+
+	it("parses multiple hunks with individual IDs and statistics", () => {
+		const parsed = parseDiffHunks(multiHunkDiff);
+		expect(parsed.headers).toHaveLength(2);
+		expect(parsed.hunks).toHaveLength(2);
+
+		const hunk1 = parsed.hunks[0];
+		expect(hunk1.oldStart).toBe(1);
+		expect(hunk1.adds).toBe(1);
+		expect(hunk1.dels).toBe(1);
+		expect(hunk1.status).toBe("pending");
+
+		const hunk2 = parsed.hunks[1];
+		expect(hunk2.oldStart).toBe(10);
+		expect(hunk2.adds).toBe(2);
+		expect(hunk2.dels).toBe(1);
+		expect(hunk2.status).toBe("pending");
+	});
+
+	it("selectively applies only accepted hunks and leaves rejected hunks untouched", () => {
+		const originalSource = `export function add(a: number, b: number) {
+  return a + b;
+}
+
+// other lines
+// line 6
+// line 7
+// line 8
+// line 9
+export function multiply(a: number, b: number) {
+  return a * b;
+}
+`;
+		const parsed = parseDiffHunks(multiHunkDiff);
+
+		// Accept hunk 1, reject hunk 2
+		parsed.hunks[0].status = "accepted";
+		parsed.hunks[1].status = "rejected";
+
+		const { result, appliedCount, rejectedCount } = applyHunksToSource(originalSource, parsed.hunks);
+		expect(appliedCount).toBe(1);
+		expect(rejectedCount).toBe(1);
+
+		// Hunk 1 should be applied
+		expect(result).toContain("export function add(a: number, b: number): number {");
+
+		// Hunk 2 should NOT be applied (original retained)
+		expect(result).toContain("return a * b;");
+		expect(result).not.toContain("Math.imul");
+	});
+
+	it("supports applying user inline-edited lines inside a hunk", () => {
+		const originalSource = `export function add(a: number, b: number) {
+  return a + b;
+}
+`;
+		const singleDiff = `@@ -1,3 +1,3 @@
+ export function add(a: number, b: number) {
+-  return a + b;
++  return a + b + 1;
+ }`;
+		const parsed = parseDiffHunks(singleDiff);
+		parsed.hunks[0].status = "accepted";
+		// User modified the added lines manually
+		parsed.hunks[0].editedLines = [
+			"export function add(a: number, b: number) {",
+			"  return Number(a) + Number(b);",
+			"}",
+		];
+
+		const { result } = applyHunksToSource(originalSource, parsed.hunks);
+		expect(result).toContain("return Number(a) + Number(b);");
+		expect(result).not.toContain("a + b + 1");
+	});
+});
+

@@ -308,6 +308,8 @@ export const desktopApi = {
 		call<{ ok: boolean; output?: string; error?: string }>("git_init", { cwd }),
 	gitResolveConflict: (opts: { cwd?: string; path: string; strategy: "ours" | "theirs" }) =>
 		call<{ ok: boolean; status?: GitStatusResult; error?: string }>("git_resolve_conflict", opts),
+	applyDiffHunks: (opts: { cwd?: string; filename: string; hunks: any[] }) =>
+		call<{ success: boolean; appliedCount?: number; error?: string }>("apply_diff_hunks", opts),
 
 	// ── System Operations ───────────────────────────────────────────────
 	getSystemTelemetry: () =>
@@ -326,6 +328,18 @@ export const desktopApi = {
 		call<{ text?: string; hasImage?: boolean; ok?: boolean; length?: number }>("system_manage_clipboard", opts),
 	toggleHud: () =>
 		call<boolean>("toggle_hud_window"),
+
+	// ── Codebase Symbol Graph ──────────────────────────────────────────
+	searchCodeSymbols: (opts: { cwd?: string; query: string; kind?: string; limit?: number }) =>
+		call<{ symbols: any[]; totalCount: number; totalIndexed: number; filesIndexed: number }>(
+			"search_code_symbols",
+			opts,
+		),
+	getCodeSymbolReferences: (opts: { cwd?: string; symbol: string }) =>
+		call<{ symbol: string; references: Array<{ filePath: string; line: number; lineContent: string }>; count: number }>(
+			"get_symbol_references",
+			opts,
+		),
 
 	onConversationEvent: (handler: (payload: { instanceId: string; event: unknown }) => void) => {
 		const api = bridge();

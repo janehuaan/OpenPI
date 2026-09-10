@@ -353,3 +353,7 @@ export function decodeLines(
 	}
 	return { messages, rest, errors };
 }
+
+export * from "./diff.ts";
+export * from "./symbols.ts";
+
