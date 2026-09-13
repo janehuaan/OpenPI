@@ -352,7 +352,6 @@ html, body, #root {
 .reference-memory-search {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 8px !important;
 	color: var(--text) !important;
 	transition: border-color 140ms ease, box-shadow 140ms ease;
 }
@@ -402,7 +401,6 @@ html, body, #root {
 .space-row,
 .reference-space,
 .reference-project-session-item {
-	border-radius: 8px !important;
 	margin: 2px 0 !important;
 	border: 1px solid transparent !important;
 	transition: background-color 120ms ease, border-color 120ms ease;
@@ -466,7 +464,6 @@ html, body, #root {
 	background: var(--accent-soft) !important;
 	border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent) !important;
 	color: var(--accent) !important;
-	border-radius: 5px !important;
 	padding: 1px 6px !important;
 	font-size: 10px !important;
 	font-weight: 700 !important;
@@ -476,7 +473,6 @@ html, body, #root {
 .reference-account-btn,
 .sidebar-account .icon-button {
 	color: var(--text-secondary) !important;
-	border-radius: 6px !important;
 	transition: all 120ms ease;
 }
 
@@ -517,7 +513,6 @@ html, body, #root {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border-subtle) !important;
 	color: var(--text-secondary) !important;
-	border-radius: 7px !important;
 }
 
 .reference-header-icon-btn:hover {
@@ -542,7 +537,6 @@ html, body, #root {
 .reference-user-card {
 	background: var(--accent) !important;
 	color: var(--accent-contrast) !important;
-	border-radius: 14px 14px 4px 14px !important;
 	padding: 10px 15px !important;
 	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent) !important;
 	border: none !important;
@@ -573,7 +567,6 @@ html, body, #root {
 .message-reasoning {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 9px !important;
 	margin: 8px 0 !important;
 	box-shadow: var(--shadow-soft) !important;
 	overflow: hidden;
@@ -628,7 +621,6 @@ html, body, #root {
 .trajectory-header-btn {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 8px !important;
 	padding: 5px 11px !important;
 	color: var(--text-secondary) !important;
 	font-size: 12px !important;
@@ -655,7 +647,6 @@ html, body, #root {
 
 .trajectory-item-line {
 	padding: 4px 8px !important;
-	border-radius: 6px !important;
 	transition: background-color 120ms ease;
 }
 
@@ -692,14 +683,12 @@ html, body, #root {
 	color: var(--text-secondary) !important;
 	font-family: var(--mono) !important;
 	font-size: 11.5px !important;
-	border-radius: 8px !important;
 	padding: 8px 12px !important;
 }
 
 .trajectory-badge {
 	font-size: 10.5px !important;
 	font-weight: 600 !important;
-	border-radius: 4px !important;
 	padding: 1px 6px !important;
 }
 
@@ -735,7 +724,6 @@ html, body, #root {
 .tool-trace {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 8px !important;
 	overflow: hidden;
 }
 
@@ -752,7 +740,6 @@ html, body, #root {
 .md-code-block {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 10px !important;
 	overflow: hidden;
 	box-shadow: var(--shadow-soft) !important;
 }
@@ -788,8 +775,8 @@ html, body, #root {
 	background: var(--accent-soft) !important;
 	color: var(--accent) !important;
 	border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent) !important;
-	border-radius: 4px;
-	padding: 2px 5px;
+	border-radius: 6px;
+	padding: 2px 6px;
 }
 
 .md-quote {
@@ -801,7 +788,7 @@ html, body, #root {
 .md-table-wrap {
 	border: 1px solid var(--border) !important;
 	background: var(--bg-elevated) !important;
-	border-radius: 8px;
+	border-radius: 12px;
 	overflow: hidden;
 }
 
@@ -826,7 +813,6 @@ html, body, #root {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border-strong) !important;
 	box-shadow: var(--shadow) !important;
-	border-radius: 16px !important;
 	transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
@@ -907,7 +893,6 @@ html, body, #root {
 	background: var(--bg-muted) !important;
 	border: 1px solid var(--border-subtle) !important;
 	color: var(--text-secondary) !important;
-	border-radius: 6px !important;
 	transition: all 120ms ease;
 }
 
@@ -947,7 +932,6 @@ html, body, #root {
 /* ── 4.15.2 Sidebar Nav Bar & Item Badges ── */
 .reference-nav-item {
 	color: var(--text-secondary) !important;
-	border-radius: 8px !important;
 	border: 1px solid transparent !important;
 	transition: all 120ms ease;
 }
@@ -1068,7 +1052,6 @@ html, body, #root {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border) !important;
 	box-shadow: var(--shadow) !important;
-	border-radius: 16px !important;
 }
 
 .settings-section-card-header {
@@ -1087,7 +1070,6 @@ html, body, #root {
 .theme-mode-card {
 	background: var(--bg-muted) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 12px !important;
 	transition: all 140ms ease !important;
 }
 
@@ -1105,7 +1087,6 @@ html, body, #root {
 .theme-flavor-card {
 	background: var(--bg-muted) !important;
 	border: 1px solid var(--border) !important;
-	border-radius: 14px !important;
 	transition: all 160ms ease !important;
 }
 
@@ -1141,7 +1122,6 @@ html, body, #root {
 	border: 1px solid var(--border-strong) !important;
 	box-shadow: var(--shadow) !important;
 	color: var(--text) !important;
-	border-radius: 12px !important;
 }
 
 .reference-slash-menu button,
