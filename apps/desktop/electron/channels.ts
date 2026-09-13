@@ -13,6 +13,7 @@ export const INVOKE_CHANNELS = [
 	"select_workspace",
 	"get_workspace_summary",
 	"read_workspace_file",
+	"open_file_in_editor",
 	"extract_document_text",
 	"get_conversation",
 	"get_conversation_stats",

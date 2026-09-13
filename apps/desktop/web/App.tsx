@@ -18,10 +18,12 @@ import {
 	ReferenceWorkspacePreview,
 	RenameConversationDialog,
 	ShortcutsDialog,
+	FilePreviewDialog,
 	TasksSurface,
 	GitSurface,
 	FloatingHud,
 } from "./components/surfaces";
+import { FilePreviewContext, type FilePreviewRequest } from "./lib/file-links";
 import {
 	type CapabilityTab,
 	type DocumentAttachment,
@@ -239,6 +241,17 @@ export function App() {
 	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
 	const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
+	const [previewFileRequest, setPreviewFileRequest] = useState<FilePreviewRequest | null>(null);
+
+	const filePreviewContextValue = useMemo(() => ({
+		openFilePreview: (request: FilePreviewRequest | string, line?: number) => {
+			if (typeof request === "string") {
+				setPreviewFileRequest({ path: request, lineStart: line });
+			} else {
+				setPreviewFileRequest(request);
+			}
+		},
+	}), []);
 	const [authDialog, setAuthDialog] = useState<{
 		provider: string;
 		url?: string;
@@ -2248,7 +2261,7 @@ export function App() {
 	);
 
 	return (
-		<>
+		<FilePreviewContext.Provider value={filePreviewContextValue}>
 			{extensionNotice && (
 				<div className={`notice-banner ${extensionNotice.type}`} style={{ position: "fixed", top: 12, right: 24, zIndex: 9999, maxWidth: 460 }}>
 					<Bell size={15} />
@@ -2393,6 +2406,14 @@ export function App() {
 					onRespond={respondToConversationUi}
 				/>
 			)}
-		</>
+
+			{previewFileRequest && (
+				<FilePreviewDialog
+					request={previewFileRequest}
+					workspace={selectedWorkspace ?? codeWorkspace ?? setup.workspace}
+					onClose={() => setPreviewFileRequest(null)}
+				/>
+			)}
+		</FilePreviewContext.Provider>
 	);
 }

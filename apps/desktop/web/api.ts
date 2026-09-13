@@ -129,6 +129,8 @@ export const desktopApi = {
 	selectWorkspace: (defaultPath?: string) => call<string | undefined>("select_workspace", { defaultPath }),
 	getWorkspaceSummary: (cwd: string) => call<WorkspaceSummary>("get_workspace_summary", { cwd }),
 	readWorkspaceFile: (cwd: string, path: string) => call<WorkspaceFileContent>("read_workspace_file", { cwd, path }),
+	openFileInEditor: (filePath: string, cwd?: string) =>
+		call<{ success: boolean; error?: string }>("open_file_in_editor", { filePath, cwd }),
 	extractDocumentText: (input: DocumentTextExtractionInput) =>
 		call<DocumentTextExtractionResult>("extract_document_text", input),
 	sendMessage: (instanceId: string, message: string, images: ImageContent[], sessionName?: string) =>

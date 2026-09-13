@@ -1725,13 +1725,50 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			return scanWorkspaceSummary(cwd || defaultWorkspace());
 		},
 		read_workspace_file: async ({ cwd, path }: { cwd: string; path: string }) => {
-			const file = join(cwd || defaultWorkspace(), path);
-			if (!existsSync(file)) return { path, text: "" };
+			let targetPath = (path || "").trim();
+			if (targetPath.startsWith("file://")) {
+				try {
+					targetPath = decodeURIComponent(new URL(targetPath).pathname);
+					if (process.platform === "win32" && /^\/[a-zA-Z]:/.test(targetPath)) {
+						targetPath = targetPath.slice(1);
+					}
+				} catch {
+					targetPath = targetPath.replace(/^file:\/\//, "");
+				}
+			}
+			const file = isAbsolute(targetPath) ? targetPath : join(cwd || defaultWorkspace(), targetPath);
+			if (!existsSync(file)) return { path: targetPath, text: "", exists: false };
 			try {
 				const text = readFileSync(file, "utf8");
-				return { path, text };
+				return { path: file, text, exists: true };
 			} catch {
-				return { path, text: "" };
+				return { path: file, text: "", exists: false };
+			}
+		},
+		open_file_in_editor: async ({ filePath, cwd }: { filePath: string; cwd?: string }) => {
+			let targetPath = (filePath || "").trim();
+			if (targetPath.startsWith("file://")) {
+				try {
+					targetPath = decodeURIComponent(new URL(targetPath).pathname);
+					if (process.platform === "win32" && /^\/[a-zA-Z]:/.test(targetPath)) {
+						targetPath = targetPath.slice(1);
+					}
+				} catch {
+					targetPath = targetPath.replace(/^file:\/\//, "");
+				}
+			}
+			const file = isAbsolute(targetPath) ? targetPath : join(cwd || defaultWorkspace(), targetPath);
+			if (!existsSync(file)) {
+				return { success: false, error: `文件不存在: ${file}` };
+			}
+			try {
+				const openErr = await shell.openPath(file);
+				if (openErr) {
+					return { success: false, error: openErr };
+				}
+				return { success: true };
+			} catch (err: any) {
+				return { success: false, error: err?.message || String(err) };
 			}
 		},
 		extract_document_text: async (input: any) => {

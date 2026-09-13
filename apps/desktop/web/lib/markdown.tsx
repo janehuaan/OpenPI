@@ -1,6 +1,7 @@
 import { memo, type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Check, Copy, Terminal } from "../components/icons";
+import { Check, Copy, FileText, Terminal } from "../components/icons";
 import { nextStreamingTextOffset } from "./smooth-stream";
+import { parseFileLink, useFilePreview, type ParsedFileLink } from "./file-links";
 
 const STREAM_FRAME_INTERVAL_MS = 24;
 const AUTO_FOLLOW_THRESHOLD_PX = 96;
@@ -374,6 +375,45 @@ function splitTableRow(trimmed: string): string[] {
 	return row.split("|").map((cell) => cell.trim());
 }
 
+function FileLinkPill({ label, fileLink }: { label: string; fileLink: ParsedFileLink }) {
+	const previewCtx = useFilePreview();
+	const filename = fileLink.filePath.split(/[\\/]/).filter(Boolean).at(-1) ?? fileLink.filePath;
+	const lineBadge = fileLink.lineStart
+		? `L${fileLink.lineStart}${fileLink.lineEnd ? `-${fileLink.lineEnd}` : ""}`
+		: "";
+
+	let cleanLabel = label === fileLink.rawHref ? filename : label;
+	if (lineBadge && (cleanLabel.endsWith(`:${lineBadge}`) || cleanLabel.endsWith(`:#${lineBadge}`))) {
+		cleanLabel = cleanLabel.slice(0, -(lineBadge.length + 1));
+	}
+
+	const handleClick = (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (previewCtx) {
+			previewCtx.openFilePreview({
+				path: fileLink.filePath,
+				lineStart: fileLink.lineStart,
+				lineEnd: fileLink.lineEnd,
+				label: cleanLabel,
+			});
+		}
+	};
+
+	return (
+		<button
+			type="button"
+			className="md-file-link"
+			onClick={handleClick}
+			title={`项目内代码预览: ${fileLink.filePath}${fileLink.lineStart ? ` (第 ${fileLink.lineStart} 行)` : ""}`}
+		>
+			<FileText size={12} className="md-file-link-icon" />
+			<span className="md-file-link-text">{cleanLabel}</span>
+			{lineBadge && <span className="md-file-link-line">{lineBadge}</span>}
+		</button>
+	);
+}
+
 function renderInline(text: string): ReactNode[] {
 	const nodes: ReactNode[] = [];
 	// links [text](url), then code / bold / italic
@@ -397,7 +437,18 @@ function renderInline(text: string): ReactNode[] {
 					</a>,
 				);
 			} else {
-				nodes.push(token);
+				const fileLink = parseFileLink(href);
+				if (fileLink) {
+					nodes.push(
+						<FileLinkPill
+							key={key++}
+							label={label}
+							fileLink={fileLink}
+						/>,
+					);
+				} else {
+					nodes.push(token);
+				}
 			}
 		} else if (token.startsWith("`") && token.endsWith("`")) {
 			nodes.push(

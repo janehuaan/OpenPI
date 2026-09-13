@@ -10,6 +10,7 @@ export { ConversationUiDialog } from "./dialogs/conversation-ui-dialog";
 export { CreateTaskDialog } from "./dialogs/create-task-dialog";
 export { QuickSaveMemoryDialog, type QuickSaveMemoryDialogProps } from "./dialogs/quick-save-memory-dialog";
 export { ShortcutsDialog, type ShortcutsDialogProps } from "./dialogs/shortcuts-dialog";
+export { FilePreviewDialog, type FilePreviewDialogProps } from "./dialogs/file-preview-dialog";
 
 // Panels
 export { ContextPanel, TokenCompositionBar, MetricCard } from "./panels/context-panel";
