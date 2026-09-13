@@ -57,6 +57,9 @@ export class MemoryEngine {
 
 	public start(intervalMs = 12_000): void {
 		if (this.timer) return;
+		try {
+			this.db.gcStaleJobs(14);
+		} catch {}
 		this.timer = setInterval(() => {
 			this.tick().catch(() => {});
 		}, intervalMs);

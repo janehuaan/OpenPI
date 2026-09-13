@@ -73,4 +73,12 @@ contextBridge.exposeInMainWorld("openpi", {
 		ipcRenderer.on("openpi:composer-prefill", listener);
 		return () => ipcRenderer.removeListener("openpi:composer-prefill", listener);
 	},
+
+	onAutoPilotEvent(handler: (payload: unknown) => void): () => void {
+		const listener = (_event: unknown, payload: unknown) =>
+			handler(payload);
+		ipcRenderer.on("openpi:autopilot-event", listener);
+		return () => ipcRenderer.removeListener("openpi:autopilot-event", listener);
+	},
 });
+

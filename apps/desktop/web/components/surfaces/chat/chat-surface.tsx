@@ -2,12 +2,14 @@ import {
 	Fragment,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
 	type ClipboardEvent,
 	type DragEvent,
 	type KeyboardEvent,
+	type WheelEvent,
 } from "react";
 import { desktopApi } from "../../../api";
 import {
@@ -274,7 +276,9 @@ export function ChatSurface({
 	conversationInstanceId.current = conversation?.instance.id;
 	const dragDepth = useRef(0);
 	const messageScroll = useRef<HTMLDivElement>(null);
+	const messageThread = useRef<HTMLDivElement>(null);
 	const autoFollow = useRef(true);
+	const initialScrollSettleUntil = useRef(0);
 	const pollingVideos = useRef(new Set<string>());
 	const speechSessionId = useRef<string | undefined>(undefined);
 	const speechShouldContinue = useRef(false);
@@ -538,9 +542,17 @@ export function ChatSurface({
 		};
 	}, [mediaScope, pendingVideoSignature]);
 
-	useEffect(() => {
+	const forceScrollToBottom = useCallback(() => {
+		const scroll = messageScroll.current;
+		if (scroll) {
+			scroll.scrollTop = scroll.scrollHeight;
+		}
+	}, []);
+
+	useLayoutEffect(() => {
 		abortSpeechRecognition();
 		autoFollow.current = true;
+		initialScrollSettleUntil.current = Date.now() + 600;
 		setShowScrollToBottom(false);
 		setMoreMenuOpen(false);
 		setModelMenuOpen(false);
@@ -548,7 +560,14 @@ export function ChatSurface({
 		setDraggingImages(false);
 		setSlashOpen(false);
 		dragDepth.current = 0;
-	}, [conversation?.instance.id]);
+		forceScrollToBottom();
+	}, [conversation?.instance.id, forceScrollToBottom]);
+
+	useLayoutEffect(() => {
+		if (autoFollow.current) {
+			forceScrollToBottom();
+		}
+	}, [latestMessageContent, latestMediaContent, isWorking, forceScrollToBottom]);
 
 	useEffect(() => () => abortSpeechRecognition(), []);
 
@@ -604,12 +623,39 @@ export function ChatSurface({
 
 	useEffect(() => {
 		if (!autoFollow.current) return;
-		const frame = window.requestAnimationFrame(() => {
-			const scroll = messageScroll.current;
-			if (scroll) scroll.scrollTop = scroll.scrollHeight;
+		let rafId: number;
+		let count = 0;
+		const tick = () => {
+			if (autoFollow.current) {
+				forceScrollToBottom();
+			}
+			count++;
+			if (count < 6) {
+				rafId = window.requestAnimationFrame(tick);
+			}
+		};
+		rafId = window.requestAnimationFrame(tick);
+		return () => window.cancelAnimationFrame(rafId);
+	}, [latestMessageContent, latestMediaContent, isWorking, forceScrollToBottom]);
+
+	useEffect(() => {
+		const target = messageThread.current;
+		if (!target) return;
+		const observer = new ResizeObserver(() => {
+			if (autoFollow.current) {
+				forceScrollToBottom();
+			}
 		});
-		return () => window.cancelAnimationFrame(frame);
-	}, [latestMessageContent, latestMediaContent, isWorking]);
+		observer.observe(target);
+		return () => observer.disconnect();
+	}, [forceScrollToBottom]);
+
+	function handleMessageWheel(event: WheelEvent<HTMLDivElement>): void {
+		if (event.deltaY < 0) {
+			// User intentionally scrolled UP to inspect past history
+			initialScrollSettleUntil.current = 0;
+		}
+	}
 
 	function updateMediaItem(
 		scope: string,
@@ -633,15 +679,29 @@ export function ChatSurface({
 		const scroll = messageScroll.current;
 		if (!scroll) return;
 		const isAwayFromBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight > 96;
+		if (Date.now() < initialScrollSettleUntil.current) {
+			if (isAwayFromBottom && autoFollow.current) {
+				scroll.scrollTop = scroll.scrollHeight;
+				return;
+			}
+		}
 		autoFollow.current = !isAwayFromBottom;
 		setShowScrollToBottom(isAwayFromBottom);
 	}
 
-	function scrollToBottom(): void {
+	function scrollToBottom(smooth?: boolean | unknown): void {
+		const isSmooth = smooth !== false;
 		autoFollow.current = true;
+		initialScrollSettleUntil.current = Date.now() + 400;
 		setShowScrollToBottom(false);
 		const scroll = messageScroll.current;
-		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+		if (scroll) {
+			if (isSmooth) {
+				scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+			} else {
+				scroll.scrollTop = scroll.scrollHeight;
+			}
+		}
 	}
 
 	function clearSpeechRestart(): void {
@@ -1170,9 +1230,9 @@ export function ChatSurface({
 			{activeTab === "activity" ? (
 				<ActivityTimeline conversation={conversation} />
 			) : (
-				<div className="message-scroll" ref={messageScroll} onScroll={handleMessageScroll}>
+				<div className="message-scroll" ref={messageScroll} onScroll={handleMessageScroll} onWheel={handleMessageWheel}>
 					{threadItems.length > 0 ? (
-						<div className="message-thread">
+						<div className="message-thread" ref={messageThread}>
 							{threadItems.map((item) =>
 								"message" in item ? (
 									<MessageItem
@@ -1324,10 +1384,11 @@ export function ChatSurface({
 						<button
 							type="button"
 							className={appMode === "code" ? "active" : ""}
+							title="Code 编程工程与无人值守交付"
 							onClick={() => onAppModeChange("code")}
 						>
 							<TerminalSquare size={14} />
-							CWork
+							Code (无人值守)
 						</button>
 					</div>
 				</div>

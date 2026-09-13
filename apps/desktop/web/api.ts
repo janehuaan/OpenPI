@@ -1,5 +1,6 @@
 import type { SpeechInputEvent } from "./lib/speech-recognition";
 import type { AppSettings } from "./lib/app-types";
+import type { AutoPilotTask } from "@openpi/shared";
 import type {
 	AgentInstance,
 	AgnesImageRequest,
@@ -55,6 +56,7 @@ type OpenPiBridge = {
 	onNavigate?: (handler: (view: string, extra?: unknown) => void) => () => void;
 	onNewConversation?: (handler: () => void) => () => void;
 	onComposerPrefill?: (handler: (draft: { text: string; images?: string[] }) => void) => () => void;
+	onAutoPilotEvent?: (handler: (payload: { task: AutoPilotTask }) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -280,6 +282,7 @@ export const desktopApi = {
 	stopSpeechRecognition: (sessionId: string) => call<boolean>("stop_speech_recognition", { sessionId }),
 	notifyTaskCompleted: (opts?: { message?: string; title?: string; durationMs?: number; force?: boolean }) =>
 		call<boolean>("notify_task_completed", opts),
+	setNativeTheme: (theme: "system" | "dark" | "light") => call<boolean>("set_native_theme", { theme }),
 	getAppSettings: () => call<AppSettings>("get_app_settings"),
 	updateAppSettings: async (patch: Partial<AppSettings>) => {
 		const result = await call<AppSettings>("update_app_settings", patch);
@@ -381,4 +384,24 @@ export const desktopApi = {
 		if (!api?.onComposerPrefill) return () => undefined;
 		return api.onComposerPrefill(handler);
 	},
+
+	// ── Auto-Pilot Autonomous Delivery & Self-Healing Loop ──────────────────────────
+	startAutoPilotTask: (opts: { cwd?: string; prompt: string; testCommand?: string; maxIterations?: number }) =>
+		call<AutoPilotTask>("start_autopilot_task", opts),
+	getAutoPilotStatus: (opts: { taskId: string }) =>
+		call<{ task: AutoPilotTask | null }>("get_autopilot_status", opts),
+	mergeAutoPilotTask: (opts: { taskId: string }) =>
+		call<{ success: boolean; error?: string }>("merge_autopilot_task", opts),
+	discardAutoPilotTask: (opts: { taskId: string }) =>
+		call<{ success: boolean; error?: string }>("discard_autopilot_task", opts),
+	continueAutoPilotTask: (opts: { taskId: string; additionalIterations?: number }) =>
+		call<AutoPilotTask>("continue_autopilot_task", opts),
+	onAutoPilotEvent: (handler: (payload: { task: AutoPilotTask }) => void) => {
+		const api = bridge();
+		if (!api?.onAutoPilotEvent) return () => undefined;
+		return api.onAutoPilotEvent(handler);
+	},
+	focusMainWindow: () => call<boolean>("focus_main_window"),
+	runTerminalCommand: (opts: { cwd?: string; command: string; timeoutMs?: number }) =>
+		call<{ exitCode: number; stdout: string; stderr: string }>("run_terminal_command", opts),
 };

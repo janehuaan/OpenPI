@@ -51,6 +51,7 @@ import { hashForView, initialView, isView, VIEW_STORAGE_KEY, viewFromHash } from
 import { draftStore } from "./lib/draft-store";
 import { exportAndDownloadConversation } from "./lib/export-markdown";
 import { useGlobalKeybindings } from "./lib/keybindings";
+import { initTheme, toggleThemeMode } from "./lib/theme-manager";
 
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
 const SNAPSHOT_CACHE_KEY = "openpi-snapshot-cache";
@@ -138,6 +139,13 @@ export function App() {
 	);
 	const [respondingConversationUiRequestId, setRespondingConversationUiRequestId] = useState<string>();
 	const [extensionNotice, setExtensionNotice] = useState<ExtensionNotice>();
+	useEffect(() => {
+		if (!extensionNotice) return;
+		const timer = setTimeout(() => {
+			setExtensionNotice(undefined);
+		}, 8000);
+		return () => clearTimeout(timer);
+	}, [extensionNotice]);
 	/** info notify (e.g. TPS) shown under the latest assistant reply, not the top bar */
 	const [turnMeta, setTurnMeta] = useState<{ instanceId: string; message: string }>();
 	const [composerDraftRequest, setComposerDraftRequest] = useState<{ id: string; text: string; images?: string[] }>();
@@ -151,6 +159,22 @@ export function App() {
 		if (typeof window === "undefined") return "chat";
 		return initialView(window.location.hash, window.localStorage.getItem(VIEW_STORAGE_KEY));
 	});
+	const [isHudMode, setIsHudMode] = useState(() => {
+		if (typeof window === "undefined") return false;
+		return window.location.hash.includes("hud") || window.location.search.includes("hud");
+	});
+
+	useEffect(() => {
+		const checkHud = () => {
+			setIsHudMode(window.location.hash.includes("hud") || window.location.search.includes("hud"));
+		};
+		window.addEventListener("hashchange", checkHud);
+		window.addEventListener("popstate", checkHud);
+		return () => {
+			window.removeEventListener("hashchange", checkHud);
+			window.removeEventListener("popstate", checkHud);
+		};
+	}, []);
 	const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
 	const [taskQuery, setTaskQuery] = useState("");
 	const [chatQuery, setChatQuery] = useState("");
@@ -1582,8 +1606,13 @@ export function App() {
 		onExportMarkdown: exportSelectedConversation,
 		onToggleGit: () => setView((prev) => (prev === "git" ? "chat" : "git")),
 		onOpenShortcuts: () => setShowShortcutsDialog((prev) => !prev),
+		onToggleTheme: () => toggleThemeMode(),
 		isWorking,
 	});
+
+	useEffect(() => {
+		initTheme();
+	}, []);
 
 	useEffect(() => {
 		const unsubNavigate = desktopApi.onNavigate((targetView) => {
@@ -1964,11 +1993,19 @@ export function App() {
 		};
 	}, []);
 
-	if (typeof window !== "undefined" && window.location.hash.includes("hud")) {
+	if (isHudMode) {
 		return (
 			<FloatingHud
-				onOpenMainWithPrompt={(prompt) => {
-					void desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
+				onOpenMainWithPrompt={async (prompt) => {
+					try {
+						const conv = await desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
+						if (conv?.id) {
+							await desktopApi.sendMessage(conv.id, prompt, []);
+						}
+						await desktopApi.focusMainWindow();
+					} catch (e) {
+						console.error("Failed to open prompt in main window:", e);
+					}
 				}}
 			/>
 		);

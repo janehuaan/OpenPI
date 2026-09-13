@@ -7,7 +7,8 @@ export type KeybindingAction =
 	| "open_settings"
 	| "export_markdown"
 	| "toggle_git"
-	| "open_shortcuts";
+	| "open_shortcuts"
+	| "toggle_theme";
 
 export interface KeybindingHandlers {
 	onNewConversation?: () => void;
@@ -17,6 +18,7 @@ export interface KeybindingHandlers {
 	onExportMarkdown?: () => void;
 	onToggleGit?: () => void;
 	onOpenShortcuts?: () => void;
+	onToggleTheme?: () => void;
 	isWorking?: boolean;
 }
 
@@ -40,6 +42,11 @@ export function matchKeybinding(
 		// Cmd/Ctrl + Shift + G
 		if (event.shiftKey && key === "g") {
 			return "toggle_git";
+		}
+
+		// Cmd/Ctrl + Shift + T
+		if (event.shiftKey && key === "t") {
+			return "toggle_theme";
 		}
 
 		// Cmd/Ctrl + / or Cmd/Ctrl + ?
@@ -156,6 +163,13 @@ export function handleKeybinding(
 			if (handlers.onOpenShortcuts) {
 				event.preventDefault();
 				handlers.onOpenShortcuts();
+				return true;
+			}
+			break;
+		case "toggle_theme":
+			if (handlers.onToggleTheme) {
+				event.preventDefault();
+				handlers.onToggleTheme();
 				return true;
 			}
 			break;

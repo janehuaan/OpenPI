@@ -31,8 +31,8 @@ export function createHudWindow(getMainWindow?: () => BrowserWindow | undefined)
 		: { workArea: { width: 1400, height: 900, x: 0, y: 0 } };
 	const { width: screenWidth, height: screenHeight } = primaryDisplay.workArea;
 
-	const HUD_WIDTH = 680;
-	const HUD_HEIGHT = 440;
+	const HUD_WIDTH = 700;
+	const HUD_HEIGHT = 480;
 	const x = Math.round((screenWidth - HUD_WIDTH) / 2);
 	// Place higher up like Spotlight/Raycast
 	const y = Math.round(screenHeight * 0.2);
@@ -76,7 +76,7 @@ export function createHudWindow(getMainWindow?: () => BrowserWindow | undefined)
 		void win.loadURL(DEV_URL);
 	} else {
 		const index = join(here, "../dist/index.html");
-		void win.loadFile(index, { hash: "hud" });
+		void win.loadFile(index, { hash: "hud", search: "mode=hud" });
 	}
 
 	return win;

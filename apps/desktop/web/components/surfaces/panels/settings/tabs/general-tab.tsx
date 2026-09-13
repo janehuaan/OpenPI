@@ -6,14 +6,24 @@ import {
 	Check,
 	Globe,
 	History,
+	Monitor,
+	Moon,
+	Palette,
 	RefreshCw,
 	Save,
 	Sliders,
+	Sun,
 	Terminal,
 	UserRound,
 	Zap,
 } from "../../../../icons";
 import type { AppSettings } from "../../../../../lib/app-types";
+import {
+	useTheme,
+	THEME_PRESETS,
+	type ThemeMode,
+	type ThemeFlavor,
+} from "../../../../../lib/theme-manager";
 
 interface GeneralTabProps {
 	instanceId?: string;
@@ -21,6 +31,14 @@ interface GeneralTabProps {
 }
 
 export const GeneralTab: FC<GeneralTabProps> = ({ instanceId, onReload }) => {
+	const {
+		mode: themeMode,
+		flavor: themeFlavor,
+		effectiveMode,
+		setMode: setThemeMode,
+		setFlavor: setThemeFlavor,
+		setTheme,
+	} = useTheme();
 	const [settings, setSettings] = useState<AppSettings>({});
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -101,6 +119,203 @@ export const GeneralTab: FC<GeneralTabProps> = ({ instanceId, onReload }) => {
 					<span>{saveToast}</span>
 				</div>
 			)}
+
+			{/* ── 0. Appearance & Theme ── */}
+			<section className="settings-section-card">
+				<div className="settings-section-card-header">
+					<div className="settings-section-card-header-left">
+						<div className="settings-section-card-icon">
+							<Palette size={18} />
+						</div>
+						<div className="settings-section-card-title">
+							<h3>外观与主题系统 (Appearance & Theme)</h3>
+							<span>全场景自适应色彩、极客暗黑、OLED 纯黑与经典浅色调色盘</span>
+						</div>
+					</div>
+				</div>
+
+				<div className="settings-section-card-body">
+					{/* Mode Selector */}
+					<div className="theme-modes-grid">
+						{[
+							{
+								id: "system" as ThemeMode,
+								label: "跟随系统 (Auto)",
+								icon: Monitor,
+								desc: "自适应 macOS 外观偏好，暗浅平滑自动联动",
+							},
+							{
+								id: "dark" as ThemeMode,
+								label: "深色模式 (Dark)",
+								icon: Moon,
+								desc: "沉浸暗黑与黑曜玻璃，护眼不刺眼",
+							},
+							{
+								id: "light" as ThemeMode,
+								label: "浅色模式 (Light)",
+								icon: Sun,
+								desc: "清晰明快纸本素雅，日间办公专注首选",
+							},
+						].map((item) => {
+							const Icon = item.icon;
+							const isActive = themeMode === item.id;
+							return (
+								<button
+									key={item.id}
+									type="button"
+									className={`theme-mode-card ${isActive ? "active" : ""}`}
+									onClick={() => setThemeMode(item.id)}
+								>
+									<div className="theme-mode-card-icon">
+										<Icon size={16} />
+									</div>
+									<div className="theme-mode-card-meta">
+										<strong>{item.label}</strong>
+										<span>{item.desc}</span>
+									</div>
+								</button>
+							);
+						})}
+					</div>
+
+					{/* Theme Flavor Galleries: Clean Dark & Light Sections */}
+					<div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "18px" }}>
+						{/* Dark Palettes */}
+						<div>
+							<div style={{ fontSize: "12px", fontWeight: 650, color: "var(--text-secondary)", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+								<Moon size={14} style={{ color: "var(--accent)" }} />
+								<span>深色调色盘 (Dark Flavors)</span>
+								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· 4 款极客护眼与实体配色</span>
+							</div>
+							<div className="theme-flavors-grid">
+								{THEME_PRESETS.filter((p) => p.mode === "dark").map((preset) => {
+									const isSelected = effectiveMode === "dark" && themeFlavor === preset.id;
+									return (
+										<button
+											key={preset.id}
+											type="button"
+											className={`theme-flavor-card ${isSelected ? "active" : ""}`}
+											onClick={() => {
+												setTheme({ mode: preset.mode, flavor: preset.id });
+											}}
+										>
+											<div
+												className="theme-flavor-preview"
+												style={{
+													background: preset.swatches.bg,
+													borderColor: isSelected ? "var(--accent)" : "rgba(255, 255, 255, 0.12)",
+												}}
+											>
+												<div className="theme-flavor-preview-dots">
+													<span className="theme-flavor-dot" style={{ background: preset.swatches.accent }} />
+													<span className="theme-flavor-dot" style={{ background: preset.swatches.text }} />
+													<span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 600, color: preset.swatches.accent, opacity: 0.9 }}>
+														{preset.tag}
+													</span>
+												</div>
+												<div
+													className="theme-flavor-preview-content"
+													style={{
+														background: preset.swatches.elevated,
+														borderColor: preset.swatches.accent,
+													}}
+												>
+													<span
+														className="theme-flavor-pill"
+														style={{ background: preset.swatches.text, opacity: 0.7 }}
+													/>
+													<span
+														className="theme-flavor-accent-badge"
+														style={{ background: preset.swatches.accent }}
+													/>
+												</div>
+											</div>
+											<div className="theme-flavor-info">
+												<div className="theme-flavor-header">
+													<strong>{preset.name}</strong>
+													{isSelected && (
+														<span className="theme-flavor-check">
+															<Check size={11} />
+														</span>
+													)}
+												</div>
+												<p>{preset.desc}</p>
+											</div>
+										</button>
+									);
+								})}
+							</div>
+						</div>
+
+						{/* Light Palettes */}
+						<div>
+							<div style={{ fontSize: "12px", fontWeight: 650, color: "var(--text-secondary)", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+								<Sun size={14} style={{ color: "var(--warn)" }} />
+								<span>浅色调色盘 (Light Flavors)</span>
+								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· 3 款日间素雅与纸本舒适</span>
+							</div>
+							<div className="theme-flavors-grid">
+								{THEME_PRESETS.filter((p) => p.mode === "light").map((preset) => {
+									const isSelected = effectiveMode === "light" && themeFlavor === preset.id;
+									return (
+										<button
+											key={preset.id}
+											type="button"
+											className={`theme-flavor-card ${isSelected ? "active" : ""}`}
+											onClick={() => {
+												setTheme({ mode: preset.mode, flavor: preset.id });
+											}}
+										>
+											<div
+												className="theme-flavor-preview"
+												style={{
+													background: preset.swatches.bg,
+													borderColor: isSelected ? "var(--accent)" : "rgba(0, 0, 0, 0.10)",
+												}}
+											>
+												<div className="theme-flavor-preview-dots">
+													<span className="theme-flavor-dot" style={{ background: preset.swatches.accent }} />
+													<span className="theme-flavor-dot" style={{ background: preset.swatches.text }} />
+													<span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: 600, color: preset.swatches.accent, opacity: 0.9 }}>
+														{preset.tag}
+													</span>
+												</div>
+												<div
+													className="theme-flavor-preview-content"
+													style={{
+														background: preset.swatches.elevated,
+														borderColor: preset.swatches.accent,
+													}}
+												>
+													<span
+														className="theme-flavor-pill"
+														style={{ background: preset.swatches.text, opacity: 0.7 }}
+													/>
+													<span
+														className="theme-flavor-accent-badge"
+														style={{ background: preset.swatches.accent }}
+													/>
+												</div>
+											</div>
+											<div className="theme-flavor-info">
+												<div className="theme-flavor-header">
+													<strong>{preset.name}</strong>
+													{isSelected && (
+														<span className="theme-flavor-check">
+															<Check size={11} />
+														</span>
+													)}
+												</div>
+												<p>{preset.desc}</p>
+											</div>
+										</button>
+									);
+								})}
+							</div>
+						</div>
+					</div>
+				</div>
+			</section>
 
 			{/* ── 1. Workspace Modes ── */}
 			<section className="settings-section-card">

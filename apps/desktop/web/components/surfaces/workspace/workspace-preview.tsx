@@ -4,8 +4,10 @@ import {
 	type DragEvent,
 	type KeyboardEvent,
 	type ReactNode,
+	type WheelEvent,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -99,8 +101,9 @@ import type {
 import { MiniDiffView } from "../../diff-viewer";
 import { LivePreviewPanel } from "./live-preview-panel";
 import { SwarmCanvas } from "./swarm-canvas";
+import { AutoPilotModal } from "./autopilot-modal";
+import type { AutoPilotTask } from "@openpi/shared";
 import { extractSwarmFromMessages } from "../../../lib/swarm-types";
-import { SymbolGraphPanel } from "../panels/symbol-graph-panel";
 import {
 	ArrowDown,
 	ArrowLeft,
@@ -139,6 +142,7 @@ import {
 	Menu,
 	MessageSquare,
 	Mic,
+	Moon,
 	MoreHorizontal,
 	Package,
 	PanelLeftClose,
@@ -162,6 +166,7 @@ import {
 	Sparkles,
 	Square,
 	Store,
+	Sun,
 	Terminal,
 	TerminalSquare,
 	Trash2,
@@ -170,7 +175,9 @@ import {
 	WandSparkles,
 	Wrench,
 	X,
+	Zap,
 } from "../../icons";
+import { useTheme } from "../../../lib/theme-manager";
 import { ClaudeCodeRecapCard } from "../../recap-card";
 import { TodoPanel } from "../../todo-panel";
 import type { TodoState, GitStatusResult } from "../../../types";
@@ -312,6 +319,7 @@ export function ReferenceWorkspacePreview({
 	customContent?: ReactNode;
 	onOpenShortcuts?: () => void;
 }) {
+	const { effectiveMode, toggle: toggleTheme } = useTheme();
 	const initialKey = selectedInstanceId ?? "__new_draft__";
 	const [draft, setDraft] = useState(() => draftStore.getDraft(initialKey)?.text ?? "");
 	const [attachments, setAttachments] = useState<ImageAttachment[]>(
@@ -374,6 +382,19 @@ export function ReferenceWorkspacePreview({
 
 	const [livePreviewOpen, setLivePreviewOpen] = useState(false);
 	const [swarmCanvasOpen, setSwarmCanvasOpen] = useState(false);
+	const [autoPilotOpen, setAutoPilotOpen] = useState(false);
+	const [autoPilotPrompt, setAutoPilotPrompt] = useState("");
+	const [autoPilotAutoStart, setAutoPilotAutoStart] = useState(false);
+	const [activeAutoPilotTask, setActiveAutoPilotTask] = useState<AutoPilotTask | null>(null);
+
+	useEffect(() => {
+		const unsub = desktopApi.onAutoPilotEvent?.(({ task }) => {
+			setActiveAutoPilotTask(task);
+		});
+		return () => {
+			if (unsub) unsub();
+		};
+	}, []);
 
 	const detectedHtml = useMemo(() => {
 		const msgs = conversation?.messages ?? [];
@@ -455,9 +476,11 @@ export function ReferenceWorkspacePreview({
 	const attachmentInput = useRef<HTMLInputElement>(null);
 	const draftInput = useRef<HTMLTextAreaElement>(null);
 	const feedScroll = useRef<HTMLElement>(null);
+	const chatView = useRef<HTMLDivElement>(null);
 	const projectList = useRef<HTMLDivElement>(null);
 	const chatList = useRef<HTMLDivElement>(null);
 	const autoFollow = useRef(true);
+	const initialScrollSettleUntil = useRef(0);
 	const [contextPanelOpen, setContextPanelOpen] = useState(false);
 	const [sidebarSearch, setSidebarSearch] = useState("");
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -898,12 +921,27 @@ export function ReferenceWorkspacePreview({
 			.slice(0, 30);
 	}, [agentSlash, localSlashItems, slashQuery]);
 
-	useEffect(() => {
+	const forceScrollToBottom = useCallback(() => {
+		const feed = feedScroll.current;
+		if (feed) {
+			feed.scrollTop = feed.scrollHeight;
+		}
+	}, []);
+
+	useLayoutEffect(() => {
 		autoFollow.current = true;
+		initialScrollSettleUntil.current = Date.now() + 600;
 		setShowScrollToBottom(false);
 		setModelMenuOpen(false);
 		setSlashOpen(false);
-	}, [conversation?.instance.id]);
+		forceScrollToBottom();
+	}, [conversation?.instance.id, selectedInstanceId, forceScrollToBottom]);
+
+	useLayoutEffect(() => {
+		if (autoFollow.current) {
+			forceScrollToBottom();
+		}
+	}, [messageSignature, forceScrollToBottom]);
 
 	useEffect(() => {
 		const open = draft.startsWith("/") && !draft.includes("\n");
@@ -929,25 +967,68 @@ export function ReferenceWorkspacePreview({
 
 	useEffect(() => {
 		if (!autoFollow.current) return;
-		const frame = window.requestAnimationFrame(() => {
-			const feed = feedScroll.current;
-			if (feed) feed.scrollTop = feed.scrollHeight;
+		let rafId: number;
+		let count = 0;
+		const tick = () => {
+			if (autoFollow.current) {
+				forceScrollToBottom();
+			}
+			count++;
+			if (count < 6) {
+				rafId = window.requestAnimationFrame(tick);
+			}
+		};
+		rafId = window.requestAnimationFrame(tick);
+		return () => window.cancelAnimationFrame(rafId);
+	}, [messageSignature, forceScrollToBottom]);
+
+	useEffect(() => {
+		const target = chatView.current;
+		if (!target) return;
+		const observer = new ResizeObserver(() => {
+			if (autoFollow.current) {
+				forceScrollToBottom();
+			}
 		});
-		return () => window.cancelAnimationFrame(frame);
-	}, [messageSignature]);
+		observer.observe(target);
+		return () => observer.disconnect();
+	}, [forceScrollToBottom]);
+
+	function handleFeedWheel(event: WheelEvent<HTMLElement>): void {
+		if (event.deltaY < 0) {
+			// User is actively scrolling UP to inspect past history
+			initialScrollSettleUntil.current = 0;
+		}
+	}
 
 	function handleFeedScroll(): void {
 		const feed = feedScroll.current;
 		if (!feed) return;
 		const isAwayFromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight > 160;
+		if (Date.now() < initialScrollSettleUntil.current) {
+			// During initial session load or transition, layout reflows should not cancel auto-follow
+			if (isAwayFromBottom && autoFollow.current) {
+				feed.scrollTop = feed.scrollHeight;
+				return;
+			}
+		}
 		autoFollow.current = !isAwayFromBottom;
 		setShowScrollToBottom(isAwayFromBottom);
 	}
 
-	function scrollToBottom(): void {
+	function scrollToBottom(smooth?: boolean | unknown): void {
+		const isSmooth = smooth !== false;
 		autoFollow.current = true;
+		initialScrollSettleUntil.current = Date.now() + 400;
 		setShowScrollToBottom(false);
-		feedScroll.current?.scrollTo({ top: feedScroll.current.scrollHeight, behavior: "smooth" });
+		const feed = feedScroll.current;
+		if (feed) {
+			if (isSmooth) {
+				feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+			} else {
+				feed.scrollTop = feed.scrollHeight;
+			}
+		}
 	}
 
 	async function addFiles(files: File[]): Promise<void> {
@@ -1332,6 +1413,7 @@ export function ReferenceWorkspacePreview({
 			setSlashOpen(false);
 			return;
 		}
+
 		(document.activeElement as HTMLElement)?.blur();
 		draftInput.current?.focus();
 		await onSend(message, attachments, documents);
@@ -1571,7 +1653,12 @@ export function ReferenceWorkspacePreview({
 														<button
 															type="button"
 															className={`reference-project-session-item ${isSelected ? "selected" : ""}`}
-															onClick={() => onOpenProject(instance.id)}
+															onClick={() => {
+																if (instance.id === selectedInstanceId) {
+																	scrollToBottom(true);
+																}
+																onOpenProject(instance.id);
+															}}
 														>
 															<MessageSquare size={12} className="reference-session-icon" />
 															<span className="reference-session-title">
@@ -1651,7 +1738,12 @@ export function ReferenceWorkspacePreview({
 												<button
 													type="button"
 													className="reference-session-select"
-													onClick={() => onSelectConversation(instance.id)}
+													onClick={() => {
+														if (instance.id === selectedInstanceId) {
+															scrollToBottom(true);
+														}
+														onSelectConversation(instance.id);
+													}}
 												>
 													<div className="reference-session-icon-wrap">
 														<MessageSquare size={13} className="reference-session-icon" />
@@ -1705,6 +1797,15 @@ export function ReferenceWorkspacePreview({
 					<strong>Huaan</strong>
 					<em>Pro</em>
 					<div className="reference-account-actions">
+						<button
+							type="button"
+							className="reference-account-btn"
+							title={effectiveMode === "dark" ? "切换浅色模式 (⌘⇧T)" : "切换深色模式 (⌘⇧T)"}
+							aria-label="切换主题"
+							onClick={toggleTheme}
+						>
+							{effectiveMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+						</button>
 						<button
 							type="button"
 							className={`reference-account-btn ${activeView === "git" ? "active" : ""}`}
@@ -1876,8 +1977,8 @@ export function ReferenceWorkspacePreview({
 				</header>
 				<div className="workspace-preview-split-container">
 					<div className="workspace-preview-chat-pane">
-						<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll}>
-					<div className="reference-chat-view">
+						<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll} onWheel={handleFeedWheel}>
+							<div className="reference-chat-view" ref={chatView}>
 						<TodoPanel state={todoState} />
 						{feedItems.length === 0 && (
 							<div className="reference-draft-welcome">
@@ -2154,6 +2255,37 @@ export function ReferenceWorkspacePreview({
 							{isWorking && <span className="scroll-pulse-dot" />}
 						</button>
 					)}
+					{(appMode === "code" || conversation?.instance.mode === "code") &&
+						activeAutoPilotTask &&
+						activeAutoPilotTask.status !== "merged" &&
+						activeAutoPilotTask.status !== "discarded" && (
+							<div
+								className="code-autopilot-active-bar"
+								onClick={() => setAutoPilotOpen(true)}
+								title="点击查看 Auto-Pilot 执行流水线、终端日志与变更 Diff"
+							>
+								<div className="code-autopilot-active-left">
+									<Zap size={14} className="text-blue-500 animate-pulse" />
+									<span className="code-autopilot-title">
+										无人值守任务: {activeAutoPilotTask.prompt.slice(0, 32)}
+									</span>
+									<span className={`code-autopilot-status-badge status-${activeAutoPilotTask.status}`}>
+										{activeAutoPilotTask.status === "ready_for_review"
+											? activeAutoPilotTask.discoveredIssues && activeAutoPilotTask.discoveredIssues.length > 0
+												? `⚠️ 发现 ${activeAutoPilotTask.discoveredIssues.length} 项问题 (待处理)`
+												: "✅ 全维 0 错误完全解决 (交付就绪)"
+											: activeAutoPilotTask.status === "testing"
+												? "🔍 全维问题雷达扫描中 (编译/测试/构建)"
+												: activeAutoPilotTask.status === "diagnosing"
+													? `🔄 持续排查与自愈中 (第 ${activeAutoPilotTask.currentIteration}/${activeAutoPilotTask.maxIterations} 轮)...`
+													: "⚡ 正在编码实施与自测"}
+									</span>
+								</div>
+								<button type="button" className="code-autopilot-open-btn">
+									查看流水线 / 日志 / Diff ➔
+								</button>
+							</div>
+						)}
 					<div className="reference-composer">
 					{(attachments.length > 0 || documents.length > 0) && (
 						<div className="reference-attachment-list" aria-label="已附加内容">
@@ -2213,7 +2345,11 @@ export function ReferenceWorkspacePreview({
 					)}
 					<textarea
 						ref={draftInput}
-						placeholder="发送消息给 OpenPI，或输入 / 查看命令…"
+						placeholder={
+							appMode === "code" || conversation?.instance.mode === "code"
+								? "输入研发任务，智能体将自主编码、全维巡检并自愈直到完全通过 (Enter 发送)..."
+								: "发送消息给 OpenPI，或输入 / 查看命令…"
+						}
 						rows={1}
 						value={draft ?? ""}
 						onChange={(event) => setDraft(event.target.value)}
@@ -2515,6 +2651,18 @@ export function ReferenceWorkspacePreview({
 							}}
 						/>
 					)}
+					{autoPilotOpen && (
+						<AutoPilotModal
+							workspaceCwd={workspace}
+							initialPrompt={autoPilotPrompt}
+							autoStart={autoPilotAutoStart}
+							onClose={() => {
+								setAutoPilotOpen(false);
+								setAutoPilotAutoStart(false);
+								setAutoPilotPrompt("");
+							}}
+						/>
+					)}
 				</div>
 					</>
 				)}
@@ -2726,15 +2874,6 @@ export function ReferenceWorkspacePreview({
 							{showAllFiles ? "收起列表" : `显示全部 (${relatedFiles.length})`}
 						</button>
 					)}
-				</ReferenceContextCard>
-				<ReferenceContextCard title="代码符号图谱">
-					<SymbolGraphPanel
-						cwd={workspace}
-						onInsertReference={(sym, file, line) => {
-							setDraft((prev) => `${prev ? prev + " " : ""}[针对符号: ${sym} (${file}:${line})] `);
-							draftInput.current?.focus();
-						}}
-					/>
 				</ReferenceContextCard>
 				<ReferenceContextCard title="长期记忆">
 					<label className="reference-memory-search">

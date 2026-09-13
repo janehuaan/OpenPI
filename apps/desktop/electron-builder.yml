@@ -49,9 +49,11 @@ win:
     - target: nsis
       arch:
         - x64
+        - arm64
     - target: portable
       arch:
         - x64
+        - arm64
   artifactName: ${productName}-Setup-${version}-${arch}.${ext}
 
 nsis:
@@ -66,9 +68,19 @@ linux:
     - target: AppImage
       arch:
         - x64
+        - arm64
     - target: deb
       arch:
         - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+    - target: tar.gz
+      arch:
+        - x64
+        - arm64
   category: Development
   maintainer: "Jane Huaan <huaan@users.noreply.github.com>"
   synopsis: OpenPI desktop personal agent
@@ -78,3 +90,8 @@ linux:
 deb:
   packageName: openpi
   artifactName: ${productName}-${version}-${arch}.${ext}
+
+rpm:
+  packageName: openpi
+  artifactName: ${productName}-${version}-${arch}.${ext}
+

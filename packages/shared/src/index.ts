@@ -356,4 +356,5 @@ export function decodeLines(
 
 export * from "./diff.ts";
 export * from "./symbols.ts";
+export * from "./autopilot.ts";
 

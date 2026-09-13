@@ -37,6 +37,7 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
 			{ keys: ["⌘", "B"], description: "展开 / 折叠左侧边栏" },
 			{ keys: ["⌘", ","], description: "偏好设置与模型服务管理" },
 			{ keys: ["⌘", "K"], description: "搜索对话与工作区项目" },
+			{ keys: ["⌘", "⇧", "T"], description: "极速切换深色 / 浅色模式" },
 			{ keys: ["⌘", "⇧", "E"], description: "导出当前对话为 Markdown" },
 			{ keys: ["⌘", "⇧", "G"], description: "打开 Git 版本管理面板" },
 			{ keys: ["⌘", "/"], description: "打开本快捷键指南" },

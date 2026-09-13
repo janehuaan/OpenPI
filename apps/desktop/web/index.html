@@ -31,9 +31,18 @@
 				document.documentElement.classList.add("platform-darwin");
 			}
 			try {
-				const theme = localStorage.getItem("openpi-theme");
-				if (theme === "dark" || (!theme && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+				const theme = localStorage.getItem("openpi-theme") || "dark";
+				const isDark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+				const effectiveMode = isDark ? "dark" : "light";
+				const flavor = localStorage.getItem("openpi-theme-flavor") || (isDark ? "dark-default" : "light-default");
+				document.documentElement.setAttribute("data-theme", effectiveMode);
+				document.documentElement.setAttribute("data-theme-flavor", flavor);
+				if (isDark) {
 					document.documentElement.classList.add("dark");
+					document.documentElement.classList.remove("light");
+				} else {
+					document.documentElement.classList.add("light");
+					document.documentElement.classList.remove("dark");
 				}
 			} catch (_) {}
 		</script>

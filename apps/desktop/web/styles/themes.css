@@ -1,0 +1,1179 @@
+/* OpenPI Desktop — Curated Theme Flavors & High-Precision Design System */
+
+/* ==========================================================================
+   1. Dark Theme Flavors
+   ========================================================================== */
+
+/* ── 1.1 Obsidian Dark (Default Dark — Liquid Glass Experience) ── */
+:root[data-theme="dark"][data-theme-flavor="dark-default"],
+[data-theme="dark"][data-theme-flavor="dark-default"],
+:root[data-theme="dark"]:not([data-theme-flavor]),
+[data-theme="dark"]:not([data-theme-flavor]) {
+	--bg: #0c0e14;
+	--bg-elevated: #161a25;
+	--bg-muted: #10141d;
+	--sidebar-bg: #090b10;
+	--rail-bg: #06080d;
+	--border: rgba(255, 255, 255, 0.13);
+	--border-subtle: rgba(255, 255, 255, 0.08);
+	--border-strong: rgba(255, 255, 255, 0.24);
+	--text: #f0f6fc;
+	--text-secondary: #94a3b8;
+	--text-tertiary: #64748b;
+	--accent: #3b82f6;
+	--accent-hover: #2563eb;
+	--accent-soft: rgba(59, 130, 246, 0.18);
+	--accent-contrast: #ffffff;
+	--focus: #7566ea;
+	--danger: #ef4444;
+	--danger-soft: rgba(239, 68, 68, 0.18);
+	--ok: #22c55e;
+	--ok-soft: rgba(34, 197, 94, 0.18);
+	--warn: #f59e0b;
+	--warn-soft: rgba(245, 158, 11, 0.18);
+	--glass-bg: rgba(22, 28, 42, 0.45);
+	--glass-bg-subtle: rgba(22, 28, 42, 0.25);
+	--glass-bg-elevated: rgba(28, 36, 54, 0.55);
+	--glass-bg-hover: rgba(35, 45, 68, 0.65);
+	--shadow: 0 14px 44px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.32);
+	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
+	color-scheme: dark;
+}
+
+/* ── 1.2 OLED Pure Black (Solid Performance — 0 GPU Blur) ── */
+:root[data-theme-flavor="dark-oled"],
+[data-theme-flavor="dark-oled"] {
+	--bg: #000000;
+	--bg-elevated: #111115;
+	--bg-muted: #09090c;
+	--sidebar-bg: #060608;
+	--rail-bg: #020203;
+	--border: #23232b;
+	--border-subtle: #16161c;
+	--border-strong: #3a3a46;
+	--text: #ffffff;
+	--text-secondary: #a1a1aa;
+	--text-tertiary: #71717a;
+	--accent: #38bdf8;
+	--accent-hover: #0ea5e9;
+	--accent-soft: rgba(56, 189, 248, 0.16);
+	--accent-contrast: #000000;
+	--focus: #60a5fa;
+	--danger: #ef4444;
+	--danger-soft: rgba(239, 68, 68, 0.18);
+	--ok: #22c55e;
+	--ok-soft: rgba(34, 197, 94, 0.18);
+	--warn: #f59e0b;
+	--warn-soft: rgba(245, 158, 11, 0.18);
+	--glass-bg: #111115;
+	--glass-bg-subtle: #09090c;
+	--glass-bg-elevated: #16161b;
+	--glass-bg-hover: #1f1f26;
+	--shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 2px 10px rgba(0, 0, 0, 0.55);
+	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.60);
+	color-scheme: dark;
+}
+
+/* ── 1.3 Tokyo Night (Solid Performance — 0 GPU Blur) ── */
+:root[data-theme-flavor="dark-tokyo"],
+[data-theme-flavor="dark-tokyo"] {
+	--bg: #1a1b26;
+	--bg-elevated: #24283b;
+	--bg-muted: #1f2335;
+	--sidebar-bg: #16161e;
+	--rail-bg: #13141c;
+	--border: #292e42;
+	--border-subtle: #202436;
+	--border-strong: #414868;
+	--text: #c0caf5;
+	--text-secondary: #9aa5ce;
+	--text-tertiary: #565f89;
+	--accent: #7aa2f7;
+	--accent-hover: #6388de;
+	--accent-soft: rgba(122, 162, 247, 0.18);
+	--accent-contrast: #15161e;
+	--focus: #bb9af7;
+	--danger: #f7768e;
+	--danger-soft: rgba(247, 118, 142, 0.18);
+	--ok: #9ece6a;
+	--ok-soft: rgba(158, 206, 106, 0.18);
+	--warn: #e0af68;
+	--warn-soft: rgba(224, 175, 104, 0.18);
+	--glass-bg: #1f2335;
+	--glass-bg-subtle: #16161e;
+	--glass-bg-elevated: #24283b;
+	--glass-bg-hover: #2f354f;
+	--shadow: 0 16px 44px rgba(10, 11, 18, 0.70), 0 2px 10px rgba(10, 11, 18, 0.40);
+	--shadow-soft: 0 4px 16px rgba(10, 11, 18, 0.50);
+	color-scheme: dark;
+}
+
+/* ── 1.4 Cyberpunk Neon (Solid Performance — 0 GPU Blur) ── */
+:root[data-theme-flavor="dark-cyberpunk"],
+[data-theme-flavor="dark-cyberpunk"] {
+	--bg: #0b0c14;
+	--bg-elevated: #151824;
+	--bg-muted: #11131c;
+	--sidebar-bg: #08090f;
+	--rail-bg: #05050a;
+	--border: #232a42;
+	--border-subtle: #171c2e;
+	--border-strong: rgba(0, 240, 255, 0.50);
+	--text: #f0f4fc;
+	--text-secondary: #94a3b8;
+	--text-tertiary: #64748b;
+	--accent: #00f0ff;
+	--accent-hover: #38f3ff;
+	--accent-soft: rgba(0, 240, 255, 0.16);
+	--accent-contrast: #07080d;
+	--focus: #ffe600;
+	--danger: #ff0055;
+	--danger-soft: rgba(255, 0, 85, 0.18);
+	--ok: #00ff9d;
+	--ok-soft: rgba(0, 255, 157, 0.18);
+	--warn: #ffbe00;
+	--warn-soft: rgba(255, 190, 0, 0.18);
+	--glass-bg: #151724;
+	--glass-bg-subtle: #0f101a;
+	--glass-bg-elevated: #1c1f30;
+	--glass-bg-hover: #262a40;
+	--shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 24px rgba(0, 240, 255, 0.12);
+	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.60);
+	color-scheme: dark;
+}
+
+/* ==========================================================================
+   2. Light Theme Flavors
+   ========================================================================== */
+
+/* ── 2.1 Modern Slate (Default Light — Liquid Glass Experience) ── */
+:root[data-theme="light"][data-theme-flavor="light-default"],
+[data-theme="light"][data-theme-flavor="light-default"],
+:root[data-theme="light"]:not([data-theme-flavor]),
+[data-theme="light"]:not([data-theme-flavor]) {
+	--bg: #f8fafc;
+	--bg-elevated: #ffffff;
+	--bg-muted: #f1f5f9;
+	--sidebar-bg: #f1f5f9;
+	--rail-bg: #e2e8f0;
+	--border: #e2e8f0;
+	--border-subtle: #edf2f7;
+	--border-strong: #cbd5e1;
+	--text: #0f172a;
+	--text-secondary: #475569;
+	--text-tertiary: #94a3b8;
+	--accent: #2563eb;
+	--accent-hover: #1d4ed8;
+	--accent-soft: rgba(37, 99, 235, 0.10);
+	--accent-contrast: #ffffff;
+	--focus: #6366f1;
+	--danger: #dc2626;
+	--danger-soft: rgba(220, 38, 38, 0.10);
+	--ok: #16a34a;
+	--ok-soft: rgba(22, 163, 74, 0.10);
+	--warn: #d97706;
+	--warn-soft: rgba(217, 119, 6, 0.10);
+	--glass-bg: rgba(255, 255, 255, 0.88);
+	--glass-bg-subtle: rgba(255, 255, 255, 0.70);
+	--glass-bg-elevated: #ffffff;
+	--glass-bg-hover: #f8fafc;
+	--shadow: 0 14px 36px rgba(30, 35, 60, 0.08), 0 2px 8px rgba(30, 35, 60, 0.03);
+	--shadow-soft: 0 2px 8px rgba(30, 35, 60, 0.04);
+	color-scheme: light;
+}
+
+/* ── 2.2 Warm Sand (Solid Performance — 0 GPU Blur) ── */
+:root[data-theme-flavor="light-warm"],
+[data-theme-flavor="light-warm"] {
+	--bg: #fbf9f5;
+	--bg-elevated: #f4ecdf;
+	--bg-muted: #ede2d2;
+	--sidebar-bg: #f5ede0;
+	--rail-bg: #ebe0cf;
+	--border: #e2d6c3;
+	--border-subtle: #ece2d2;
+	--border-strong: #d2c1a8;
+	--text: #2a2320;
+	--text-secondary: #6c5d56;
+	--text-tertiary: #9c8b83;
+	--accent: #c2652b;
+	--accent-hover: #a6521e;
+	--accent-soft: rgba(194, 101, 43, 0.14);
+	--accent-contrast: #ffffff;
+	--focus: #a35832;
+	--danger: #c53030;
+	--danger-soft: rgba(197, 48, 48, 0.12);
+	--ok: #2f855a;
+	--ok-soft: rgba(47, 133, 90, 0.12);
+	--warn: #b7791f;
+	--warn-soft: rgba(183, 121, 31, 0.12);
+	--glass-bg: #f5efe4;
+	--glass-bg-subtle: #ede4d6;
+	--glass-bg-elevated: #fbf9f5;
+	--glass-bg-hover: #ede4d6;
+	--shadow: 0 14px 38px rgba(80, 60, 45, 0.07), 0 2px 8px rgba(80, 60, 45, 0.03);
+	--shadow-soft: 0 2px 8px rgba(80, 60, 45, 0.04);
+	color-scheme: light;
+}
+
+/* ── 2.3 Nord Frost (Solid Performance — 0 GPU Blur) ── */
+:root[data-theme-flavor="light-nord"],
+[data-theme-flavor="light-nord"] {
+	--bg: #f3f6fa;
+	--bg-elevated: #ffffff;
+	--bg-muted: #e4edf6;
+	--sidebar-bg: #eaf1f8;
+	--rail-bg: #dbe6f2;
+	--border: #d2dfed;
+	--border-subtle: #e2ecf7;
+	--border-strong: #bacfe4;
+	--text: #1e293b;
+	--text-secondary: #475569;
+	--text-tertiary: #64748b;
+	--accent: #0284c7;
+	--accent-hover: #0369a1;
+	--accent-soft: rgba(2, 132, 199, 0.14);
+	--accent-contrast: #ffffff;
+	--focus: #38bdf8;
+	--danger: #e11d48;
+	--danger-soft: rgba(225, 29, 72, 0.12);
+	--ok: #059669;
+	--ok-soft: rgba(5, 150, 105, 0.12);
+	--warn: #d97706;
+	--warn-soft: rgba(217, 119, 6, 0.12);
+	--glass-bg: #ffffff;
+	--glass-bg-subtle: #e5ecf5;
+	--glass-bg-elevated: #ffffff;
+	--glass-bg-hover: #edf3fa;
+	--shadow: 0 14px 40px rgba(35, 60, 85, 0.08), 0 2px 8px rgba(35, 60, 85, 0.03);
+	--shadow-soft: 0 2px 8px rgba(35, 60, 85, 0.04);
+	color-scheme: light;
+}
+
+/* ==========================================================================
+   3. Solid Performance Backing & 0 GPU Blur Engine
+   ========================================================================== */
+
+/* Disable GPU blur for all 5 non-liquid-glass themes */
+:root[data-theme-flavor="dark-oled"] *,
+:root[data-theme-flavor="dark-tokyo"] *,
+:root[data-theme-flavor="dark-cyberpunk"] *,
+:root[data-theme-flavor="light-warm"] *,
+:root[data-theme-flavor="light-nord"] * {
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+/* Ensure 100% solid, non-transparent surfaces so wallpaper vibrancy never bleeds through */
+:root[data-theme-flavor="dark-oled"],
+:root[data-theme-flavor="dark-tokyo"],
+:root[data-theme-flavor="dark-cyberpunk"],
+:root[data-theme-flavor="light-warm"],
+:root[data-theme-flavor="light-nord"],
+:root[data-theme-flavor="dark-oled"] body,
+:root[data-theme-flavor="dark-tokyo"] body,
+:root[data-theme-flavor="dark-cyberpunk"] body,
+:root[data-theme-flavor="light-warm"] body,
+:root[data-theme-flavor="light-nord"] body,
+:root[data-theme-flavor="dark-oled"] #root,
+:root[data-theme-flavor="dark-tokyo"] #root,
+:root[data-theme-flavor="dark-cyberpunk"] #root,
+:root[data-theme-flavor="light-warm"] #root,
+:root[data-theme-flavor="light-nord"] #root,
+:root[data-theme-flavor="dark-oled"] .reference-workspace,
+:root[data-theme-flavor="dark-tokyo"] .reference-workspace,
+:root[data-theme-flavor="dark-cyberpunk"] .reference-workspace,
+:root[data-theme-flavor="light-warm"] .reference-workspace,
+:root[data-theme-flavor="light-nord"] .reference-workspace {
+	background: var(--bg) !important;
+}
+
+/* ==========================================================================
+   4. High-Precision Structural Styles Across All Themes
+   ========================================================================== */
+
+/* ── 4.1 Base Shell & Canvas ── */
+html, body, #root {
+	background: var(--bg);
+	color: var(--text);
+}
+
+.reference-workspace {
+	background: var(--bg) !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.2 AppRail (Leftmost 56px Bar) ── */
+.app-rail {
+	background: var(--rail-bg) !important;
+	border-right: 1px solid var(--border) !important;
+}
+
+.rail-button {
+	color: var(--text-secondary) !important;
+}
+
+.rail-button:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+.rail-button.active {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+}
+
+.brand-mark {
+	color: var(--accent) !important;
+}
+
+/* ── 4.3 Left Sidebar (Conversations, Projects, Spaces) ── */
+.reference-leftbar,
+.conversation-sidebar {
+	background: var(--sidebar-bg) !important;
+	border-right: 1px solid var(--border) !important;
+}
+
+.reference-brand,
+.sidebar-title {
+	border-bottom: 1px solid var(--border-subtle) !important;
+	background: var(--sidebar-bg) !important;
+}
+
+.reference-brand strong,
+.brand-copy strong {
+	color: var(--text) !important;
+	font-weight: 650 !important;
+}
+
+/* ── 4.4 Search Input & Keybinding Pills ── */
+.reference-search,
+.search-box,
+.reference-memory-search {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 8px !important;
+	color: var(--text) !important;
+	transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.reference-search:focus-within,
+.search-box:focus-within,
+.reference-memory-search:focus-within {
+	border-color: var(--accent) !important;
+	box-shadow: 0 0 0 2px var(--accent-soft) !important;
+}
+
+.reference-search input,
+.search-box input,
+.reference-memory-search input {
+	color: var(--text) !important;
+}
+
+.reference-search input::placeholder,
+.search-box input::placeholder,
+.reference-memory-search input::placeholder {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-search kbd,
+.search-box kbd {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-tertiary) !important;
+	border-radius: 4px;
+	padding: 1px 5px;
+	font-size: 11px;
+}
+
+/* ── 4.5 Section Headings ── */
+.reference-section-heading,
+.sidebar-section-label {
+	color: var(--text-tertiary) !important;
+	font-size: 11px !important;
+	font-weight: 650 !important;
+	letter-spacing: 0.04em !important;
+	text-transform: uppercase !important;
+}
+
+/* ── 4.6 Session Rows, Spaces & Selected States ── */
+.reference-session-row,
+.conversation-row,
+.space-row,
+.reference-space,
+.reference-project-session-item {
+	border-radius: 8px !important;
+	margin: 2px 0 !important;
+	border: 1px solid transparent !important;
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.reference-session-row:hover,
+.conversation-row:hover,
+.space-row:hover,
+.reference-space:hover,
+.reference-project-session-item:hover {
+	background: var(--bg-muted) !important;
+	border-color: var(--border-subtle) !important;
+}
+
+.reference-session-row.selected,
+.conversation-row.selected,
+.space-row.selected,
+.reference-space.selected,
+.reference-project-session-item.selected {
+	background: var(--accent-soft) !important;
+	border-color: color-mix(in srgb, var(--accent) 32%, transparent) !important;
+	border-left: 3px solid var(--accent) !important;
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04) !important;
+}
+
+.reference-session-row strong,
+.conversation-row strong,
+.space-row strong,
+.reference-space strong,
+.reference-project-session-item strong {
+	color: var(--text) !important;
+}
+
+.reference-session-title,
+.conversation-copy,
+.space-copy {
+	color: var(--text-secondary) !important;
+}
+
+.reference-session-row.selected strong,
+.conversation-row.selected strong,
+.space-row.selected strong {
+	font-weight: 650 !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.7 Bottom User Account Profile Card ── */
+.reference-account,
+.sidebar-account {
+	background: var(--sidebar-bg) !important;
+	border-top: 1px solid var(--border-subtle) !important;
+}
+
+.reference-account strong,
+.sidebar-account strong {
+	color: var(--text) !important;
+	font-weight: 650 !important;
+}
+
+.reference-account em {
+	background: var(--accent-soft) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent) !important;
+	color: var(--accent) !important;
+	border-radius: 5px !important;
+	padding: 1px 6px !important;
+	font-size: 10px !important;
+	font-weight: 700 !important;
+	font-style: normal !important;
+}
+
+.reference-account-btn,
+.sidebar-account .icon-button {
+	color: var(--text-secondary) !important;
+	border-radius: 6px !important;
+	transition: all 120ms ease;
+}
+
+.reference-account-btn:hover,
+.sidebar-account .icon-button:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+.reference-account-btn.active {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+}
+
+/* ── 4.8 Main Header & Titlebar ── */
+.reference-main {
+	background: var(--bg) !important;
+}
+
+.reference-main-header {
+	background: var(--bg) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.reference-title h1,
+.reference-title strong {
+	color: var(--text) !important;
+	font-weight: 650 !important;
+}
+
+.reference-title-folder {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent) !important;
+}
+
+.reference-header-icon-btn {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	border-radius: 7px !important;
+}
+
+.reference-header-icon-btn:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+	border-color: var(--border) !important;
+}
+
+.reference-header-icon-btn.active {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border-color: var(--accent) !important;
+}
+
+/* ── 4.9 Chat Message Bubble & Content Presentation ── */
+.message-scroll {
+	background: var(--bg) !important;
+}
+
+/* User Message Bubble */
+.message.user .message-body,
+.reference-user-card {
+	background: var(--accent) !important;
+	color: var(--accent-contrast) !important;
+	border-radius: 14px 14px 4px 14px !important;
+	padding: 10px 15px !important;
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent) !important;
+	border: none !important;
+}
+
+.message.user .message-body p,
+.message.user .message-body span,
+.reference-user-card p {
+	color: var(--accent-contrast) !important;
+}
+
+/* Assistant Message Flow & Typography */
+.message.assistant .message-text,
+.reference-assistant-card,
+.reference-assistant-message {
+	background: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
+	padding: 0 !important;
+	color: var(--text) !important;
+}
+
+.reference-assistant-message p {
+	color: var(--text) !important;
+}
+
+/* ── 4.10 Reasoning (Deep Thinking) Block ── */
+.message-reasoning {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 9px !important;
+	margin: 8px 0 !important;
+	box-shadow: var(--shadow-soft) !important;
+	overflow: hidden;
+}
+
+.message-reasoning.is-thinking {
+	border-color: var(--accent) !important;
+	box-shadow: 0 0 0 1.5px var(--accent-soft), var(--shadow-soft) !important;
+}
+
+.message-reasoning summary {
+	color: var(--text-secondary) !important;
+	padding: 8px 12px !important;
+	font-size: 12px !important;
+	font-weight: 550 !important;
+	cursor: pointer !important;
+	display: flex !important;
+	align-items: center !important;
+	gap: 7px !important;
+	user-select: none;
+}
+
+.message-reasoning summary:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+.reasoning-brain-icon {
+	color: var(--accent) !important;
+}
+
+.reasoning-chevron {
+	color: var(--text-tertiary) !important;
+}
+
+.message-reasoning pre {
+	background: var(--bg-muted) !important;
+	border-top: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	font-family: var(--mono) !important;
+	font-size: 12px !important;
+	line-height: 1.6 !important;
+	padding: 10px 14px !important;
+	margin: 0 !important;
+	max-height: 380px !important;
+	overflow-y: auto !important;
+	white-space: pre-wrap !important;
+	word-break: break-word !important;
+}
+
+/* ── 4.11 Trajectory & Tool Execution Chains ── */
+.trajectory-header-btn {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 8px !important;
+	padding: 5px 11px !important;
+	color: var(--text-secondary) !important;
+	font-size: 12px !important;
+	font-weight: 550 !important;
+	box-shadow: var(--shadow-soft) !important;
+	transition: all 140ms ease !important;
+}
+
+.trajectory-header-btn:hover {
+	background: var(--bg-muted) !important;
+	border-color: var(--border-strong) !important;
+	color: var(--text) !important;
+}
+
+.trajectory-header-btn .trajectory-chevron {
+	color: var(--text-tertiary) !important;
+}
+
+.trajectory-list {
+	border-left: 2px solid var(--border) !important;
+	margin: 6px 0 8px 10px !important;
+	padding-left: 12px !important;
+}
+
+.trajectory-item-line {
+	padding: 4px 8px !important;
+	border-radius: 6px !important;
+	transition: background-color 120ms ease;
+}
+
+.trajectory-item-line:hover {
+	background: var(--bg-muted) !important;
+}
+
+.trajectory-verb {
+	color: var(--text-tertiary) !important;
+	font-size: 11px !important;
+	font-weight: 600 !important;
+	text-transform: uppercase !important;
+	letter-spacing: 0.03em !important;
+}
+
+.trajectory-icon {
+	color: var(--accent) !important;
+}
+
+.trajectory-target {
+	color: var(--text) !important;
+	font-size: 12.5px !important;
+}
+
+.trajectory-duration {
+	color: var(--text-tertiary) !important;
+	font-size: 11px !important;
+}
+
+.trajectory-output,
+.mini-diff-viewer {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	font-family: var(--mono) !important;
+	font-size: 11.5px !important;
+	border-radius: 8px !important;
+	padding: 8px 12px !important;
+}
+
+.trajectory-badge {
+	font-size: 10.5px !important;
+	font-weight: 600 !important;
+	border-radius: 4px !important;
+	padding: 1px 6px !important;
+}
+
+.trajectory-badge.running {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+}
+
+.trajectory-badge.error {
+	background: var(--danger-soft) !important;
+	color: var(--danger) !important;
+	border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent) !important;
+}
+
+.activity-inline {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	color: var(--text-secondary) !important;
+}
+
+.activity-inline.activity-terminal {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text) !important;
+}
+
+.activity-inline.activity-terminal .activity-summary {
+	color: var(--text) !important;
+}
+
+/* ── 4.12 Tool Trace Cards ── */
+.tool-trace {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 8px !important;
+	overflow: hidden;
+}
+
+.tool-trace summary {
+	color: var(--text-secondary) !important;
+}
+
+.tool-trace summary:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.13 Code Blocks in Markdown ── */
+.md-code-block {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 10px !important;
+	overflow: hidden;
+	box-shadow: var(--shadow-soft) !important;
+}
+
+.md-code-header {
+	background: var(--bg-muted) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.md-code-lang {
+	color: var(--text-secondary) !important;
+}
+
+.md-code-copy-btn {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+}
+
+.md-code-copy-btn:hover {
+	background: var(--bg-muted) !important;
+	border-color: var(--border) !important;
+	color: var(--text) !important;
+}
+
+.md-code-block .md-code {
+	background: transparent !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.14 Markdown Inline Code, Tables & Blockquotes ── */
+.md-inline-code {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent) !important;
+	border-radius: 4px;
+	padding: 2px 5px;
+}
+
+.md-quote {
+	background: var(--bg-muted) !important;
+	border-left: 3px solid var(--accent) !important;
+	color: var(--text-secondary) !important;
+}
+
+.md-table-wrap {
+	border: 1px solid var(--border) !important;
+	background: var(--bg-elevated) !important;
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.md-table th {
+	background: var(--bg-muted) !important;
+	border-bottom: 1px solid var(--border) !important;
+	color: var(--text-secondary) !important;
+	font-weight: 650;
+}
+
+.md-table td {
+	border-bottom: 1px solid var(--border-subtle) !important;
+	color: var(--text) !important;
+}
+
+.md-table tr:hover td {
+	background: var(--bg-muted) !important;
+}
+
+/* ── 4.15 Floating Composer Box (Bottom Input) ── */
+.reference-composer {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border-strong) !important;
+	box-shadow: var(--shadow) !important;
+	border-radius: 16px !important;
+	transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.reference-composer:focus-within {
+	border-color: var(--accent) !important;
+	box-shadow: 0 0 0 2.5px var(--accent-soft), var(--shadow) !important;
+}
+
+.reference-composer textarea {
+	color: var(--text) !important;
+}
+
+.reference-composer textarea::placeholder {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-composer-toolbar {
+	border-top: 1px solid var(--border-subtle) !important;
+}
+
+.reference-model-control,
+.reference-attachment-chip {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	border-radius: 999px !important;
+}
+
+.reference-model-control:hover,
+.reference-attachment-chip:hover {
+	background: var(--bg-elevated) !important;
+	border-color: var(--border) !important;
+	color: var(--accent) !important;
+}
+
+.reference-model-sep {
+	color: var(--border-strong) !important;
+}
+
+.reference-model-thinking {
+	color: var(--text-secondary) !important;
+}
+
+.reference-model-chevron {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-model-name {
+	color: var(--text) !important;
+	font-weight: 600 !important;
+}
+
+.reference-composer-icon {
+	color: var(--text-secondary) !important;
+}
+
+.reference-composer-icon:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+.reference-composer .reference-send:not(:disabled) {
+	background: var(--accent) !important;
+	color: var(--accent-contrast) !important;
+}
+
+.reference-composer .reference-send:disabled {
+	background: var(--bg-muted) !important;
+	color: var(--text-tertiary) !important;
+}
+
+/* ── 4.15.1 Composer Status Dock & Badges ── */
+.composer-status-dock {
+	border-top: 1px solid var(--border-subtle) !important;
+}
+
+.dock-badge {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	border-radius: 6px !important;
+	transition: all 120ms ease;
+}
+
+.dock-badge:hover {
+	background: var(--bg-elevated) !important;
+	border-color: var(--border) !important;
+	color: var(--text) !important;
+}
+
+.dock-badge-branch {
+	color: var(--accent) !important;
+}
+
+.dock-badge-branch .dock-icon-branch {
+	color: var(--accent) !important;
+}
+
+.dock-badge-tokens {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+}
+
+.dock-badge-changes.has-changes {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+}
+
+.dock-btn-refresh {
+	color: var(--text-tertiary) !important;
+}
+
+.dock-btn-refresh:hover {
+	color: var(--text) !important;
+}
+
+/* ── 4.15.2 Sidebar Nav Bar & Item Badges ── */
+.reference-nav-item {
+	color: var(--text-secondary) !important;
+	border-radius: 8px !important;
+	border: 1px solid transparent !important;
+	transition: all 120ms ease;
+}
+
+.reference-nav-item:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+	border-color: var(--border-subtle) !important;
+}
+
+.reference-nav-item.active {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+	font-weight: 650 !important;
+}
+
+.reference-nav-count {
+	background: var(--bg-muted) !important;
+	color: var(--text-tertiary) !important;
+	border: 1px solid var(--border-subtle) !important;
+	border-radius: 10px !important;
+	padding: 1px 6px !important;
+	font-size: 10.5px !important;
+	font-weight: 600 !important;
+	margin-left: auto;
+}
+
+.reference-nav-item.active .reference-nav-count {
+	background: var(--accent) !important;
+	color: var(--accent-contrast) !important;
+	border-color: transparent !important;
+}
+
+/* ── 4.15.3 Page / Surface Headers ── */
+.surface-header,
+.operation-page-header,
+.capability-page-header,
+.task-page-header {
+	border-bottom: 1px solid var(--border-subtle) !important;
+	background: var(--sidebar-bg) !important;
+}
+
+/* ── 4.16 Right Split View Panel (Live Preview & Markdown Artifacts) ── */
+.live-preview-panel,
+.reference-context {
+	background: var(--bg) !important;
+	border-left: 1px solid var(--border) !important;
+}
+
+.live-preview-toolbar,
+.reference-context > header {
+	background: var(--sidebar-bg) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.preview-url-bar {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+}
+
+.preview-url-input {
+	color: var(--text) !important;
+}
+
+.preview-mode-switch {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+}
+
+.preview-mode-btn.active {
+	background: var(--bg-elevated) !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.17 Settings Redesign Shell & Theme Mode/Flavor Cards ── */
+.settings-redesign-shell {
+	background: var(--bg) !important;
+}
+
+.settings-header {
+	background: var(--bg-elevated) !important;
+	border-bottom: 1px solid var(--border) !important;
+}
+
+.settings-header-title strong {
+	color: var(--text) !important;
+}
+
+.settings-header-title span {
+	color: var(--text-tertiary) !important;
+}
+
+.settings-sidebar {
+	background: var(--sidebar-bg) !important;
+	border-right: 1px solid var(--border) !important;
+}
+
+.settings-nav-item {
+	color: var(--text-secondary) !important;
+	border: 1px solid transparent !important;
+}
+
+.settings-nav-item:hover {
+	background: var(--bg-muted) !important;
+	border-color: var(--border-subtle) !important;
+	color: var(--text) !important;
+}
+
+.settings-nav-item.active {
+	background: var(--accent-soft) !important;
+	border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+	color: var(--accent) !important;
+	font-weight: 650 !important;
+}
+
+.settings-section-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow) !important;
+	border-radius: 16px !important;
+}
+
+.settings-section-card-header {
+	background: var(--bg-muted) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.settings-section-card-title h3 {
+	color: var(--text) !important;
+}
+
+.settings-section-card-title span {
+	color: var(--text-tertiary) !important;
+}
+
+.theme-mode-card {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 12px !important;
+	transition: all 140ms ease !important;
+}
+
+.theme-mode-card:hover {
+	border-color: var(--border-strong) !important;
+	background: var(--bg-elevated) !important;
+}
+
+.theme-mode-card.active {
+	border-color: var(--accent) !important;
+	background: var(--accent-soft) !important;
+	box-shadow: 0 0 0 1.5px var(--accent) !important;
+}
+
+.theme-flavor-card {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 14px !important;
+	transition: all 160ms ease !important;
+}
+
+.theme-flavor-card:hover {
+	border-color: var(--accent) !important;
+	transform: translateY(-2px);
+	box-shadow: var(--shadow-soft) !important;
+}
+
+.theme-flavor-card.active {
+	border-color: var(--accent) !important;
+	background: var(--accent-soft) !important;
+	box-shadow: 0 0 0 2px var(--accent) !important;
+}
+
+.theme-flavor-header strong {
+	color: var(--text) !important;
+}
+
+.theme-flavor-info p {
+	color: var(--text-tertiary) !important;
+}
+
+/* ── 4.18 Modals, Popovers, Dropdowns & Menus ── */
+.dialog,
+.ui-popover-content,
+.ui-select-content,
+.model-popover,
+.reference-slash-menu,
+.reference-header-menu,
+.reference-project-menu {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border-strong) !important;
+	box-shadow: var(--shadow) !important;
+	color: var(--text) !important;
+	border-radius: 12px !important;
+}
+
+.reference-slash-menu button,
+.reference-header-menu button,
+.reference-project-menu button,
+.composer-plus-menu button {
+	color: var(--text-secondary) !important;
+}
+
+.reference-slash-menu button:hover,
+.reference-header-menu button:hover,
+.reference-project-menu button:hover,
+.composer-plus-menu button:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+/* ── 4.19 Universal Scrollbar Polish ── */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--border-strong);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--text-tertiary);
+}

@@ -36,11 +36,11 @@ export function ModeTabBar({
 				<button
 					type="button"
 					className={mode === "code" ? "active" : ""}
-					title="Code"
+					title="Code 编程工程与无人值守交付"
 					onClick={() => onModeChange("code")}
 				>
 					<TerminalSquare size={13} />
-					Code
+					Code (无人值守)
 				</button>
 			</div>
 		</div>

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { describe, it } from "node:test";
-import { MemoryDb } from "../src/memory/memory-db.ts";
+import { MemoryDb, safeDbRun } from "../src/memory/memory-db.ts";
 
 describe("MemoryDb SQLite State Machine", () => {
 	it("initializes schema and tables in in-memory mode", () => {
@@ -135,6 +135,28 @@ describe("MemoryDb SQLite State Machine", () => {
 				rmSync(tempDir, { recursive: true, force: true });
 			} catch {}
 		}
+	});
+
+	it("gcStaleJobs deletes completed/failed jobs older than retention cutoff", () => {
+		const db = new MemoryDb(":memory:");
+		db.enqueueJob("memory_stage1", "old-job");
+		const claimed = db.claimNextJob("worker-1");
+		db.completeJob("memory_stage1", "old-job", claimed!.ownershipToken);
+
+		// Manually set finished_at to 20 days ago
+		const twentyDaysAgo = Date.now() - 20 * 86_400_000;
+		(db as any).db.prepare("UPDATE jobs SET finished_at = ? WHERE job_key = 'old-job'").run(twentyDaysAgo);
+
+		// GC with 14 days retention
+		const pruned = db.gcStaleJobs(14);
+		assert.equal(pruned, 1);
+		assert.equal(db.getJob("memory_stage1", "old-job"), undefined);
+		db.close();
+	});
+
+	it("safeDbRun executes successfully and returns result", () => {
+		const res = safeDbRun(() => 42);
+		assert.equal(res, 42);
 	});
 });
 

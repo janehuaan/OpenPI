@@ -439,4 +439,45 @@ export class MemoryDb {
 			unconsolidatedStage1: Number((stage1Stmt.get() as any)?.c ?? 0),
 		};
 	}
+
+	/**
+	 * Garbage collect completed and failed jobs older than retentionDays (default 14 days)
+	 * to prevent unbounded SQLite growth.
+	 */
+	public gcStaleJobs(retentionDays = 14): number {
+		const cutoffMs = Date.now() - retentionDays * 86_400_000;
+		const stmt = this.db.prepare(`
+			DELETE FROM jobs
+			WHERE status IN ('completed', 'failed')
+			  AND finished_at IS NOT NULL
+			  AND finished_at < ?
+		`);
+		const info = stmt.run(cutoffMs);
+		return Number((info as any)?.changes ?? 0);
+	}
+}
+
+/**
+ * Execute a synchronous SQLite operation with automatic retry on SQLITE_BUSY / locked.
+ */
+export function safeDbRun<T>(fn: () => T, maxRetries = 3): T {
+	let attempt = 0;
+	while (true) {
+		try {
+			return fn();
+		} catch (err: any) {
+			const isBusy =
+				err?.code === "SQLITE_BUSY" ||
+				(typeof err?.message === "string" &&
+					(err.message.includes("busy") || err.message.includes("locked")));
+			if (isBusy && attempt < maxRetries) {
+				attempt++;
+				const start = Date.now();
+				const delay = 15 * attempt;
+				while (Date.now() - start < delay) {}
+				continue;
+			}
+			throw err;
+		}
+	}
 }

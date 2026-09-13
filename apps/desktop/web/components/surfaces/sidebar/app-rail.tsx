@@ -5,9 +5,12 @@ import {
 	GitBranch,
 	ListTodo,
 	MessageSquare,
+	Moon,
 	Server,
+	Sun,
 } from "../../icons.tsx";
 import type { TaskDefinition, TaskRun } from "../../../types";
+import { useTheme } from "../../../lib/theme-manager";
 
 export type MoreView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
 
@@ -35,6 +38,7 @@ export function AppRail({
 	gitChangedCount?: number;
 	onNavigate(view: MoreView | "chat"): void;
 }) {
+	const { effectiveMode, toggle: toggleTheme } = useTheme();
 	const activeRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length;
 	return (
 		<aside className="app-rail" aria-label="主导航">
@@ -76,6 +80,17 @@ export function AppRail({
 					);
 				})}
 			</nav>
+			<div className="rail-footer" style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "6px", alignItems: "center" }}>
+				<button
+					type="button"
+					className="rail-button"
+					data-label={effectiveMode === "dark" ? "切换浅色 (⌘⇧T)" : "切换深色 (⌘⇧T)"}
+					title={effectiveMode === "dark" ? "切换浅色模式 (⌘⇧T)" : "切换深色模式 (⌘⇧T)"}
+					onClick={toggleTheme}
+				>
+					{effectiveMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+				</button>
+			</div>
 		</aside>
 	);
 }

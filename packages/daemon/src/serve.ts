@@ -67,25 +67,34 @@ const startedAt = Date.now();
  */
 function reapStaleDaemon(): void {
 	if (process.platform !== "win32") {
-		try {
-			const output = execFileSync("pgrep", ["-f", "openpi-daemon serve"], { encoding: "utf8" });
-			for (const line of output.split("\n")) {
-				const pid = Number.parseInt(line.trim(), 10);
-				if (!Number.isFinite(pid) || pid === process.pid) continue;
-				try {
-					process.kill(pid, "SIGKILL");
-					process.stderr.write(`[daemon] reaped stale daemon pid ${pid}\n`);
-				} catch {
-					// Already gone between listing and killing.
+		const patterns = ["daemon\\.(js|ts) serve", "openpi-daemon", "openpi/daemon\\.js serve"];
+		for (const pat of patterns) {
+			try {
+				const output = execFileSync("pgrep", ["-f", pat], { encoding: "utf8" });
+				for (const line of output.split("\n")) {
+					const pid = Number.parseInt(line.trim(), 10);
+					if (!Number.isFinite(pid) || pid === process.pid) continue;
+					try {
+						process.kill(pid, "SIGKILL");
+						process.stderr.write(`[daemon] reaped stale daemon pid ${pid}\n`);
+					} catch {
+						// Already gone between listing and killing.
+					}
 				}
+			} catch {
+				// pgrep exits non-zero when nothing matches; that is the normal case.
 			}
-		} catch {
-			// pgrep exits non-zero when nothing matches; that is the normal case.
 		}
 		const path = socketPath();
 		if (existsSync(path)) {
 			try {
 				unlinkSync(path);
+			} catch {}
+		}
+		const pidFile = pidPath();
+		if (existsSync(pidFile)) {
+			try {
+				unlinkSync(pidFile);
 			} catch {}
 		}
 	}

@@ -12,7 +12,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-import { type BrowserWindow, dialog, type IpcMain, Notification, shell } from "electron";
+import { type BrowserWindow, dialog, type IpcMain, nativeTheme, Notification, shell } from "electron";
 import {
 	type AppOp,
 	applyHunksToSource,
@@ -57,6 +57,7 @@ import {
 } from "./system-ops.ts";
 import { toggleHudWindow } from "./hud.ts";
 import { isModelOutageOrRateLimitError, pickCascadeFallbackModel } from "./model-cascade.ts";
+import { autopilotManager, runShellCommand } from "./autopilot-manager.ts";
 
 function readModelsConfig(): { providers: Record<string, any> } {
 	const file = join(agentDir(), "models.json");
@@ -92,7 +93,7 @@ function settingsPath(): string {
 	return join(agentDir(), "settings.json");
 }
 
-function readSettingsJson(): Record<string, any> {
+export function readSettingsJson(): Record<string, any> {
 	const file = settingsPath();
 	if (!existsSync(file)) return {};
 	try {
@@ -871,6 +872,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 	};
 
 	onRestartDeferred(() => send("daemon-restart-deferred"));
+	autopilotManager.setBroadcaster(send as any);
 
 	const getClient = async () => ensureDaemon();
 
@@ -2206,9 +2208,19 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			return true;
 		},
 
+		set_native_theme: async ({ theme }: { theme?: "system" | "dark" | "light" } = {}) => {
+			if (theme === "system" || theme === "dark" || theme === "light") {
+				nativeTheme.themeSource = theme;
+				return true;
+			}
+			return false;
+		},
+
 		get_app_settings: async (_args: any = {}) => {
 			const settings = readSettingsJson();
 			return {
+				theme: typeof settings.theme === "string" ? settings.theme : undefined,
+				themeFlavor: typeof settings.themeFlavor === "string" ? settings.themeFlavor : undefined,
 				defaultProvider: typeof settings.defaultProvider === "string" ? settings.defaultProvider : undefined,
 				defaultModel: typeof settings.defaultModel === "string" ? settings.defaultModel : undefined,
 				defaultThinkingLevel: typeof settings.defaultThinkingLevel === "string" ? settings.defaultThinkingLevel : "off",
@@ -2228,6 +2240,13 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			const current = readSettingsJson();
 			const updated = { ...current };
 
+			if ("theme" in patch) {
+				updated.theme = patch.theme || undefined;
+				if (patch.theme === "system" || patch.theme === "dark" || patch.theme === "light") {
+					nativeTheme.themeSource = patch.theme;
+				}
+			}
+			if ("themeFlavor" in patch) updated.themeFlavor = patch.themeFlavor || undefined;
 			if ("defaultProvider" in patch) updated.defaultProvider = patch.defaultProvider || undefined;
 			if ("defaultModel" in patch) updated.defaultModel = patch.defaultModel || undefined;
 			if ("defaultThinkingLevel" in patch) updated.defaultThinkingLevel = patch.defaultThinkingLevel || undefined;
@@ -2610,6 +2629,73 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				references,
 				count: references.length,
 			};
+		},
+
+		start_autopilot_task: async ({
+			cwd,
+			prompt,
+			testCommand,
+			maxIterations,
+		}: {
+			cwd?: string;
+			prompt: string;
+			testCommand?: string;
+			maxIterations?: number;
+		}) => {
+			const targetCwd = cwd || defaultWorkspace();
+			return autopilotManager.startTask({
+				cwd: targetCwd,
+				prompt,
+				testCommand,
+				maxIterations,
+			});
+		},
+
+		get_autopilot_status: async ({ taskId }: { taskId: string }) => {
+			const task = autopilotManager.getTask(taskId);
+			return { task: task ?? null };
+		},
+
+		merge_autopilot_task: async ({ taskId }: { taskId: string }) => {
+			return autopilotManager.mergeTask(taskId);
+		},
+
+		discard_autopilot_task: async ({ taskId }: { taskId: string }) => {
+			return autopilotManager.discardTask(taskId);
+		},
+
+		continue_autopilot_task: async ({
+			taskId,
+			additionalIterations,
+		}: {
+			taskId: string;
+			additionalIterations?: number;
+		}) => {
+			return autopilotManager.continueHealing(taskId, additionalIterations);
+		},
+
+		focus_main_window: async () => {
+			const win = getWindow();
+			if (win && !win.isDestroyed()) {
+				if (win.isMinimized()) win.restore();
+				win.show();
+				win.focus();
+				return true;
+			}
+			return false;
+		},
+
+		run_terminal_command: async ({
+			cwd,
+			command,
+			timeoutMs,
+		}: {
+			cwd?: string;
+			command: string;
+			timeoutMs?: number;
+		}) => {
+			const targetCwd = cwd || defaultWorkspace();
+			return runShellCommand(targetCwd, command, timeoutMs || 30000);
 		},
 	};
 

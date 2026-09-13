@@ -1,12 +1,18 @@
 {
   "name": "@openpi/extension-memory",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "File-based long-term memory for openpi (hashed n-gram vectors + BM25, fully local)",
-  "keywords": ["pi-package", "openpi", "memory"],
+  "keywords": [
+    "pi-package",
+    "openpi",
+    "memory"
+  ],
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "exports": {
     ".": "./src/index.ts"

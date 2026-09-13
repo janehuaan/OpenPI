@@ -59,6 +59,16 @@ type PendingRequest = {
 export type EventListener = (event: PiRpcEvent) => void;
 export type UiRequestHandler = (request: PiRpcEvent) => void;
 
+/** Unattended autonomous engineering directive automatically injected into all Code mode sessions. */
+const CODE_MODE_UNATTENDED_DIRECTIVE = [
+	"【OpenPI 无人值守自主研发与持续自愈准则】：",
+	"1. 主动全维问题探测：在任何代码修改或开发任务完成后，必须主动调用 bash 运行项目对应的全维验证（包含编译/类型检查如 tsc / npm run typecheck、单元测试如 npm test / pytest / cargo test / go test、静态检查 lint 与构建 build）。",
+	"2. 循环攻坚与自动收敛：如果在验证过程中发现任何测试失败、类型报错、编译错误或代码规范问题，严禁停滞或把半成品交付给用户，必须主动定位源码根因并实施修复，持续循环验证，直到所有维度达到 0 报错（完全通过）为止。",
+	"3. 交付完整性：确保所有变更都经过真实验证，无破坏性副作用与遗留缺陷。",
+	"4. 长耗时任务排重与幂等保护：执行可能超过 60 秒的长耗时重型任务（如 docker build、大型全量编译、镜像压包等）时，严禁盲目频繁重试！重新执行前必须先用 pgrep/docker ps 确认是否有前序同名任务正在运行，避免多进程重复竞争与死锁。",
+	"5. 错误颠簸防死锁：若同一命令连续 2 次报完全相同的系统级环境错误（如 command not found / permission denied），严禁在错误原地反复空转，必须优先检查工具链 PATH 与执行环境并调整策略。",
+].join("\n");
+
 export function buildRpcArgs(options: RpcProcessOptions): string[] {
 	const args = ["--mode", "rpc"];
 	// A bare --provider is ignored by the CLI; only --model <provider>/<id>
@@ -66,7 +76,10 @@ export function buildRpcArgs(options: RpcProcessOptions): string[] {
 	if (options.model) args.push("--model", options.model);
 	if (options.sessionFile) args.push("--session", options.sessionFile);
 	else args.push("--no-session");
-	if (options.mode === "code") args.push("--tools", CODE_MODE_TOOLS.join(","));
+	if (options.mode === "code") {
+		args.push("--tools", CODE_MODE_TOOLS.join(","));
+		args.push("--append-system-prompt", CODE_MODE_UNATTENDED_DIRECTIVE);
+	}
 	if (options.extraArgs?.length) args.push(...options.extraArgs);
 	return args;
 }

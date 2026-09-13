@@ -83,6 +83,7 @@ export const INVOKE_CHANNELS = [
 	"start_speech_recognition",
 	"stop_speech_recognition",
 	"notify_task_completed",
+	"set_native_theme",
 	"get_app_settings",
 	"update_app_settings",
 	"git_status",
@@ -112,6 +113,13 @@ export const INVOKE_CHANNELS = [
 	"batch_probe_provider_models",
 	"search_code_symbols",
 	"get_symbol_references",
+	"start_autopilot_task",
+	"get_autopilot_status",
+	"merge_autopilot_task",
+	"discard_autopilot_task",
+	"continue_autopilot_task",
+	"focus_main_window",
+	"run_terminal_command",
 ] as const;
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number];
@@ -122,6 +130,7 @@ export const EVENT_CHANNELS = [
 	"speech-event",
 	"daemon-restart-deferred",
 	"daemon-status",
+	"autopilot-event",
 ] as const;
 
 export type EventChannel = (typeof EVENT_CHANNELS)[number];

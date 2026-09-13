@@ -76,6 +76,17 @@ describe("keybindings", () => {
 			expect(matchKeybinding({ key: "e", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
 		});
 
+		it("matches Cmd/Ctrl + Shift + T for toggle_theme", () => {
+			expect(matchKeybinding({ key: "t", metaKey: true, ctrlKey: false, shiftKey: true, altKey: false })).toBe(
+				"toggle_theme",
+			);
+			expect(matchKeybinding({ key: "T", metaKey: false, ctrlKey: true, shiftKey: true, altKey: false })).toBe(
+				"toggle_theme",
+			);
+			// Without shift, should NOT match
+			expect(matchKeybinding({ key: "t", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
+		});
+
 		it("returns null for unrelated keys", () => {
 			expect(matchKeybinding({ key: "k", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
 			expect(matchKeybinding({ key: "Enter", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false })).toBeNull();
@@ -206,6 +217,16 @@ describe("keybindings", () => {
 			expect(handled).toBe(true);
 			expect(event.preventDefault).toHaveBeenCalledTimes(1);
 			expect(onOpenShortcuts).toHaveBeenCalledTimes(1);
+		});
+
+		it("calls onToggleTheme and prevents default on Cmd+Shift+T", () => {
+			const onToggleTheme = vi.fn();
+			const event = createMockEvent({ key: "t", metaKey: true, shiftKey: true });
+			const handled = handleKeybinding(event, { onToggleTheme });
+
+			expect(handled).toBe(true);
+			expect(event.preventDefault).toHaveBeenCalledTimes(1);
+			expect(onToggleTheme).toHaveBeenCalledTimes(1);
 		});
 
 		it("does nothing when handler is missing", () => {

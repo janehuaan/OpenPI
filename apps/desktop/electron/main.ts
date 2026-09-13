@@ -6,14 +6,37 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme, screen, session, shell } from "electron";
 import { disconnect, ensureDaemon } from "./daemon.ts";
-import { registerHandlers } from "./handlers.ts";
+import { registerHandlers, readSettingsJson } from "./handlers.ts";
 import { cleanupGlobalShortcuts, setupGlobalShortcuts, toggleHudWindow } from "./hud.ts";
 import { captureScreenNative } from "./system-ops.ts";
 import { destroySystemTray, setupSystemTray } from "./tray.ts";
+
+// Augment process.env.PATH so subagents and tools have access to cargo, brew, bun, etc. in macOS GUI app
+(() => {
+	const home = process.env.HOME || homedir();
+	const additionalPaths = [
+		join(home, ".cargo/bin"),
+		"/opt/homebrew/bin",
+		"/opt/homebrew/sbin",
+		"/usr/local/bin",
+		join(home, ".local/bin"),
+		join(home, ".bun/bin"),
+		join(home, "go-sdk/go/bin"),
+		join(home, "go/bin"),
+	];
+	const existing = (process.env.PATH || "").split(":");
+	for (const p of additionalPaths) {
+		if (existsSync(p) && !existing.includes(p)) {
+			existing.unshift(p);
+		}
+	}
+	process.env.PATH = existing.join(":");
+})();
 
 // Prevent fatal unhandled EPIPE crashes if terminal or parent process closes stdio pipes
 process.stdout?.on?.("error", (err: any) => {
@@ -247,6 +270,10 @@ if (!gotSingleInstanceLock) {
 	});
 
 	registerHandlers(ipcMain, () => mainWindow);
+	const initialSettings = readSettingsJson();
+	if (initialSettings.theme === "system" || initialSettings.theme === "dark" || initialSettings.theme === "light") {
+		nativeTheme.themeSource = initialSettings.theme;
+	}
 	nativeTheme.on("updated", () => {
 		if (process.platform !== "darwin") mainWindow?.setBackgroundColor(backgroundColor());
 	});

@@ -24,6 +24,8 @@ export type CapabilityTab =
 	| "kernel";
 
 export interface AppSettings {
+	theme?: "system" | "dark" | "light";
+	themeFlavor?: string;
 	defaultProvider?: string;
 	defaultModel?: string;
 	defaultThinkingLevel?: string;

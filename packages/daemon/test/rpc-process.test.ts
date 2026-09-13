@@ -87,9 +87,11 @@ test("buildRpcArgs restricts tools in code mode only", () => {
 	const tools = code[code.indexOf("--tools") + 1]?.split(",") ?? [];
 	assert.ok(tools.includes("read"));
 	assert.ok(tools.includes("edit"));
+	assert.ok(code.includes("--append-system-prompt"));
 
 	const chat = buildRpcArgs({ sessionId: "s1", cwd: "/tmp", mode: "chat" });
 	assert.equal(chat.includes("--tools"), false);
+	assert.equal(chat.includes("--append-system-prompt"), false);
 });
 
 test("send resolves with the correlated response", async () => {
