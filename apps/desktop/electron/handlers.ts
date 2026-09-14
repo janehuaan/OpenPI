@@ -31,7 +31,7 @@ import {
 	WorkspaceSymbolIndexer,
 	type SymbolKind,
 } from "@openpi/shared";
-import { agentDir, defaultWorkspace, sessionsDir } from "@openpi/daemon";
+import { agentDir, defaultWorkspace, sessionsDir } from "./daemon-client.ts";
 import { eventChannelName, invokeChannelName, type EventChannel, type InvokeChannel } from "./channels.ts";
 import { queryDynamicRegistry } from "./model-specs-registry.ts";
 import { probeSingleModel, batchProbeModels, type ModelProbeResult } from "./model-prober.ts";

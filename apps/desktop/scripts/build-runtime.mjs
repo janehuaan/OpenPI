@@ -58,20 +58,11 @@ function size(path) {
 rmSync(runtime, { recursive: true, force: true });
 mkdirSync(runtime, { recursive: true });
 
-// ── The daemon ────────────────────────────────────────────────────────────
-// Bundling pulls in @openpi/shared and @openpi/scheduler, so the packaged app
-// needs no workspace layout and no TS stripping at runtime.
-await build({
-	entryPoints: [join(repo, "packages/daemon/src/cli.ts")],
-	outfile: join(runtime, "daemon.js"),
-	bundle: true,
-	platform: "node",
-	target: "node22",
-	format: "esm",
-	sourcemap: true,
-	logLevel: "warning",
-});
-log(`daemon.js      ${size(join(runtime, "daemon.js"))}`);
+// ── The daemon (Rust Native) ────────────────────────────────────────────
+// The entire daemon and scheduler are compiled into a high-performance single native binary.
+execFileSync("cargo", ["build", "--release", "--bin", "openpi-daemon"], { cwd: repo, stdio: "inherit" });
+cpSync(join(repo, "target/release/openpi-daemon"), join(runtime, "openpi-daemon"));
+log(`openpi-daemon  ${size(join(runtime, "openpi-daemon"))}`);
 
 // ── Extensions ────────────────────────────────────────────────────────────
 // Each becomes one file. pi's peer packages stay external: the extension is

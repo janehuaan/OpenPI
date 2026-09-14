@@ -18,7 +18,7 @@ import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientRequestInput, HealthInfo } from "@openpi/shared";
-import { DaemonClient, isDaemonLive } from "@openpi/daemon";
+import { DaemonClient, isDaemonLive } from "./daemon-client.ts";
 
 export type DaemonStatus = "connected" | "reconnecting" | "disconnected";
 

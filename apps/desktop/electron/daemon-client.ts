@@ -1,11 +1,10 @@
 /**
- * Minimal client for talking to a running daemon.
- *
- * Used by the CLI subcommands and by tests. The desktop app will use the same
- * shape from the Electron main process.
+ * IPC client for communicating with the native Rust OpenPI Daemon.
  */
 
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { connect, type Socket } from "node:net";
 import {
 	type ClientRequest,
@@ -15,7 +14,26 @@ import {
 	type PiRpcEvent,
 	type ServerMessage,
 } from "@openpi/shared";
-import { socketPath } from "./../config.ts";
+
+export function openpiDir(): string {
+	return process.env.OPENPI_DIR ?? join(homedir(), ".openpi");
+}
+
+export function socketPath(): string {
+	return process.env.OPENPI_SOCKET_PATH ?? join(openpiDir(), "openpi.sock");
+}
+
+export function agentDir(): string {
+	return join(openpiDir(), "agent");
+}
+
+export function sessionsDir(): string {
+	return join(openpiDir(), "sessions");
+}
+
+export function defaultWorkspace(): string {
+	return process.env.OPENPI_WORKSPACE ?? homedir();
+}
 
 export type EventHandler = (sessionId: string, event: PiRpcEvent) => void;
 

@@ -8,9 +8,6 @@
     "paths": {
       "@openpi/shared": [
         "./packages/shared/src/index.ts"
-      ],
-      "@openpi/daemon": [
-        "./packages/daemon/src/index.ts"
       ]
     },
     "baseUrl": "."

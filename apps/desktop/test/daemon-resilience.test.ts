@@ -13,7 +13,7 @@ const { mockClientInstance, mockDaemonLive } = vi.hoisted(() => {
 	return { mockClientInstance, mockDaemonLive };
 });
 
-vi.mock("@openpi/daemon", () => {
+vi.mock("../electron/daemon-client.ts", () => {
 	return {
 		DaemonClient: vi.fn().mockImplementation(() => mockClientInstance),
 		isDaemonLive: mockDaemonLive,
