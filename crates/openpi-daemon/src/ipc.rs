@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tracing::{error, info, warn};
 use openpi_proto::{ClientRequest, HealthInfo, ServerMessage};
 use openpi_scheduler::Scheduler;
@@ -69,12 +69,98 @@ async fn handle_connection(
     let (event_tx, mut event_rx_forward) = tokio::sync::mpsc::channel::<String>(128);
 
     tokio::spawn(async move {
-        while let Ok((session_id, event)) = event_rx.recv().await {
-            let subs = subs_clone.lock().await;
-            if subs.contains(&session_id) {
-                let msg = ServerMessage::event(&session_id, event);
-                if let Ok(line) = msg.to_json_line() {
-                    let _ = event_tx.send(line).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        let mut pending_text_delta: Option<(String, usize, String, String)> = None; // (session_id, content_index, text, last_event_type)
+
+        loop {
+            tokio::select! {
+                biased;
+                res = event_rx.recv() => {
+                    match res {
+                        Ok((session_id, event)) => {
+                            let subs = subs_clone.lock().await;
+                            if !subs.contains(&session_id) {
+                                continue;
+                            }
+
+                            // Check if event is an assistant streaming delta: assistantMessageEvent.type == "text_delta"
+                            let is_text_delta = event.get("type").and_then(|v| v.as_str()) == Some("message_update")
+                                && event.get("assistantMessageEvent")
+                                    .and_then(|ame| ame.get("type"))
+                                    .and_then(|t| t.as_str()) == Some("text_delta");
+
+                            if is_text_delta {
+                                let ame = &event["assistantMessageEvent"];
+                                let content_index = ame.get("contentIndex").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                                let delta = ame.get("delta").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                                if let Some((ref cur_sid, cur_idx, ref mut cur_text, _)) = pending_text_delta {
+                                    if cur_sid == &session_id && cur_idx == content_index {
+                                        cur_text.push_str(&delta);
+                                        continue;
+                                    }
+                                }
+
+                                // Different delta target: flush existing first
+                                if let Some((p_sid, p_idx, p_text, _)) = pending_text_delta.take() {
+                                    let batched_event = serde_json::json!({
+                                        "type": "message_update",
+                                        "assistantMessageEvent": {
+                                            "type": "text_delta",
+                                            "contentIndex": p_idx,
+                                            "delta": p_text
+                                        }
+                                    });
+                                    let msg = ServerMessage::event(&p_sid, batched_event);
+                                    if let Ok(line) = msg.to_json_line() {
+                                        let _ = event_tx.send(line).await;
+                                    }
+                                }
+
+                                pending_text_delta = Some((session_id, content_index, delta, "text_delta".into()));
+                            } else {
+                                // Non-delta event: flush pending delta immediately before dispatching
+                                if let Some((p_sid, p_idx, p_text, _)) = pending_text_delta.take() {
+                                    let batched_event = serde_json::json!({
+                                        "type": "message_update",
+                                        "assistantMessageEvent": {
+                                            "type": "text_delta",
+                                            "contentIndex": p_idx,
+                                            "delta": p_text
+                                        }
+                                    });
+                                    let msg = ServerMessage::event(&p_sid, batched_event);
+                                    if let Ok(line) = msg.to_json_line() {
+                                        let _ = event_tx.send(line).await;
+                                    }
+                                }
+
+                                let msg = ServerMessage::event(&session_id, event);
+                                if let Ok(line) = msg.to_json_line() {
+                                    let _ = event_tx.send(line).await;
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+                _ = interval.tick() => {
+                    // Flush accumulated delta on frame interval (~60fps)
+                    if let Some((p_sid, p_idx, p_text, _)) = pending_text_delta.take() {
+                        let batched_event = serde_json::json!({
+                            "type": "message_update",
+                            "assistantMessageEvent": {
+                                "type": "text_delta",
+                                "contentIndex": p_idx,
+                                "delta": p_text
+                            }
+                        });
+                        let msg = ServerMessage::event(&p_sid, batched_event);
+                        if let Ok(line) = msg.to_json_line() {
+                            let _ = event_tx.send(line).await;
+                        }
+                    }
                 }
             }
         }

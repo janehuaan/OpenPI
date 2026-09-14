@@ -117,12 +117,10 @@ pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
 }
 
 const CODE_MODE_UNATTENDED_DIRECTIVE: &str = "\
-【OpenPI 无人值守自主研发与持续自愈准则】：\n\
-1. 主动全维问题探测：在任何代码修改或开发任务完成后，必须主动调用 bash 运行项目对应的全维验证（包含编译/类型检查如 tsc / npm run typecheck、单元测试如 npm test / pytest / cargo test / go test、静态检查 lint 与构建 build）。\n\
-2. 循环攻坚与自动收敛：如果在验证过程中发现任何测试失败、类型报错、编译错误或代码规范问题，严禁停滞或把半成品交付给用户，必须主动定位源码根因并实施修复，持续循环验证，直到所有维度达到 0 报错（完全通过）为止。\n\
-3. 交付完整性：确保所有变更都经过真实验证，无破坏性副作用与遗留缺陷。\n\
-4. 长耗时任务排重与幂等保护：执行可能超过 60 秒的长耗时重型任务（如 docker build、大型全量编译、镜像压包等）时，严禁盲目频繁重试！重新执行前必须先用 pgrep/docker ps 确认是否有前序同名任务正在运行，避免多进程重复竞争与死锁。\n\
-5. 错误颠簸防死锁：若同一命令连续 2 次报完全相同的系统级环境错误（如 command not found / permission denied），严禁在错误原地反复空转，必须优先检查工具链 PATH 与执行环境并调整策略。";
+【OpenPI 研发自愈准则】：\n\
+1. 目标导向与按需验证：仅在执行代码编写或实质性文件修改后，才执行针对性的语法/类型检查或单测验证；严禁在普通问答、代码解释或只读探索任务中盲目触发大型全局编译与重构。\n\
+2. 缺陷收敛闭环：若自己引入了编译报错或测试失败，必须主动定位源码根因并实施修复，直至消除当前变更引入的缺陷。\n\
+3. 高效执行：回答问题务求直击要害，杜绝不必要的空转工具调用。长耗时重型任务（如 docker build/镜像生成）执行前先用 pgrep/docker ps 探测避免多进程竞争与死锁。";
 
 pub struct ManagedSession {
     pub info: SessionInfo,
@@ -419,7 +417,7 @@ impl Supervisor {
 
         if session.info.mode == SessionMode::Code {
             cmd.arg("--tools")
-                .arg("read,bash,edit,write,grep,find,ls")
+                .arg("read,bash,edit,write,grep,find,ls,memory,session_search,system_os")
                 .arg("--append-system-prompt")
                 .arg(CODE_MODE_UNATTENDED_DIRECTIVE);
         }
