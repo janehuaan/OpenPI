@@ -8,6 +8,9 @@ license.workspace = true
 openpi-proto = { path = "../openpi-proto" }
 openpi-storage = { path = "../openpi-storage" }
 openpi-scheduler = { path = "../openpi-scheduler" }
+openpi-memory = { path = "../openpi-memory" }
+openpi-state = { path = "../openpi-state" }
+openpi-tools = { path = "../openpi-tools" }
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true

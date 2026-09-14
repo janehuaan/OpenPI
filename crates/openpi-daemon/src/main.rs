@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use tracing::info;
 use openpi_daemon::{run_ipc_server, Supervisor};
+use openpi_scheduler::Scheduler;
+use openpi_storage::Storage;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -9,6 +11,9 @@ async fn main() -> anyhow::Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let socket_path = std::env::var("OPENPI_SOCKET_PATH")
         .unwrap_or_else(|_| format!("{}/.openpi/openpi.sock", home));
+
+    let db_path = std::env::var("OPENPI_DB_PATH")
+        .unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
 
     let pi_cli_path = std::env::var("OPENPI_PI_CLI_PATH").unwrap_or_else(|_| {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -22,10 +27,14 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting OpenPI Daemon (Rust)");
     info!("Socket: {}", socket_path);
+    info!("Database: {}", db_path);
     info!("Pi CLI: {}", pi_cli_path);
 
+    let storage = Storage::open(&db_path)?;
+    let scheduler = Scheduler::new(storage.clone());
     let supervisor = Supervisor::new();
-    run_ipc_server(&socket_path, supervisor, pi_cli_path).await?;
+
+    run_ipc_server(&socket_path, supervisor, storage, scheduler, pi_cli_path).await?;
 
     Ok(())
 }

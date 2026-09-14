@@ -5,11 +5,16 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use openpi_proto::{ClientRequest, HealthInfo, ServerMessage};
+use openpi_scheduler::Scheduler;
+use openpi_storage::Storage;
+use crate::app_ops::handle_app_op;
 use crate::supervisor::Supervisor;
 
 pub async fn run_ipc_server(
     socket_path: &str,
     supervisor: Supervisor,
+    storage: Storage,
+    scheduler: Scheduler,
     pi_cli_path: String,
 ) -> anyhow::Result<()> {
     if std::path::Path::new(socket_path).exists() {
@@ -28,9 +33,11 @@ pub async fn run_ipc_server(
         match listener.accept().await {
             Ok((stream, _)) => {
                 let supervisor = supervisor.clone();
+                let storage = storage.clone();
+                let scheduler = scheduler.clone();
                 let pi_cli = pi_cli_path.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, supervisor, pi_cli, start_time).await {
+                    if let Err(e) = handle_connection(stream, supervisor, storage, scheduler, pi_cli, start_time).await {
                         warn!("Client connection error: {}", e);
                     }
                 });
@@ -45,6 +52,8 @@ pub async fn run_ipc_server(
 async fn handle_connection(
     stream: UnixStream,
     supervisor: Supervisor,
+    storage: Storage,
+    scheduler: Scheduler,
     pi_cli_path: String,
     start_time: std::time::Instant,
 ) -> anyhow::Result<()> {
@@ -144,7 +153,6 @@ async fn handle_connection(
             ClientRequest::Subscribe { id, session_id } => {
                 let mut subs = subscribed_sessions.lock().await;
                 subs.insert(session_id.clone());
-                // Ensure process is running
                 if let Err(e) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
                     warn!("Failed to ensure process for {}: {}", session_id, e);
                 }
@@ -171,6 +179,9 @@ async fn handle_connection(
                     Ok(_) => ServerMessage::ok(id, serde_json::json!({"stopped": true})),
                     Err(e) => ServerMessage::err(id, e.to_string()),
                 }
+            }
+            ClientRequest::App { id, op } => {
+                handle_app_op(&id, &op, &storage, &scheduler).await?
             }
             ClientRequest::Shutdown { id } => {
                 let _ = write_tx.send(ServerMessage::ok(id, serde_json::json!({"shutting_down": true})).to_json_line()?).await;

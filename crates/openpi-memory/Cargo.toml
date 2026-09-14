@@ -1,5 +1,5 @@
 [package]
-name = "openpi-scheduler"
+name = "openpi-memory"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,10 +9,4 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-chrono.workspace = true
-tokio.workspace = true
-tracing.workspace = true
-uuid.workspace = true
 openpi-storage = { path = "../openpi-storage" }
-petgraph = "0.7"
-cron = "0.15"

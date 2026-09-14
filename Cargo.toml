@@ -3,6 +3,9 @@ members = [
     "crates/openpi-proto",
     "crates/openpi-storage",
     "crates/openpi-scheduler",
+    "crates/openpi-memory",
+    "crates/openpi-state",
+    "crates/openpi-tools",
     "crates/openpi-daemon",
 ]
 resolver = "2"

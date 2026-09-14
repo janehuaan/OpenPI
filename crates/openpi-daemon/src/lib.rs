@@ -1,3 +1,4 @@
+pub mod app_ops;
 pub mod ipc;
 pub mod supervisor;
 

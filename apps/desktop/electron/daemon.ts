@@ -72,8 +72,16 @@ export function daemonCli(): string {
 
 	const here = dirname(fileURLToPath(import.meta.url));
 	const candidates = app?.isPackaged
-		? [join(getBuiltInRuntimeDir(), "daemon.js")]
-		: [join(here, "../../../packages/daemon/src/cli.ts")];
+		? [
+				join(getUserRuntimeDir(), "openpi-daemon"),
+				join(getBuiltInRuntimeDir(), "openpi-daemon"),
+				join(getBuiltInRuntimeDir(), "daemon.js"),
+			]
+		: [
+				join(here, "../../../target/release/openpi-daemon"),
+				join(here, "../../../target/debug/openpi-daemon"),
+				join(here, "../../../packages/daemon/src/cli.ts"),
+			];
 	const found = candidates.find(existsSync);
 	if (found) return found;
 	throw new Error(
@@ -202,11 +210,21 @@ export async function requestDaemon(
 }
 
 function spawnDaemon(): void {
+	const entry = daemonCli();
+	if (!entry.endsWith(".ts") && !entry.endsWith(".js")) {
+		const child = spawn(entry, [], {
+			detached: true,
+			stdio: "ignore",
+			env: { ...process.env },
+		});
+		child.unref();
+		return;
+	}
+
 	// process.execPath is the Electron binary; ELECTRON_RUN_AS_NODE makes it behave
 	// as plain Node, so no second runtime has to be shipped. A packaged daemon is a
 	// plain-JS bundle; only the dev path needs TS stripping, which Electron 38's
 	// Node 22 supports.
-	const entry = daemonCli();
 	const darwinArgs =
 		process.platform === "darwin"
 			? [
