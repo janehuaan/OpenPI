@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import {
 	Bot,
 	BrainCircuit,
@@ -83,7 +83,7 @@ function BlockRenderer({
 	return <>{parts}</>;
 }
 
-export function MessageItem({
+export const MessageItem = memo(function MessageItem({
 	message,
 	hideAssistantTools = false,
 	onRemember,
@@ -310,7 +310,7 @@ export function MessageItem({
 			</div>
 		</article>
 	);
-}
+});
 
 function MessageCopyButton({ text }: { text: string }) {
 	const [copied, setCopied] = useState(false);

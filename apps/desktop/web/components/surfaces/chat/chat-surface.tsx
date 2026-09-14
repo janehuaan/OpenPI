@@ -308,32 +308,39 @@ export function ChatSurface({
 		onAbort();
 	}, [onAbort]);
 
-	const rawConversationMessages = conversation?.messages ?? [];
-	let pendingRecalled: Array<{ type: string; key: string; value: string }> | undefined;
-	const storedMessages: ConversationMessage[] = [];
-	for (const msg of rawConversationMessages) {
-		const customType = (msg as any).customType || (msg as any).details?.customType;
-		if (customType === "openpi-memory:snapshot" || (msg as any).type === "custom_message") {
-			const recalled = (msg as any).details?.recalled;
-			if (Array.isArray(recalled) && recalled.length > 0) {
-				pendingRecalled = recalled;
+	const handleRememberMessage = useCallback((text: string) => {
+		if (onRemember) void onRemember(text);
+	}, [onRemember]);
+
+	const messages = useMemo(() => {
+		const rawConversationMessages = conversation?.messages ?? [];
+		let pendingRecalled: Array<{ type: string; key: string; value: string }> | undefined;
+		const storedMessages: ConversationMessage[] = [];
+		for (const msg of rawConversationMessages) {
+			const customType = (msg as any).customType || (msg as any).details?.customType;
+			if (customType === "openpi-memory:snapshot" || (msg as any).type === "custom_message") {
+				const recalled = (msg as any).details?.recalled;
+				if (Array.isArray(recalled) && recalled.length > 0) {
+					pendingRecalled = recalled;
+				}
+				continue;
 			}
-			continue;
+			if (msg.role === "assistant") {
+				const withRecalled: ConversationMessage =
+					msg.recalledMemories && msg.recalledMemories.length > 0
+						? msg
+						: pendingRecalled && pendingRecalled.length > 0
+							? { ...msg, recalledMemories: pendingRecalled }
+							: msg;
+				pendingRecalled = undefined;
+				storedMessages.push(withRecalled);
+			} else if (["user", "toolResult"].includes(msg.role)) {
+				storedMessages.push(msg);
+			}
 		}
-		if (msg.role === "assistant") {
-			const withRecalled: ConversationMessage =
-				msg.recalledMemories && msg.recalledMemories.length > 0
-					? msg
-					: pendingRecalled && pendingRecalled.length > 0
-						? { ...msg, recalledMemories: pendingRecalled }
-						: msg;
-			pendingRecalled = undefined;
-			storedMessages.push(withRecalled);
-		} else if (["user", "toolResult"].includes(msg.role)) {
-			storedMessages.push(msg);
-		}
-	}
-	const messages = optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
+		return optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
+	}, [conversation?.messages, optimisticMessage]);
+
 	const mediaScope = conversation?.instance.id
 		? `conversation:${conversation.instance.id}`
 		: workspace
@@ -341,18 +348,21 @@ export function ChatSurface({
 			: `mode:${mode}`;
 	const mediaItems = mediaHistory[mediaScope] ?? [];
 	const mediaSubmitting = mediaItems.some((item) => item.status === "generating");
-	const mediaTimeline = mediaItems
-		.map((item, index) => ({ key: `media:${item.id}`, timestamp: item.createdAt, index, media: item }))
-		.sort((left, right) => left.timestamp - right.timestamp || left.index - right.index);
-	const messageTimeline = messages.map((message, index) => ({
-		key: `message:${message.timestamp ?? index}:${index}`,
-		timestamp: message.timestamp ?? index,
-		index,
-		message,
-	}));
-	const threadItems = [...messageTimeline, ...mediaTimeline].sort(
-		(left, right) => left.timestamp - right.timestamp || left.index - right.index,
-	);
+
+	const threadItems = useMemo(() => {
+		const mediaTimeline = mediaItems
+			.map((item, index) => ({ key: `media:${item.id}`, timestamp: item.createdAt, index, media: item }))
+			.sort((left, right) => left.timestamp - right.timestamp || left.index - right.index);
+		const messageTimeline = messages.map((message, index) => ({
+			key: `message:${message.timestamp ?? index}:${index}`,
+			timestamp: message.timestamp ?? index,
+			index,
+			message,
+		}));
+		return [...messageTimeline, ...mediaTimeline].sort(
+			(left, right) => left.timestamp - right.timestamp || left.index - right.index,
+		);
+	}, [messages, mediaItems]);
 	const latestMessage = messages[messages.length - 1];
 	const latestMessageContent = latestMessage
 		? `${latestMessage.timestamp ?? ""}:${contentText(latestMessage.content)}:${contentImages(latestMessage.content)
@@ -1241,7 +1251,7 @@ export function ChatSurface({
 										hideAssistantTools={
 											item.message.role === "assistant" && assistantToolsHaveResults(messages, item.index)
 										}
-										onRemember={onRemember ? (rememberText) => void onRemember(rememberText) : undefined}
+										onRemember={handleRememberMessage}
 									/>
 								) : (
 									<GeneratedMediaCard

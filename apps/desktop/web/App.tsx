@@ -296,16 +296,28 @@ export function App() {
 	);
 	const isWorking = Boolean(isStreaming || busy === "send-message" || runningTools.length > 0);
 
+	const persistCacheTimerRef = useRef<number | undefined>(undefined);
 	useEffect(() => {
 		if (conversation) {
 			conversationCacheRef.current[conversation.instance.id] = conversation;
-			try {
-				window.sessionStorage.setItem(
-					`${CONVERSATION_CACHE_PREFIX}${conversation.instance.id}`,
-					JSON.stringify(conversation),
-				);
-			} catch {}
+			if (persistCacheTimerRef.current !== undefined) {
+				window.clearTimeout(persistCacheTimerRef.current);
+			}
+			const currentConv = conversation;
+			persistCacheTimerRef.current = window.setTimeout(() => {
+				try {
+					window.sessionStorage.setItem(
+						`${CONVERSATION_CACHE_PREFIX}${currentConv.instance.id}`,
+						JSON.stringify(currentConv),
+					);
+				} catch {}
+			}, 1000);
 		}
+		return () => {
+			if (persistCacheTimerRef.current !== undefined) {
+				window.clearTimeout(persistCacheTimerRef.current);
+			}
+		};
 	}, [conversation]);
 
 	const refresh = useCallback(
@@ -484,12 +496,13 @@ export function App() {
 				})
 				.catch(() => {});
 		poll();
-		const timer = window.setInterval(poll, 3000);
+		const intervalMs = isStreaming ? 3000 : 20000;
+		const timer = window.setInterval(poll, intervalMs);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
 		};
-	}, [selectedInstanceId]);
+	}, [selectedInstanceId, isStreaming]);
 
 	useEffect(() => {
 		const provider = conversation?.state.model?.provider;
@@ -519,12 +532,13 @@ export function App() {
 				})
 				.catch(() => {});
 		poll();
-		const timer = window.setInterval(poll, 2000);
+		const intervalMs = isStreaming ? 2000 : 15000;
+		const timer = window.setInterval(poll, intervalMs);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
 		};
-	}, [selectedInstanceId, view]);
+	}, [selectedInstanceId, view, isStreaming]);
 
 	useEffect(() => {
 		if (!desktopApi.isNative) return;
@@ -922,7 +936,7 @@ export function App() {
 							)
 					: false;
 				const streamConnected = streamConnectedInstanceId === instanceId;
-				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 4_000;
+				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 15_000;
 				if (!disposed) {
 					setConversation((current) => {
 						if (!current || current.instance.id !== next.instance.id) {
@@ -965,6 +979,23 @@ export function App() {
 								...next,
 								state: { ...next.state, isStreaming: true },
 							};
+						}
+						// If idle and messages count, last message timestamp/role, and state are identical:
+						// return current to preserve object identity and completely prevent React re-rendering!
+						if (
+							current.messages.length === next.messages.length &&
+							current.state.sessionName === next.state.sessionName &&
+							current.state.isStreaming === next.state.isStreaming &&
+							current.instance.status === next.instance.status
+						) {
+							const curLast = current.messages[current.messages.length - 1];
+							const nextLast = next.messages[next.messages.length - 1];
+							if (
+								(!curLast && !nextLast) ||
+								(curLast?.role === nextLast?.role && curLast?.timestamp === nextLast?.timestamp)
+							) {
+								return current;
+							}
 						}
 						return next;
 					});

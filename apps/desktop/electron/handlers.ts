@@ -5,7 +5,7 @@
  * delegating to `@openpi/daemon` and `@openpi/scheduler`.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -559,6 +559,34 @@ function normalizeModelOption(m: any, pCfg?: any) {
 	};
 }
 
+interface SessionFileCacheEntry {
+	mtimeMs: number;
+	size: number;
+	messages: any[];
+	state: any;
+}
+const sessionFileCache = new Map<string, SessionFileCacheEntry>();
+
+let cachedSessionsList: { timestamp: number; data: SessionInfo[] } | null = null;
+async function getCachedSessionsList(client: any, maxAgeMs = 1500): Promise<SessionInfo[]> {
+	const now = Date.now();
+	if (cachedSessionsList && now - cachedSessionsList.timestamp < maxAgeMs) {
+		return cachedSessionsList.data;
+	}
+	try {
+		const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
+		const arr: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+		cachedSessionsList = { timestamp: now, data: arr };
+		return arr;
+	} catch {
+		return cachedSessionsList?.data ?? [];
+	}
+}
+
+function invalidateCachedSessionsList() {
+	cachedSessionsList = null;
+}
+
 async function getAvailableModelsHelper(client: any, instanceId?: string) {
 	const cfg = readModelsConfig();
 	const diskModels: any[] = [];
@@ -585,8 +613,7 @@ async function getAvailableModelsHelper(client: any, instanceId?: string) {
 	const rpcModels: any[] = [];
 	if (instanceId) {
 		try {
-			const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
-			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+			const sessionArray = await getCachedSessionsList(client);
 			const found = sessionArray.find((s: any) => s.sessionId === instanceId);
 			if (found?.running) {
 				const res = (await client.request(
@@ -898,9 +925,12 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 	const handleSessionEvent = (sessionId: string, event: any) => {
 		if (event.type === "agent_start") {
 			turnStartTimes.set(sessionId, Date.now());
+			invalidateCachedSessionsList();
 		} else if (event.type === "agent_settled") {
 			const startTime = turnStartTimes.get(sessionId);
 			turnStartTimes.delete(sessionId);
+			invalidateCachedSessionsList();
+			sessionFileCache.delete(sessionId);
 			const duration = startTime ? Date.now() - startTime : 0;
 			const win = getWindow();
 			const isNotFocused = !win || !win.isFocused();
@@ -1051,7 +1081,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				name: label,
 				model: effectiveModel,
 			})) as SessionInfo;
-
+			invalidateCachedSessionsList();
 			if (session?.sessionId) {
 				try {
 					const state = (await client.request({
@@ -1093,38 +1123,50 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) throw new Error("缺少对话 instanceId");
 			const client = await getClient();
 
-			// 1. Fast-path: parse messages and state directly from local session jsonl file (~10-30ms)
+			// 1. Fast-path: parse messages and state directly from local session jsonl file (~0.02ms on cache hit)
 			let messages: any[] = [];
 			let state: any = {};
 			const sessionPath = join(sessionsDir(), `${instanceId}.jsonl`);
 			if (existsSync(sessionPath)) {
 				try {
-					const content = readFileSync(sessionPath, "utf8");
-					const lines = content.split("\n");
-					for (let i = 0; i < lines.length; i++) {
-						const line = lines[i];
-						if (!line) continue;
-						try {
-							const item = JSON.parse(line);
-							if (item.type === "message" && item.message) {
-								messages.push(item.message);
-							} else if (item.type === "model_change") {
-								state.model = { id: item.modelId, provider: item.provider };
-							} else if (item.type === "thinking_level_change") {
-								state.thinkingLevel = item.thinkingLevel;
-							} else if (item.type === "session_info" && item.name) {
-								state.sessionName = item.name;
-							} else if (item.type === "session" && item.id) {
-								state.sessionId = item.id;
-							}
-						} catch {}
+					const stat = statSync(sessionPath);
+					const cached = sessionFileCache.get(instanceId);
+					if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+						messages = cached.messages;
+						state = { ...cached.state };
+					} else {
+						const content = readFileSync(sessionPath, "utf8");
+						const lines = content.split("\n");
+						for (let i = 0; i < lines.length; i++) {
+							const line = lines[i];
+							if (!line) continue;
+							try {
+								const item = JSON.parse(line);
+								if (item.type === "message" && item.message) {
+									messages.push(item.message);
+								} else if (item.type === "model_change") {
+									state.model = { id: item.modelId, provider: item.provider };
+								} else if (item.type === "thinking_level_change") {
+									state.thinkingLevel = item.thinkingLevel;
+								} else if (item.type === "session_info" && item.name) {
+									state.sessionName = item.name;
+								} else if (item.type === "session" && item.id) {
+									state.sessionId = item.id;
+								}
+							} catch {}
+						}
+						sessionFileCache.set(instanceId, {
+							mtimeMs: stat.mtimeMs,
+							size: stat.size,
+							messages,
+							state,
+						});
 					}
 				} catch {}
 			}
 
-			// 2. Query session list from daemon
-			const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
-			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+			// 2. Query session list from daemon (cached with 1500ms TTL)
+			const sessionArray = await getCachedSessionsList(client);
 			const found = sessionArray.find((s) => s.sessionId === instanceId);
 
 			// 3. If subprocess is ALREADY live in memory, sync live state and in-flight messages
@@ -1190,8 +1232,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		get_conversation_stats: async ({ instanceId }: { instanceId: string }) => {
 			const client = await getClient();
 			try {
-				const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
-				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const sessionArray = await getCachedSessionsList(client);
 				const found = sessionArray.find((s) => s.sessionId === instanceId);
 				if (!found?.running) return null;
 
@@ -1217,8 +1258,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) return null;
 			try {
 				const client = await getClient();
-				const sList = (await client.request({ type: "list_sessions" })) as any;
-				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const sessionArray = await getCachedSessionsList(client);
 				const session = sessionArray.find((item) => item.sessionId === instanceId);
 				if (!session?.cwd) return null;
 
@@ -1498,6 +1538,8 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		},
 
 		delete_conversation: async ({ instanceId }: { instanceId: string }) => {
+			invalidateCachedSessionsList();
+			sessionFileCache.delete(instanceId);
 			try {
 				const client = await getClient();
 				await client.request({ type: "delete_session", sessionId: instanceId });
@@ -1620,8 +1662,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		get_conversation_commands: async ({ instanceId }: { instanceId: string }) => {
 			const client = await getClient();
 			try {
-				const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
-				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const sessionArray = await getCachedSessionsList(client);
 				const found = sessionArray.find((s: any) => s.sessionId === instanceId);
 				if (!found?.running) return [];
 
