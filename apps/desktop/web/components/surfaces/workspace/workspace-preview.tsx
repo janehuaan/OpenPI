@@ -180,6 +180,7 @@ import {
 import { useTheme } from "../../../lib/theme-manager";
 import { ClaudeCodeRecapCard } from "../../recap-card";
 import { TodoPanel } from "../../todo-panel";
+import { MessageImages } from "../chat/message-images";
 import type { TodoState, GitStatusResult } from "../../../types";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../../ui/popover";
@@ -2029,6 +2030,7 @@ export function ReferenceWorkspacePreview({
 						{feedItems.map((item) => {
 							if (item.kind === "user") {
 								const text = visibleMessageText(contentText(item.message.content));
+								const images = contentImages(item.message.content);
 								return (
 									<Fragment key={`${item.message.timestamp ?? "untimed"}-user-${item.index}`}>
 										{item.turnNumber > 1 && (
@@ -2042,25 +2044,15 @@ export function ReferenceWorkspacePreview({
 													<UserMessageActions text={text} onRemember={onRemember} />
 												)}
 												<div
-													className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""}`}
+													className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""} ${!text && images.length > 0 ? "image-only" : ""}`}
 												>
-													<p>{text}</p>
+													{text && <p>{text}</p>}
 													{hasVisionContext(item.message.content) && (
 														<span className="reference-vision-badge">
 															<ImageIcon size={12} /> GLM-4.6V 视觉解析
 														</span>
 													)}
-													{contentImages(item.message.content).length > 0 && (
-														<div className="reference-message-images">
-															{contentImages(item.message.content).map((image, imageIndex) => (
-																<img
-																	src={`data:${image.mimeType};base64,${image.data}`}
-																	alt="已附加图片"
-																	key={`${image.mimeType}-${imageIndex}`}
-																/>
-															))}
-														</div>
-													)}
+													{images.length > 0 && <MessageImages images={images} />}
 												</div>
 											</div>
 										</div>
@@ -2136,15 +2128,7 @@ export function ReferenceWorkspacePreview({
 												</div>
 											) : null}
 											{contentImages(item.message.content).length > 0 && (
-												<div className="reference-message-images">
-													{contentImages(item.message.content).map((image, imageIndex) => (
-														<img
-															src={`data:${image.mimeType};base64,${image.data}`}
-															alt="已附加图片"
-															key={`${image.mimeType}-${imageIndex}`}
-														/>
-													))}
-												</div>
+												<MessageImages images={contentImages(item.message.content)} />
 											)}
 											{item.isLatestAssistant && (
 												<ClaudeCodeRecapCard
