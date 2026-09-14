@@ -79,6 +79,8 @@ export function piRpcEntry(): string {
 	const here = dirname(fileURLToPath(import.meta.url));
 	const entry = "@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js";
 	const candidates = [
+		// user hot-updated runtime: ~/.openpi/runtime/node_modules/...
+		join(openpiDir(), "runtime", "node_modules", entry),
 		// dev, from source: packages/daemon/src -> repo root node_modules
 		join(here, "../../../node_modules", entry),
 		// packaged: the daemon bundle sits at the runtime root, beside node_modules
@@ -106,8 +108,13 @@ export function piCli(): string {
 	const here = dirname(fileURLToPath(import.meta.url));
 	const entry = "@earendil-works/pi-coding-agent/dist/bundle/cli.js";
 	const candidates = [
+		// user hot-updated runtime: ~/.openpi/runtime/node_modules/...
+		join(openpiDir(), "runtime", "node_modules", entry),
+		// dev, from source: packages/daemon/src -> repo root node_modules
 		join(here, "../../../node_modules", entry),
+		// packaged: the daemon bundle sits at the runtime root, beside node_modules
 		join(here, "node_modules", entry),
+		// package-local install
 		join(here, "../node_modules", entry),
 	];
 	for (const candidate of candidates) {

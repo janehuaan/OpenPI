@@ -80,5 +80,12 @@ contextBridge.exposeInMainWorld("openpi", {
 		ipcRenderer.on("openpi:autopilot-event", listener);
 		return () => ipcRenderer.removeListener("openpi:autopilot-event", listener);
 	},
+
+	onRuntimeUpdateProgress(handler: (progress: unknown) => void): () => void {
+		const listener = (_event: unknown, payload: unknown) =>
+			handler(payload);
+		ipcRenderer.on("openpi:runtime-update-progress", listener);
+		return () => ipcRenderer.removeListener("openpi:runtime-update-progress", listener);
+	},
 });
 

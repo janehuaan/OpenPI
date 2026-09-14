@@ -45,19 +45,34 @@ function setDaemonStatus(status: DaemonStatus): void {
 	}
 }
 
-/** Resolve the daemon CLI inside this repo or the packaged runtime. */
-function daemonCli(): string {
+import { homedir } from "node:os";
+
+export function getUserRuntimeDir(): string {
+	return join(homedir(), ".openpi", "runtime");
+}
+
+export function getBuiltInRuntimeDir(): string {
+	return join(process.resourcesPath ?? "", "openpi");
+}
+
+/** Resolve the daemon CLI inside user hot-update, repo source, or packaged runtime. */
+export function daemonCli(): string {
 	const override = process.env.OPENPI_DAEMON_CLI;
 	if (override) return override;
 
+	// If a user hot-updated runtime is present and valid, prefer it!
+	const userRuntimeDaemon = join(getUserRuntimeDir(), "daemon.js");
+	if (existsSync(userRuntimeDaemon)) {
+		try {
+			if (statSync(userRuntimeDaemon).size > 1024) {
+				return userRuntimeDaemon;
+			}
+		} catch {}
+	}
+
 	const here = dirname(fileURLToPath(import.meta.url));
-	// Packaged first, then source. `runtime/` is deliberately NOT consulted when
-	// running unpackaged: it is a build artifact that goes stale the moment the
-	// daemon changes, and preferring it means an unpackaged run silently exercises
-	// yesterday's backend - which is exactly how a new app op came back as
-	// "unknown app op" while its source was right there.
-	const candidates = app.isPackaged
-		? [join(process.resourcesPath ?? "", "openpi/daemon.js")]
+	const candidates = app?.isPackaged
+		? [join(getBuiltInRuntimeDir(), "daemon.js")]
 		: [join(here, "../../../packages/daemon/src/cli.ts")];
 	const found = candidates.find(existsSync);
 	if (found) return found;

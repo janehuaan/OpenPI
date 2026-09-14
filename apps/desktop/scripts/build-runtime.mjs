@@ -18,7 +18,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -141,10 +141,35 @@ function copyPi() {
 copyPi();
 log(`node_modules   ${size(join(runtime, "node_modules"))}`);
 
+// ── Manifest ──────────────────────────────────────────────────────────────
+let gitCommit = "unknown";
+try {
+	gitCommit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8" }).trim();
+} catch {}
+
+const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
+let piVersion = "unknown";
+try {
+	const piPkg = JSON.parse(readFileSync(join(runtime, "node_modules", PI_PACKAGE, "package.json"), "utf8"));
+	piVersion = piPkg.version ?? "unknown";
+} catch {}
+
+const manifest = {
+	name: "openpi-runtime",
+	version: pkg.version ?? "0.2.3",
+	piVersion,
+	buildTime: new Date().toISOString(),
+	gitCommit,
+	schemaVersion: 1,
+};
+writeFileSync(join(runtime, "runtime-manifest.json"), JSON.stringify(manifest, null, 2));
+log(`manifest       runtime-manifest.json (v${manifest.version}, pi v${manifest.piVersion}, ${gitCommit})`);
+
 // ── Verify ────────────────────────────────────────────────────────────────
 // A staging bug is invisible until the packaged app fails to start, so assert
 // the entry points exist before handing off to electron-builder.
 for (const required of [
+	"runtime-manifest.json",
 	"daemon.js",
 	"extensions/memory.js",
 	"extensions/session-state.js",
@@ -159,3 +184,24 @@ for (const required of [
 }
 
 log(`\nruntime/       ${size(runtime)} total`);
+
+// ── Zip Package Generation ────────────────────────────────────────────────
+if (process.argv.includes("--zip") || process.env.OPENPI_BUILD_RUNTIME_ZIP === "1") {
+	const releaseDir = join(desktop, "release");
+	mkdirSync(releaseDir, { recursive: true });
+	const zipName = `openpi-runtime-v${manifest.version}.zip`;
+	const zipPath = join(releaseDir, zipName);
+	rmSync(zipPath, { force: true });
+
+	try {
+		if (process.platform === "win32") {
+			execFileSync("tar", ["-a", "-cf", zipPath, "*"], { cwd: runtime, stdio: "ignore" });
+		} else {
+			execFileSync("zip", ["-rq", zipPath, "."], { cwd: runtime, stdio: "ignore" });
+		}
+		log(`runtime zip    ${zipName} (${size(zipPath)})`);
+	} catch (err) {
+		log(`[warn] failed to create runtime zip archive: ${err.message}`);
+	}
+}
+

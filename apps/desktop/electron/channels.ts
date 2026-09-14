@@ -121,6 +121,12 @@ export const INVOKE_CHANNELS = [
 	"continue_autopilot_task",
 	"focus_main_window",
 	"run_terminal_command",
+	"runtime_get_info",
+	"runtime_check_update",
+	"runtime_download_apply",
+	"runtime_install_local",
+	"runtime_select_zip_file",
+	"runtime_rollback",
 ] as const;
 
 export type InvokeChannel = (typeof INVOKE_CHANNELS)[number];
@@ -132,6 +138,7 @@ export const EVENT_CHANNELS = [
 	"daemon-restart-deferred",
 	"daemon-status",
 	"autopilot-event",
+	"runtime-update-progress",
 ] as const;
 
 export type EventChannel = (typeof EVENT_CHANNELS)[number];

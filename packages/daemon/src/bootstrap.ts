@@ -50,6 +50,7 @@ export function syncRuntimeExtensions(): string[] {
 
 	const here = dirname(fileURLToPath(import.meta.url));
 	const candidates = [
+		join(openpiDir(), "runtime", "extensions"),
 		join(here, "extensions"),
 		join(here, "../../../apps/desktop/runtime/extensions"),
 		join(process.cwd(), "apps/desktop/runtime/extensions"),

@@ -76,7 +76,7 @@ jobs:
       - name: Build web application and runtime
         run: |
           npm run build -w @openpi/desktop
-          npm run build:runtime -w @openpi/desktop
+          npm run build:runtime -w @openpi/desktop -- --zip
 
       - name: Disable Spotlight Indexing (macOS)
         if: runner.os == 'macOS'

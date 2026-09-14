@@ -57,6 +57,7 @@ type OpenPiBridge = {
 	onNewConversation?: (handler: () => void) => () => void;
 	onComposerPrefill?: (handler: (draft: { text: string; images?: string[] }) => void) => () => void;
 	onAutoPilotEvent?: (handler: (payload: { task: AutoPilotTask }) => void) => () => void;
+	onRuntimeUpdateProgress?: (handler: (progress: RuntimeUpdateProgress) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -406,4 +407,47 @@ export const desktopApi = {
 	focusMainWindow: () => call<boolean>("focus_main_window"),
 	runTerminalCommand: (opts: { cwd?: string; command: string; timeoutMs?: number }) =>
 		call<{ exitCode: number; stdout: string; stderr: string }>("run_terminal_command", opts),
+
+	// ── Kernel Runtime Hot-Update & Diagnostics ──────────────────────────────
+	getRuntimeInfo: () => call<RuntimeInfo>("runtime_get_info"),
+	checkRuntimeUpdate: () => call<RuntimeUpdateCheckResult>("runtime_check_update"),
+	downloadAndApplyRuntime: (assetUrl: string) =>
+		call<{ success: boolean; version?: string; error?: string }>("runtime_download_apply", { assetUrl }),
+	installLocalRuntime: (zipPath: string) =>
+		call<{ success: boolean; version?: string; error?: string }>("runtime_install_local", { zipPath }),
+	selectRuntimeZipFile: () => call<string | null>("runtime_select_zip_file"),
+	rollbackRuntime: () => call<{ success: boolean; error?: string }>("runtime_rollback"),
+	onRuntimeUpdateProgress: (handler: (progress: RuntimeUpdateProgress) => void) => {
+		const api = bridge();
+		if (!api?.onRuntimeUpdateProgress) return () => undefined;
+		return api.onRuntimeUpdateProgress(handler);
+	},
 };
+
+export interface RuntimeInfo {
+	currentVersion: string;
+	piVersion?: string;
+	buildTime?: string;
+	gitCommit?: string;
+	isHotUpdated: boolean;
+	runtimePath: string;
+	builtInVersion?: string;
+	builtInPath: string;
+}
+
+export interface RuntimeUpdateCheckResult {
+	hasUpdate: boolean;
+	currentVersion: string;
+	latestVersion?: string;
+	releaseNotes?: string;
+	publishedAt?: string;
+	assetName?: string;
+	assetUrl?: string;
+	assetSize?: number;
+}
+
+export interface RuntimeUpdateProgress {
+	stage: "downloading" | "extracting" | "verifying" | "restarting" | "completed" | "error";
+	percent: number;
+	message?: string;
+}

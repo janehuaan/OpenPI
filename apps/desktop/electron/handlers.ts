@@ -58,6 +58,7 @@ import {
 import { toggleHudWindow } from "./hud.ts";
 import { isModelOutageOrRateLimitError, pickCascadeFallbackModel } from "./model-cascade.ts";
 import { autopilotManager, runShellCommand } from "./autopilot-manager.ts";
+import { runtimeUpdater } from "./runtime-updater.ts";
 
 function readModelsConfig(): { providers: Record<string, any> } {
 	const file = join(agentDir(), "models.json");
@@ -2733,6 +2734,43 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		}) => {
 			const targetCwd = cwd || defaultWorkspace();
 			return runShellCommand(targetCwd, command, timeoutMs || 30000);
+		},
+
+		runtime_get_info: async () => {
+			return runtimeUpdater.getRuntimeInfo();
+		},
+
+		runtime_check_update: async () => {
+			return runtimeUpdater.checkForUpdates();
+		},
+
+		runtime_download_apply: async ({ assetUrl }: { assetUrl: string }) => {
+			return runtimeUpdater.downloadAndApply(assetUrl, (progress) => {
+				send("runtime-update-progress", progress);
+			});
+		},
+
+		runtime_install_local: async ({ zipPath }: { zipPath: string }) => {
+			return runtimeUpdater.installFromZip(zipPath, (progress) => {
+				send("runtime-update-progress", progress);
+			});
+		},
+
+		runtime_select_zip_file: async () => {
+			const win = getWindow();
+			const result = await dialog.showOpenDialog(win ?? (undefined as any), {
+				title: "选择 OpenPI 内核更新包 (.zip)",
+				filters: [{ name: "Zip Archives", extensions: ["zip"] }],
+				properties: ["openFile"],
+			});
+			if (result.canceled || result.filePaths.length === 0) {
+				return null;
+			}
+			return result.filePaths[0];
+		},
+
+		runtime_rollback: async () => {
+			return runtimeUpdater.rollbackToBuiltin();
 		},
 	};
 

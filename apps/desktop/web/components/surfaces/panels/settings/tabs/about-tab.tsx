@@ -1,15 +1,20 @@
-import { type FC, useState } from "react";
+import { type FC, useEffect, useState } from "react";
 import {
+	AlertCircle,
+	Check,
 	ChevronDown,
 	ChevronRight,
+	Cpu,
+	Download,
 	ExternalLink,
 	Folder,
 	Github,
-	Info,
+	RefreshCw,
 	Shield,
 	Terminal,
 	Wrench,
 } from "../../../../icons";
+import { desktopApi, type RuntimeInfo, type RuntimeUpdateCheckResult, type RuntimeUpdateProgress } from "../../../../../api";
 import type { ConversationCapabilities } from "../../../../../types";
 
 interface AboutTabProps {
@@ -18,6 +23,114 @@ interface AboutTabProps {
 
 export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 	const [toolsExpanded, setToolsExpanded] = useState(false);
+	const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+	const [checkResult, setCheckResult] = useState<RuntimeUpdateCheckResult | null>(null);
+	const [checking, setChecking] = useState(false);
+	const [installing, setInstalling] = useState(false);
+	const [rollingBack, setRollingBack] = useState(false);
+	const [progress, setProgress] = useState<RuntimeUpdateProgress | null>(null);
+	const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+
+	const loadRuntimeInfo = async () => {
+		try {
+			const info = await desktopApi.getRuntimeInfo();
+			setRuntimeInfo(info);
+		} catch (err: any) {
+			console.error("Failed to load runtime info:", err);
+		}
+	};
+
+	useEffect(() => {
+		void loadRuntimeInfo();
+		const unsub = desktopApi.onRuntimeUpdateProgress?.((p) => {
+			setProgress(p);
+			if (p.stage === "completed") {
+				setInstalling(false);
+				setStatusMessage({ type: "success", text: p.message || "内核热更新成功并已平滑生效！" });
+				void loadRuntimeInfo();
+			} else if (p.stage === "error") {
+				setInstalling(false);
+				setStatusMessage({ type: "error", text: p.message || "内核热更新失败" });
+			}
+		});
+		return () => unsub?.();
+	}, []);
+
+	const handleCheckUpdate = async () => {
+		setChecking(true);
+		setStatusMessage(null);
+		try {
+			const result = await desktopApi.checkRuntimeUpdate();
+			setCheckResult(result);
+			if (!result.hasUpdate) {
+				setStatusMessage({ type: "info", text: "当前内核运行时已是最新版本。" });
+			}
+		} catch (err: any) {
+			setStatusMessage({ type: "error", text: `检查更新失败: ${err?.message || String(err)}` });
+		} finally {
+			setChecking(false);
+		}
+	};
+
+	const handleApplyRemoteUpdate = async () => {
+		if (!checkResult?.assetUrl) return;
+		setInstalling(true);
+		setStatusMessage(null);
+		try {
+			const res = await desktopApi.downloadAndApplyRuntime(checkResult.assetUrl);
+			if (res.success) {
+				setStatusMessage({ type: "success", text: `内核已成功热更新至 v${res.version ?? checkResult.latestVersion}！` });
+				setCheckResult(null);
+				await loadRuntimeInfo();
+			} else {
+				setStatusMessage({ type: "error", text: res.error || "热更新失败" });
+			}
+		} catch (err: any) {
+			setStatusMessage({ type: "error", text: `热更新出错: ${err?.message || String(err)}` });
+		} finally {
+			setInstalling(false);
+		}
+	};
+
+	const handleInstallLocalZip = async () => {
+		try {
+			const zipPath = await desktopApi.selectRuntimeZipFile();
+			if (!zipPath) return;
+
+			setInstalling(true);
+			setStatusMessage({ type: "info", text: `正在安装本地更新包: ${zipPath}...` });
+			const res = await desktopApi.installLocalRuntime(zipPath);
+			if (res.success) {
+				setStatusMessage({ type: "success", text: `本地内核包已成功安装生效 (v${res.version})！` });
+				await loadRuntimeInfo();
+			} else {
+				setStatusMessage({ type: "error", text: res.error || "本地包安装失败" });
+			}
+		} catch (err: any) {
+			setStatusMessage({ type: "error", text: `安装失败: ${err?.message || String(err)}` });
+		} finally {
+			setInstalling(false);
+		}
+	};
+
+	const handleRollback = async () => {
+		if (!confirm("确定要回滚到客户端内置的内核运行时版本吗？这将会重启守护进程。")) return;
+		setRollingBack(true);
+		setStatusMessage(null);
+		try {
+			const res = await desktopApi.rollbackRuntime();
+			if (res.success) {
+				setStatusMessage({ type: "success", text: "已成功回滚至客户端内置内核！" });
+				await loadRuntimeInfo();
+			} else {
+				setStatusMessage({ type: "error", text: res.error || "回滚失败" });
+			}
+		} catch (err: any) {
+			setStatusMessage({ type: "error", text: `回滚失败: ${err?.message || String(err)}` });
+		} finally {
+			setRollingBack(false);
+		}
+	};
 
 	const safeTools = capabilities?.tools ?? [];
 
@@ -40,18 +153,10 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 				<div className="settings-section-card-body">
 					<div className="setting-item-row">
 						<div className="setting-item-meta">
-							<strong>客户端版本 (Client Version)</strong>
-							<span>OpenPI Desktop v0.2.0 (Electron Shell)</span>
+							<strong>客户端版本 (Client Shell)</strong>
+							<span>OpenPI Desktop v0.2.3 (Electron Shell)</span>
 						</div>
 						<span className="provider-badge active">最新版本</span>
-					</div>
-
-					<div className="setting-item-row">
-						<div className="setting-item-meta">
-							<strong>内核运行时 (Kernel Runtime)</strong>
-							<span>pi-agent-core / TypeScript & Node.js Engine</span>
-						</div>
-						<span className="provider-badge">v0.84.2</span>
 					</div>
 
 					<div className="setting-item-row">
@@ -71,6 +176,184 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 							<ExternalLink size={12} />
 						</a>
 					</div>
+				</div>
+			</section>
+
+			{/* ── Kernel Runtime & Independent Hot-Update ── */}
+			<section className="settings-section-card">
+				<div className="settings-section-card-header">
+					<div className="settings-section-card-header-left">
+						<div className="settings-section-card-icon">
+							<Cpu size={18} />
+						</div>
+						<div className="settings-section-card-title">
+							<h3>内核运行时与独立热更新 (Kernel Runtime)</h3>
+							<span>Daemon 调度中枢与智能体引擎独立无感热升级，免除重装应用</span>
+						</div>
+					</div>
+				</div>
+
+				<div className="settings-section-card-body">
+					{/* Status Row */}
+					<div className="setting-item-row">
+						<div className="setting-item-meta">
+							<strong>当前内核版本 (Runtime Version)</strong>
+							<span>
+								版本 v{runtimeInfo?.currentVersion || "0.2.3"}
+								{runtimeInfo?.piVersion ? ` (智能体引擎 v${runtimeInfo.piVersion})` : ""}
+								{runtimeInfo?.gitCommit ? ` · Commit ${runtimeInfo.gitCommit}` : ""}
+							</span>
+						</div>
+						<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+							{runtimeInfo?.isHotUpdated ? (
+								<span className="provider-badge active" title={runtimeInfo.runtimePath} style={{ background: "rgba(34, 197, 94, 0.15)", color: "#22c55e", borderColor: "rgba(34, 197, 94, 0.3)" }}>
+									🟢 独立热更版本 (~/.openpi/runtime)
+								</span>
+							) : (
+								<span className="provider-badge" title={runtimeInfo?.builtInPath || "App Resources"}>
+									⚪ 内置原生版本 (App Bundle)
+								</span>
+							)}
+						</div>
+					</div>
+
+					{/* Actions Row */}
+					<div className="setting-item-row" style={{ alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+						<div className="setting-item-meta" style={{ minWidth: "220px" }}>
+							<strong>更新与版本维护</strong>
+							<span>支持云端检查下载，或直接载入本地编译好的 .zip 离线更新包</span>
+						</div>
+
+						<div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+							<button
+								type="button"
+								className="button secondary"
+								onClick={handleCheckUpdate}
+								disabled={checking || installing || rollingBack}
+								style={{ padding: "6px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+							>
+								<RefreshCw size={13} className={checking ? "spin" : ""} />
+								<span>{checking ? "检查中..." : "检查内核更新"}</span>
+							</button>
+
+							<button
+								type="button"
+								className="button secondary"
+								onClick={handleInstallLocalZip}
+								disabled={checking || installing || rollingBack}
+								style={{ padding: "6px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+								title="选择本地打包的 openpi-runtime-*.zip 安装测试"
+							>
+								<Download size={13} />
+								<span>本地离线包安装 (.zip)</span>
+							</button>
+
+							{runtimeInfo?.isHotUpdated && (
+								<button
+									type="button"
+									className="button danger"
+									onClick={handleRollback}
+									disabled={checking || installing || rollingBack}
+									style={{ padding: "6px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+									title="重置并立即切换回 App 原生内置的内核"
+								>
+									<span>{rollingBack ? "回滚中..." : "回滚至内置版本"}</span>
+								</button>
+							)}
+						</div>
+					</div>
+
+					{/* Update Banner */}
+					{checkResult?.hasUpdate && checkResult.assetUrl && (
+						<div
+							style={{
+								padding: "12px 14px",
+								borderRadius: "10px",
+								background: "var(--accent-soft)",
+								border: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "space-between",
+								gap: "12px",
+								marginTop: "4px",
+							}}
+						>
+							<div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+								<strong style={{ fontSize: "13px", color: "var(--text)" }}>
+									发现内核新版本: v{checkResult.latestVersion}
+								</strong>
+								<span style={{ fontSize: "11.5px", color: "var(--text-secondary)" }}>
+									{checkResult.assetName || "openpi-runtime.zip"}
+									{checkResult.assetSize ? ` (${(checkResult.assetSize / (1024 * 1024)).toFixed(1)} MB)` : ""}
+									{checkResult.publishedAt ? ` · 发布于 ${new Date(checkResult.publishedAt).toLocaleDateString()}` : ""}
+								</span>
+							</div>
+
+							<button
+								type="button"
+								className="button primary"
+								onClick={handleApplyRemoteUpdate}
+								disabled={installing}
+								style={{ padding: "6px 16px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+							>
+								<Download size={13} />
+								<span>{installing ? "正在热更新..." : "一键热更新"}</span>
+							</button>
+						</div>
+					)}
+
+					{/* Progress Bar */}
+					{installing && progress && (
+						<div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px", padding: "10px 12px", borderRadius: "8px", background: "var(--bg-muted)" }}>
+							<div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+								<span style={{ color: "var(--text)" }}>{progress.message || "正在处理..."}</span>
+								<span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{progress.percent}%</span>
+							</div>
+							<div style={{ width: "100%", height: "6px", borderRadius: "999px", background: "var(--border)", overflow: "hidden" }}>
+								<div
+									style={{
+										width: `${progress.percent}%`,
+										height: "100%",
+										background: "var(--accent)",
+										transition: "width 200ms ease",
+									}}
+								/>
+							</div>
+						</div>
+					)}
+
+					{/* Status Message */}
+					{statusMessage && (
+						<div
+							style={{
+								padding: "8px 12px",
+								borderRadius: "8px",
+								fontSize: "12px",
+								marginTop: "4px",
+								background:
+									statusMessage.type === "success"
+										? "rgba(34, 197, 94, 0.12)"
+										: statusMessage.type === "error"
+										? "rgba(239, 68, 68, 0.12)"
+										: "var(--bg-muted)",
+								color:
+									statusMessage.type === "success"
+										? "#22c55e"
+										: statusMessage.type === "error"
+										? "#ef4444"
+										: "var(--text-secondary)",
+								border: `1px solid ${
+									statusMessage.type === "success"
+										? "rgba(34, 197, 94, 0.25)"
+										: statusMessage.type === "error"
+										? "rgba(239, 68, 68, 0.25)"
+										: "var(--border)"
+								}`,
+							}}
+						>
+							{statusMessage.text}
+						</div>
+					)}
 				</div>
 			</section>
 
@@ -110,7 +393,7 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 										key={tool.name}
 										style={{
 											padding: "8px 12px",
-											borderRadius: "6px",
+											borderRadius: "8px",
 											border: "1px solid var(--border)",
 											background: "var(--bg)",
 											display: "flex",
