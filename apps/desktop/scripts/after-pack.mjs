@@ -55,7 +55,7 @@ export default async function afterPack(context) {
 	// A staging or copy failure is otherwise invisible until the app fails to
 	// start, with no clue why.
 	for (const required of [
-		"daemon.js",
+		"openpi-daemon",
 		"extensions/memory.js",
 		"node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js",
 		"node_modules/jiti/package.json",

@@ -161,7 +161,7 @@ log(`manifest       runtime-manifest.json (v${manifest.version}, pi v${manifest.
 // the entry points exist before handing off to electron-builder.
 for (const required of [
 	"runtime-manifest.json",
-	"daemon.js",
+	"openpi-daemon",
 	"extensions/memory.js",
 	"extensions/session-state.js",
 	`node_modules/${PI_PACKAGE}/dist/bundle/rpc-entry.js`,
