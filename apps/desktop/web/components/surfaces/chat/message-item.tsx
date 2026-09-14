@@ -202,8 +202,10 @@ export const MessageItem = memo(function MessageItem({
 		if (parts.length > 0) traceBadge = parts.join(" · ");
 	}
 
+	const isImageOnly = isUser && !text && images.length > 0;
+
 	return (
-		<article className={`message ${isUser ? "user" : "assistant"}`}>
+		<article className={`message ${isUser ? "user" : "assistant"} ${isImageOnly ? "image-only" : ""}`}>
 			{!isUser && (
 				<div className="message-avatar">
 					<Bot size={14} />
