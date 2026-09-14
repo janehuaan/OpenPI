@@ -8,6 +8,10 @@ use openpi_scheduler::Scheduler;
 #[tokio::test]
 async fn test_daemon_full_lifecycle() {
     let temp_dir = std::env::temp_dir();
+    let test_openpi_dir = temp_dir.join(format!("test-openpi-dir-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&test_openpi_dir).unwrap();
+    std::env::set_var("OPENPI_DIR", test_openpi_dir.to_string_lossy().to_string());
+
     let sock_path = temp_dir.join(format!("test-openpi-{}.sock", uuid::Uuid::new_v4()));
     let sock_str = sock_path.to_string_lossy().to_string();
 

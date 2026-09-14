@@ -16,6 +16,14 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
 
     let pi_cli_path = std::env::var("OPENPI_PI_CLI_PATH").unwrap_or_else(|_| {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let packaged_cli = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
+                if packaged_cli.exists() {
+                    return packaged_cli.to_string_lossy().to_string();
+                }
+            }
+        }
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let default_cli = manifest_dir
             .parent()

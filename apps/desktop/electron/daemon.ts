@@ -215,7 +215,10 @@ function spawnDaemon(): void {
 		const child = spawn(entry, [], {
 			detached: true,
 			stdio: "ignore",
-			env: { ...process.env },
+			env: {
+				...process.env,
+				OPENPI_NODE_PATH: process.execPath,
+			},
 		});
 		child.unref();
 		return;

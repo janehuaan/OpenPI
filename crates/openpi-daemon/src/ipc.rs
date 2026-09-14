@@ -166,10 +166,13 @@ async fn handle_connection(
                 session_id,
                 command,
             } => {
-                let _ = supervisor.ensure_process(&session_id, &pi_cli_path).await;
-                match supervisor.send_rpc(&session_id, &command).await {
-                    Ok(_) => ServerMessage::ok(id, serde_json::json!({"sent": true})),
-                    Err(e) => ServerMessage::err(id, e.to_string()),
+                if let Err(e) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
+                    ServerMessage::err(id, e.to_string())
+                } else {
+                    match supervisor.send_rpc(&session_id, &command).await {
+                        Ok(data) => ServerMessage::ok(id, data),
+                        Err(e) => ServerMessage::err(id, e.to_string()),
+                    }
                 }
             }
             ClientRequest::StopSession { id, session_id } => {

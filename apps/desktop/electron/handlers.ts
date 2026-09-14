@@ -1108,6 +1108,28 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				}
 			}
 
+			// Fast-path / fallback: if messages is empty, parse from session jsonl directly
+			if (messages.length === 0) {
+				const sessionPath = join(sessionsDir(), `${instanceId}.jsonl`);
+				if (existsSync(sessionPath)) {
+					try {
+						const content = readFileSync(sessionPath, "utf8");
+						const lines = content.split("\n");
+						for (const line of lines) {
+							if (!line.trim()) continue;
+							try {
+								const item = JSON.parse(line);
+								if (item.type === "message" && item.message) {
+									messages.push(item.message);
+								} else if (item.type === "model_change" && !state?.model) {
+									state = { ...state, model: { id: item.modelId, provider: item.provider } };
+								}
+							} catch {}
+						}
+					} catch {}
+				}
+			}
+
 			const sList = (await client.request({ type: "list_sessions" })) as any;
 			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
 			const found = sessionArray.find((s) => s.sessionId === instanceId);
