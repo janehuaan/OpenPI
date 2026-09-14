@@ -1616,7 +1616,8 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		// ── Memory ─────────────────────────────────────────────────────────
 		list_memory_index: async ({ cwd, scope }: { cwd: string; scope: MemoryScope }) => {
 			const res = (await app({ name: "list_memory", cwd, scope })) as any;
-			return (res?.entries ?? []).map((e: any) => `[${e.type}] ${e.key}: ${e.value}`);
+			const entries = Array.isArray(res?.entries) ? res.entries : (Array.isArray(res) ? res : []);
+			return entries.map((e: any) => `[${e?.type ?? "context"}] ${e?.key ?? ""}: ${e?.value ?? ""}`);
 		},
 		write_memory_entry: async ({ cwd, memoryType, key, value, body, scope }: any) => {
 			await app({
@@ -1648,7 +1649,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		},
 		list_archived_memory: async ({ cwd, scope }: { cwd?: string; scope?: MemoryScope } = {}) => {
 			const res = (await app({ name: "list_archived_memory", cwd: cwd || defaultWorkspace(), scope: scope ?? "project" })) as any;
-			return res?.entries ?? [];
+			return Array.isArray(res?.entries) ? res.entries : (Array.isArray(res) ? res : []);
 		},
 		restore_archived_memory: async ({ cwd, scope, entry }: any) => {
 			const res = (await app({
@@ -1657,7 +1658,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				scope: scope ?? "project",
 				entry,
 			})) as any;
-			return res?.entries ?? [];
+			return Array.isArray(res?.entries) ? res.entries : (Array.isArray(res) ? res : []);
 		},
 		get_memory_hub: async ({ cwd }: { cwd?: string } = {}) => {
 			return app({ name: "get_memory_hub", cwd: cwd || defaultWorkspace() });

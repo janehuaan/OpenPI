@@ -105,7 +105,7 @@ async fn test_daemon_full_lifecycle() {
     let resp: serde_json::Value = serde_json::from_str(&line).expect("parse list_tasks response");
     assert_eq!(resp["id"], "req-task2");
     assert_eq!(resp["ok"], true);
-    let tasks = resp["data"].as_array().unwrap();
+    let tasks = resp["data"]["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0]["task"]["title"], "Scheduled Build");
 
@@ -130,6 +130,7 @@ async fn test_daemon_full_lifecycle() {
     let resp: serde_json::Value = serde_json::from_str(&line).expect("parse write_memory response");
     assert_eq!(resp["id"], "req-m1");
     assert_eq!(resp["ok"], true);
+    assert!(resp["data"]["entries"].is_array());
 
     let list_mem_req = serde_json::json!({
         "id": "req-m2",
@@ -147,7 +148,7 @@ async fn test_daemon_full_lifecycle() {
     let resp: serde_json::Value = serde_json::from_str(&line).expect("parse list_memory response");
     assert_eq!(resp["id"], "req-m2");
     assert_eq!(resp["ok"], true);
-    let memories = resp["data"].as_array().unwrap();
+    let memories = resp["data"]["entries"].as_array().unwrap();
     assert_eq!(memories.len(), 1);
     assert_eq!(memories[0]["value"], "pure-rust");
 

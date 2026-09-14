@@ -43,7 +43,7 @@ pub async fn handle_app_op(
                     "runs": runs
                 }));
             }
-            Ok(ServerMessage::ok(id, serde_json::json!(tasks_with_runs)))
+            Ok(ServerMessage::ok(id, serde_json::json!({ "tasks": tasks_with_runs })))
         }
 
         "create_task" => {
@@ -71,26 +71,61 @@ pub async fn handle_app_op(
                 id: task_id.clone(),
                 title: title.to_string(),
                 prompt: prompt.to_string(),
-                cwd,
-                schedule: schedule_raw,
+                cwd: cwd.clone(),
+                schedule: schedule_raw.clone(),
                 status: "active".to_string(),
-                next_run_at: next_run,
+                next_run_at: next_run.clone(),
                 created_at: now.to_rfc3339(),
                 updated_at: now.to_rfc3339(),
-                model,
-                steps: steps_str,
+                model: model.clone(),
+                steps: steps_str.clone(),
             };
 
             storage.insert_task(&task_rec)?;
             info!("Created task {} via Rust daemon", task_id);
-            Ok(ServerMessage::ok(id, serde_json::json!({ "taskId": task_id })))
+            let schedule_val: Value = serde_json::from_str(&schedule_raw).unwrap_or(Value::Null);
+            let steps_val: Option<Value> = steps_str.as_ref().and_then(|s| serde_json::from_str(s).ok());
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "id": task_id,
+                "taskId": task_id,
+                "title": title,
+                "prompt": prompt,
+                "cwd": cwd,
+                "schedule": schedule_val,
+                "status": "active",
+                "nextRunAt": next_run,
+                "createdAt": now.to_rfc3339(),
+                "updatedAt": now.to_rfc3339(),
+                "model": model,
+                "steps": steps_val
+            })))
         }
 
         "set_task_paused" => {
             let task_id = op.get("taskId").and_then(|t| t.as_str()).unwrap_or_default();
             let paused = op.get("paused").and_then(|p| p.as_bool()).unwrap_or(false);
-            let updated = storage.set_task_paused(task_id, paused)?;
-            Ok(ServerMessage::ok(id, serde_json::json!({ "updated": updated })))
+            let _ = storage.set_task_paused(task_id, paused)?;
+            let task_opt = storage.get_task(task_id)?;
+            match task_opt {
+                Some(task) => {
+                    let schedule_val: Value = serde_json::from_str(&task.schedule).unwrap_or(Value::Null);
+                    let steps_val: Option<Value> = task.steps.as_ref().and_then(|s| serde_json::from_str(s).ok());
+                    Ok(ServerMessage::ok(id, serde_json::json!({
+                        "id": task.id,
+                        "title": task.title,
+                        "prompt": task.prompt,
+                        "cwd": task.cwd,
+                        "schedule": schedule_val,
+                        "status": task.status,
+                        "nextRunAt": task.next_run_at,
+                        "createdAt": task.created_at,
+                        "updatedAt": task.updated_at,
+                        "model": task.model,
+                        "steps": steps_val
+                    })))
+                }
+                None => Ok(ServerMessage::ok(id, Value::Null)),
+            }
         }
 
         "delete_task" => {
@@ -107,12 +142,24 @@ pub async fn handle_app_op(
             }
         }
 
+        "cancel_run" => {
+            Ok(ServerMessage::ok(id, serde_json::json!(null)))
+        }
+
+        "read_run_log" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({ "text": "", "truncated": false })))
+        }
+
+        "step_runs" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({ "stepRuns": [] })))
+        }
+
         // --- Memory ops ---
         "list_memory" => {
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
             let scope = op.get("scope").and_then(|s| s.as_str());
             let entries = storage.list_memory(cwd, scope)?;
-            Ok(ServerMessage::ok(id, serde_json::json!(entries)))
+            Ok(ServerMessage::ok(id, serde_json::json!({ "entries": entries })))
         }
 
         "write_memory" => {
@@ -126,8 +173,8 @@ pub async fn handle_app_op(
             let now = chrono::Utc::now().to_rfc3339();
             let rec = MemoryRecord {
                 id: format!("mem-{}", Uuid::new_v4()),
-                cwd,
-                scope,
+                cwd: cwd.clone(),
+                scope: scope.clone(),
                 entry_type,
                 key,
                 value,
@@ -137,7 +184,8 @@ pub async fn handle_app_op(
             };
 
             storage.upsert_memory(&rec)?;
-            Ok(ServerMessage::ok(id, serde_json::json!({ "saved": true })))
+            let entries = storage.list_memory(&cwd, Some(&scope)).unwrap_or_default();
+            Ok(ServerMessage::ok(id, serde_json::json!({ "entries": entries })))
         }
 
         "delete_memory" => {
@@ -145,8 +193,123 @@ pub async fn handle_app_op(
             let scope = op.get("scope").and_then(|s| s.as_str());
             let entry_type = op.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let key = op.get("key").and_then(|k| k.as_str()).unwrap_or("");
-            let deleted = storage.delete_memory(cwd, scope, entry_type, key)?;
-            Ok(ServerMessage::ok(id, serde_json::json!({ "deleted": deleted })))
+            let _ = storage.delete_memory(cwd, scope, entry_type, key)?;
+            let entries = storage.list_memory(cwd, scope).unwrap_or_default();
+            Ok(ServerMessage::ok(id, serde_json::json!({ "entries": entries })))
+        }
+
+        "memory_meta" => {
+            let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let proj_entries = storage.list_memory(cwd, Some("project")).unwrap_or_default();
+            let glob_entries = storage.list_memory(cwd, Some("global")).unwrap_or_default();
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "meta": {},
+                "projectCount": proj_entries.len(),
+                "globalCount": glob_entries.len(),
+                "archiveCount": 0,
+                "digestCount": 0,
+                "latestDigest": serde_json::Value::Null,
+                "hasVectors": false,
+                "hasLexicon": false,
+                "features": {
+                    "proactiveInject": false,
+                    "softExtractEveryTurn": false,
+                    "autoSessionDigest": false,
+                    "promoteUserToGlobal": false,
+                    "searchArchive": false
+                }
+            })))
+        }
+
+        "maintain_memory" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "project": { "before": 0, "after": 0, "merged": 0, "pruned": 0 },
+                "global": { "before": 0, "after": 0, "merged": 0, "pruned": 0 }
+            })))
+        }
+
+        "list_archived_memory" | "restore_archived_memory" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({ "entries": [] })))
+        }
+
+        "get_memory_hub" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "summary": "",
+                "handbook": "",
+                "rolloutSummaries": [],
+                "skills": [],
+                "stats": {
+                    "pending": 0,
+                    "running": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "unconsolidatedStage1": 0
+                },
+                "recentJobs": []
+            })))
+        }
+
+        "save_memory_handbook" | "trigger_memory_consolidation" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({ "ok": true })))
+        }
+
+        // --- Model & Auth ops ---
+        "auth_status" => {
+            let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+            let openpi_dir = std::env::var("OPENPI_DIR").unwrap_or_else(|_| {
+                format!("{}/.openpi", home)
+            });
+            let models_file = std::path::Path::new(&openpi_dir).join("agent").join("models.json");
+            let mut providers = Vec::new();
+            if models_file.exists() {
+                if let Ok(content) = std::fs::read_to_string(&models_file) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(prov_map) = json.get("providers").and_then(|p| p.as_object()) {
+                            for (p_name, cfg) in prov_map {
+                                let has_key = cfg.get("apiKey").and_then(|k| k.as_str()).map(|k| !k.is_empty()).unwrap_or(false);
+                                let base_url = cfg.get("baseUrl").and_then(|b| b.as_str());
+                                let model_count = cfg.get("models").and_then(|m| {
+                                    if let Some(arr) = m.as_array() {
+                                        Some(arr.len())
+                                    } else if let Some(obj) = m.as_object() {
+                                        Some(obj.len())
+                                    } else {
+                                        None
+                                    }
+                                }).unwrap_or(0);
+                                providers.push(serde_json::json!({
+                                    "provider": p_name,
+                                    "configured": has_key,
+                                    "baseUrl": base_url,
+                                    "modelCount": model_count
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(ServerMessage::ok(id, serde_json::json!({ "providers": providers })))
+        }
+
+        "capabilities" | "add_extension" | "remove_extension" | "install_package" | "remove_package" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "agentDir": "",
+                "entries": []
+            })))
+        }
+
+        "media_capabilities" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "configured": false,
+                "imageModel": "agnes-image",
+                "videoModel": "agnes-video",
+                "sizes": ["1024x1024", "2K", "4K"],
+                "ratios": ["1:1", "16:9", "9:16", "4:3", "3:4"]
+            })))
+        }
+
+        "extract_document" => {
+            Ok(ServerMessage::ok(id, serde_json::json!({ "name": "document", "text": "", "truncated": false })))
         }
 
         // --- Profile ops ---
