@@ -585,14 +585,22 @@ async function getAvailableModelsHelper(client: any, instanceId?: string) {
 	const rpcModels: any[] = [];
 	if (instanceId) {
 		try {
-			const res = (await client.request({
-				type: "rpc",
-				sessionId: instanceId,
-				command: { type: "get_available_models" },
-			})) as any;
-			const list = Array.isArray(res?.models) ? res.models : Array.isArray(res) ? res : [];
-			for (const item of list) {
-				rpcModels.push(normalizeModelOption(item));
+			const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
+			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+			const found = sessionArray.find((s: any) => s.sessionId === instanceId);
+			if (found?.running) {
+				const res = (await client.request(
+					{
+						type: "rpc",
+						sessionId: instanceId,
+						command: { type: "get_available_models" },
+					},
+					800,
+				)) as any;
+				const list = Array.isArray(res?.models) ? res.models : Array.isArray(res) ? res : [];
+				for (const item of list) {
+					rpcModels.push(normalizeModelOption(item));
+				}
 			}
 		} catch {}
 	}
@@ -1085,54 +1093,75 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) throw new Error("缺少对话 instanceId");
 			const client = await getClient();
 
-			let state: any = {};
+			// 1. Fast-path: parse messages and state directly from local session jsonl file (~10-30ms)
 			let messages: any[] = [];
-			try {
-				state = await client.request({
-					type: "rpc",
-					sessionId: instanceId,
-					command: { type: "get_state" },
-				});
-				const msgRes = (await client.request({
-					type: "rpc",
-					sessionId: instanceId,
-					command: { type: "get_messages" },
-				})) as any;
-				messages = msgRes?.messages ?? [];
-			} catch (err: any) {
-				const msg = err?.message ?? String(err);
-				if (/unknown session/i.test(msg)) {
-					const error = new Error(`对话已失效 [${instanceId.slice(0, 8)}]`);
-					(error as any).code = "UNKNOWN_INSTANCE";
-					throw error;
-				}
+			let state: any = {};
+			const sessionPath = join(sessionsDir(), `${instanceId}.jsonl`);
+			if (existsSync(sessionPath)) {
+				try {
+					const content = readFileSync(sessionPath, "utf8");
+					const lines = content.split("\n");
+					for (let i = 0; i < lines.length; i++) {
+						const line = lines[i];
+						if (!line) continue;
+						try {
+							const item = JSON.parse(line);
+							if (item.type === "message" && item.message) {
+								messages.push(item.message);
+							} else if (item.type === "model_change") {
+								state.model = { id: item.modelId, provider: item.provider };
+							} else if (item.type === "thinking_level_change") {
+								state.thinkingLevel = item.thinkingLevel;
+							} else if (item.type === "session_info" && item.name) {
+								state.sessionName = item.name;
+							} else if (item.type === "session" && item.id) {
+								state.sessionId = item.id;
+							}
+						} catch {}
+					}
+				} catch {}
 			}
 
-			// Fast-path / fallback: if messages is empty, parse from session jsonl directly
-			if (messages.length === 0) {
-				const sessionPath = join(sessionsDir(), `${instanceId}.jsonl`);
-				if (existsSync(sessionPath)) {
-					try {
-						const content = readFileSync(sessionPath, "utf8");
-						const lines = content.split("\n");
-						for (const line of lines) {
-							if (!line.trim()) continue;
-							try {
-								const item = JSON.parse(line);
-								if (item.type === "message" && item.message) {
-									messages.push(item.message);
-								} else if (item.type === "model_change" && !state?.model) {
-									state = { ...state, model: { id: item.modelId, provider: item.provider } };
-								}
-							} catch {}
-						}
-					} catch {}
-				}
-			}
-
-			const sList = (await client.request({ type: "list_sessions" })) as any;
+			// 2. Query session list from daemon
+			const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
 			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
 			const found = sessionArray.find((s) => s.sessionId === instanceId);
+
+			// 3. If subprocess is ALREADY live in memory, sync live state and in-flight messages
+			if (found?.running) {
+				try {
+					const [liveState, liveMsgs] = (await Promise.all([
+						client.request(
+							{
+								type: "rpc",
+								sessionId: instanceId,
+								command: { type: "get_state" },
+							},
+							800,
+						).catch(() => undefined),
+						messages.length === 0
+							? client.request(
+									{
+										type: "rpc",
+										sessionId: instanceId,
+										command: { type: "get_messages" },
+									},
+									1500,
+							  ).catch(() => undefined)
+							: Promise.resolve(undefined),
+					])) as [any, any];
+
+					if (liveState && typeof liveState === "object") {
+						state = { ...state, ...liveState };
+					}
+					if (Array.isArray(liveMsgs?.messages) && liveMsgs.messages.length > 0) {
+						messages = liveMsgs.messages;
+					}
+				} catch {}
+			} else {
+				// Warm up the session process asynchronously in background so next user interaction is instant
+				void client.request({ type: "subscribe", sessionId: instanceId }).catch(() => {});
+			}
 
 			return {
 				instance: {
@@ -1140,7 +1169,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 					status: found?.running ? "online" : "stopped",
 					mode: found?.mode === "code" ? "code" : "work",
 					cwd: found?.cwd ?? defaultWorkspace(),
-					label: found?.name,
+					label: found?.name ?? state?.sessionName,
 					sessionId: instanceId,
 					createdAt: found?.createdAt ?? new Date().toISOString(),
 				},
@@ -1161,11 +1190,19 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		get_conversation_stats: async ({ instanceId }: { instanceId: string }) => {
 			const client = await getClient();
 			try {
-				const stats = (await client.request({
-					type: "rpc",
-					sessionId: instanceId,
-					command: { type: "get_session_stats" },
-				})) as any;
+				const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
+				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const found = sessionArray.find((s) => s.sessionId === instanceId);
+				if (!found?.running) return null;
+
+				const stats = (await client.request(
+					{
+						type: "rpc",
+						sessionId: instanceId,
+						command: { type: "get_session_stats" },
+					},
+					800,
+				)) as any;
 				if (!stats || typeof stats !== "object" || !stats.tokens) {
 					return null;
 				}
@@ -1583,11 +1620,19 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		get_conversation_commands: async ({ instanceId }: { instanceId: string }) => {
 			const client = await getClient();
 			try {
-				const res = (await client.request({
-					type: "rpc",
-					sessionId: instanceId,
-					command: { type: "get_commands" },
-				})) as any;
+				const sList = (await client.request({ type: "list_sessions" }).catch(() => ({}))) as any;
+				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const found = sessionArray.find((s: any) => s.sessionId === instanceId);
+				if (!found?.running) return [];
+
+				const res = (await client.request(
+					{
+						type: "rpc",
+						sessionId: instanceId,
+						command: { type: "get_commands" },
+					},
+					800,
+				)) as any;
 				const list = Array.isArray(res?.commands) ? res.commands : [];
 				return list.map((c: any) => {
 					if (typeof c === "string") return c.startsWith("/") ? c : `/${c}`;
