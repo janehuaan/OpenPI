@@ -73,6 +73,14 @@ function readModelsConfig(): { providers: Record<string, any> } {
 				if (p.compat.supportsDeveloperRole === undefined && (!p.baseUrl || !p.baseUrl.includes("api.openai.com"))) {
 					p.compat.supportsDeveloperRole = false;
 				}
+				if (p.api === "openai-responses" || p.api === "azure-openai-responses" || p.api === "openai-codex-responses") {
+					if (p.compat.supportsMaxOutputTokens === undefined) {
+						p.compat.supportsMaxOutputTokens = true;
+					}
+				}
+				if (p.vllmPriority !== undefined && p.compat.vllmPriority === undefined) {
+					p.compat.vllmPriority = p.vllmPriority;
+				}
 			}
 		}
 		return { providers };
@@ -520,7 +528,9 @@ export function isModelReasoningCapable(id: string, provider: string, declaredRe
 		idLower.includes("r1") ||
 		idLower.includes("qwq") ||
 		idLower.includes("o1") ||
-		idLower.includes("o3")
+		idLower.includes("o3") ||
+		idLower.includes("gpt-6") ||
+		idLower.includes("astra")
 	);
 }
 
@@ -1065,7 +1075,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		},
 
 		// ── Conversations ──────────────────────────────────────────────────
-		create_conversation: async ({ label, cwd, mode, model }: any = {}) => {
+		create_conversation: async ({ label, cwd, mode, model, inMemory }: any = {}) => {
 			const client = await getClient();
 			const settings = readSettingsJson();
 			const effectiveMode = mode || settings.defaultMode || "chat";
@@ -1080,6 +1090,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				mode: effectiveMode === "code" ? ("code" as SessionMode) : ("chat" as SessionMode),
 				name: label,
 				model: effectiveModel,
+				inMemory: Boolean(inMemory),
 			})) as SessionInfo;
 			invalidateCachedSessionsList();
 			if (session?.sessionId) {
@@ -1929,6 +1940,14 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			}
 			if (merged.compat.supportsDeveloperRole === undefined && (!merged.baseUrl || !merged.baseUrl.includes("api.openai.com"))) {
 				merged.compat.supportsDeveloperRole = false;
+			}
+			if (merged.api === "openai-responses" || merged.api === "azure-openai-responses" || merged.api === "openai-codex-responses") {
+				if (merged.compat.supportsMaxOutputTokens === undefined) {
+					merged.compat.supportsMaxOutputTokens = true;
+				}
+			}
+			if (typeof config?.vllmPriority === "number" || typeof config?.compat?.vllmPriority === "number") {
+				merged.compat.vllmPriority = config?.vllmPriority ?? config?.compat?.vllmPriority;
 			}
 			if (merged.baseUrl && (merged.api === "openai-completions" || merged.api === "openai-responses" || !merged.api)) {
 				let b = merged.baseUrl.trim().replace(/\/+$/, "");

@@ -144,6 +144,9 @@ impl Supervisor {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(records) = serde_json::from_str::<Vec<SessionInfo>>(&content) {
                     for mut r in records {
+                        if r.in_memory == Some(true) {
+                            continue;
+                        }
                         r.running = false;
                         map.insert(
                             r.session_id.clone(),
@@ -275,6 +278,7 @@ impl Supervisor {
             mode: SessionMode::Code,
             name,
             model,
+            in_memory: Some(false),
             running: false,
             created_at: created_at.clone(),
             updated_at: created_at,
@@ -318,6 +322,7 @@ impl Supervisor {
         mode: SessionMode,
         model: Option<String>,
         name: Option<String>,
+        in_memory: Option<bool>,
     ) -> anyhow::Result<SessionInfo> {
         let now = chrono::Utc::now().to_rfc3339();
         let info = SessionInfo {
@@ -326,6 +331,7 @@ impl Supervisor {
             mode,
             name,
             model,
+            in_memory,
             running: false,
             created_at: now.clone(),
             updated_at: now,
@@ -407,9 +413,16 @@ impl Supervisor {
 
         cmd.arg(&rpc_entry)
             .arg("--mode")
-            .arg("rpc")
-            .arg("--session")
-            .arg(&session_file);
+            .arg("rpc");
+
+        if session.info.in_memory == Some(true) {
+            cmd.arg("--no-session")
+                .arg("--session-id")
+                .arg(session_id);
+        } else {
+            cmd.arg("--session")
+                .arg(&session_file);
+        }
 
         if let Some(m) = &session.info.model {
             cmd.arg("--model").arg(m);

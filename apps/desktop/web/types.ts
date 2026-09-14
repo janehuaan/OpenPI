@@ -337,6 +337,7 @@ export interface CreateConversationInput {
 	mode: AgentMode;
 	label?: string;
 	cwd?: string;
+	inMemory?: boolean;
 }
 
 export interface ModelDefinition {

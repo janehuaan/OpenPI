@@ -126,7 +126,12 @@ export const desktopApi = {
 	setConversationThinkingLevel: (instanceId: string, level: ThinkingLevel) =>
 		call<ConversationState>("set_conversation_thinking_level", { instanceId, level }),
 	createConversation: (input: CreateConversationInput) =>
-		call<AgentInstance>("create_conversation", { label: input.label, cwd: input.cwd, mode: input.mode }),
+		call<AgentInstance>("create_conversation", {
+			label: input.label,
+			cwd: input.cwd,
+			mode: input.mode,
+			inMemory: input.inMemory,
+		}),
 	selectWorkspace: (defaultPath?: string) => call<string | undefined>("select_workspace", { defaultPath }),
 	getWorkspaceSummary: (cwd: string) => call<WorkspaceSummary>("get_workspace_summary", { cwd }),
 	readWorkspaceFile: (cwd: string, path: string) => call<WorkspaceFileContent>("read_workspace_file", { cwd, path }),

@@ -128,13 +128,35 @@ export async function refreshDynamicRegistryOnline(): Promise<number> {
 	return 0;
 }
 
+export const KNOWN_MODEL_PRESETS: Record<string, DynamicModelSpec> = {
+	"gpt-6-astra": {
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		reasoning: true,
+		input: ["text", "image"],
+		source: "known-preset",
+	},
+	"gpt-6": {
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		reasoning: true,
+		input: ["text", "image"],
+		source: "known-preset",
+	},
+	"gpt-6-mini": {
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		reasoning: true,
+		input: ["text", "image"],
+		source: "known-preset",
+	},
+};
+
 /**
  * Dynamically look up a model's specs from the registry without any hardcoded if-else trees.
  */
 export function queryDynamicRegistry(modelId: string): DynamicModelSpec | null {
 	if (!modelId) return null;
-	const cache = loadDynamicRegistryCache();
-	if (cache.size === 0) return null;
 
 	const raw = modelId.trim().toLowerCase();
 	const normalized = raw.replace(/[._]/g, "-");
@@ -151,6 +173,17 @@ export function queryDynamicRegistry(modelId: string): DynamicModelSpec | null {
 		normalized.replace(/-medium$/, ""),
 		normalized.replace(/-low$/, ""),
 	];
+
+	for (const candidate of candidates) {
+		for (const [key, preset] of Object.entries(KNOWN_MODEL_PRESETS)) {
+			if (candidate === key || candidate.endsWith(`/${key}`)) {
+				return { ...preset };
+			}
+		}
+	}
+
+	const cache = loadDynamicRegistryCache();
+	if (cache.size === 0) return null;
 
 	for (const candidate of candidates) {
 		// Exact match

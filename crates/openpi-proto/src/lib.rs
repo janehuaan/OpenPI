@@ -24,6 +24,8 @@ pub struct SessionInfo {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_memory: Option<bool>,
     pub running: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -57,6 +59,8 @@ pub enum ClientRequest {
         model: Option<String>,
         #[serde(default)]
         name: Option<String>,
+        #[serde(default)]
+        in_memory: Option<bool>,
     },
     StopSession { id: String, session_id: String },
     DeleteSession { id: String, session_id: String },

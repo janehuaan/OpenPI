@@ -27,6 +27,7 @@ export interface SessionInfo {
 	mode: SessionMode;
 	name?: string;
 	model?: string;
+	inMemory?: boolean;
 	/** Live subprocess present, vs. known-but-suspended. */
 	running: boolean;
 	createdAt: string;
@@ -50,7 +51,7 @@ export type ClientRequest =
 	| { id: string; type: "health" }
 	| { id: string; type: "shutdown" }
 	| { id: string; type: "list_sessions" }
-	| { id: string; type: "create_session"; cwd: string; mode?: SessionMode; model?: string; name?: string }
+	| { id: string; type: "create_session"; cwd: string; mode?: SessionMode; model?: string; name?: string; inMemory?: boolean }
 	| { id: string; type: "stop_session"; sessionId: string }
 	| { id: string; type: "delete_session"; sessionId: string }
 	| { id: string; type: "rename_session"; sessionId: string; name: string }

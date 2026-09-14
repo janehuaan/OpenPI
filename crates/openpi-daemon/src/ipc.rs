@@ -223,11 +223,12 @@ async fn handle_connection(
                 mode,
                 model,
                 name,
+                in_memory,
             } => {
                 let session_id = uuid::Uuid::new_v4().to_string();
                 let mode = mode.unwrap_or_default();
                 match supervisor
-                    .create_session(session_id, cwd, mode, model, name)
+                    .create_session(session_id, cwd, mode, model, name, in_memory)
                     .await
                 {
                     Ok(info) => ServerMessage::ok(id, serde_json::to_value(info)?),
