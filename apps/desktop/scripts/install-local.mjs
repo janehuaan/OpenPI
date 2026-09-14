@@ -102,7 +102,7 @@ if (existsSync(frameworks)) {
 	}
 }
 
-const runtime = join(target, "Contents", "Resources", "openpi", "daemon.js");
+const runtime = join(target, "Contents", "Resources", "openpi", "openpi-daemon");
 if (!existsSync(runtime)) {
 	process.stderr.write("Installed app has no openpi runtime; afterPack did not run.\n");
 	process.exit(1);
