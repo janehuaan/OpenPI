@@ -111,8 +111,6 @@ async fn handle_connection(
             }
         };
 
-        let req_id = request.id().to_string();
-
         let response = match request {
             ClientRequest::Health { id } => {
                 let sessions = supervisor.list_sessions().await;
@@ -131,7 +129,7 @@ async fn handle_connection(
             }
             ClientRequest::ListSessions { id } => {
                 let sessions = supervisor.list_sessions().await;
-                ServerMessage::ok(id, serde_json::to_value(sessions)?)
+                ServerMessage::ok(id, serde_json::json!({ "sessions": sessions }))
             }
             ClientRequest::CreateSession {
                 id,
@@ -180,15 +178,24 @@ async fn handle_connection(
                     Err(e) => ServerMessage::err(id, e.to_string()),
                 }
             }
+            ClientRequest::DeleteSession { id, session_id } => {
+                match supervisor.delete_session(&session_id).await {
+                    Ok(_) => ServerMessage::ok(id, serde_json::json!({"deleted": true})),
+                    Err(e) => ServerMessage::err(id, e.to_string()),
+                }
+            }
+            ClientRequest::RenameSession { id, session_id, name } => {
+                match supervisor.rename_session(&session_id, Some(name)).await {
+                    Ok(_) => ServerMessage::ok(id, serde_json::json!({"renamed": true})),
+                    Err(e) => ServerMessage::err(id, e.to_string()),
+                }
+            }
             ClientRequest::App { id, op } => {
                 handle_app_op(&id, &op, &storage, &scheduler).await?
             }
             ClientRequest::Shutdown { id } => {
                 let _ = write_tx.send(ServerMessage::ok(id, serde_json::json!({"shutting_down": true})).to_json_line()?).await;
                 std::process::exit(0);
-            }
-            _other => {
-                ServerMessage::ok(req_id, serde_json::json!({"status": "noop_or_unimplemented"}))
             }
         };
 

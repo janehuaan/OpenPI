@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -7,6 +8,21 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::{info, warn};
 use serde_json::Value;
 use openpi_proto::{SessionInfo, SessionMode};
+
+pub fn openpi_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("OPENPI_DIR") {
+        PathBuf::from(p)
+    } else {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
+        PathBuf::from(home).join(".openpi")
+    }
+}
+
+pub fn instances_path() -> PathBuf {
+    openpi_dir().join("instances.json")
+}
 
 pub struct ManagedSession {
     pub info: SessionInfo,
@@ -23,8 +39,28 @@ pub struct Supervisor {
 impl Supervisor {
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(1024);
+        let mut map = HashMap::new();
+        let path = instances_path();
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(records) = serde_json::from_str::<Vec<SessionInfo>>(&content) {
+                    for mut r in records {
+                        r.running = false;
+                        map.insert(
+                            r.session_id.clone(),
+                            ManagedSession {
+                                info: r,
+                                child_stdin: None,
+                                child: None,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: Arc::new(Mutex::new(map)),
             event_tx,
         }
     }
@@ -33,9 +69,25 @@ impl Supervisor {
         self.event_tx.subscribe()
     }
 
+    pub async fn save_records(&self) {
+        let path = instances_path();
+        let _ = std::fs::create_dir_all(openpi_dir());
+        let sessions = self.sessions.lock().await;
+        let mut records: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
+        records.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        if let Ok(json) = serde_json::to_string_pretty(&records) {
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+    }
+
     pub async fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.lock().await;
-        sessions.values().map(|s| s.info.clone()).collect()
+        let mut list: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
+        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        list
     }
 
     pub async fn get_session(&self, id: &str) -> Option<SessionInfo> {
@@ -63,17 +115,42 @@ impl Supervisor {
             updated_at: now,
         };
 
-        let mut sessions = self.sessions.lock().await;
-        sessions.insert(
-            id.clone(),
-            ManagedSession {
-                info: info.clone(),
-                child_stdin: None,
-                child: None,
-            },
-        );
+        {
+            let mut sessions = self.sessions.lock().await;
+            sessions.insert(
+                id.clone(),
+                ManagedSession {
+                    info: info.clone(),
+                    child_stdin: None,
+                    child: None,
+                },
+            );
+        }
 
+        self.save_records().await;
         Ok(info)
+    }
+
+    pub async fn delete_session(&self, id: &str) -> anyhow::Result<()> {
+        let _ = self.stop_session(id).await;
+        {
+            let mut sessions = self.sessions.lock().await;
+            sessions.remove(id);
+        }
+        self.save_records().await;
+        Ok(())
+    }
+
+    pub async fn rename_session(&self, id: &str, name: Option<String>) -> anyhow::Result<()> {
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(id) {
+                s.info.name = name;
+                s.info.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+        }
+        self.save_records().await;
+        Ok(())
     }
 
     pub async fn ensure_process(

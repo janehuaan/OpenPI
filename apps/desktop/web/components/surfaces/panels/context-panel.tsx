@@ -40,14 +40,14 @@ function ContextProgressBar({ value, max, color = "var(--accent)" }: { value: nu
 export function TokenCompositionBar({
 	tokens: t,
 }: {
-	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	tokens?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
 }) {
-	const total = t.input + t.output + t.cacheRead + t.cacheWrite || 1;
+	const total = (t?.input ?? 0) + (t?.output ?? 0) + (t?.cacheRead ?? 0) + (t?.cacheWrite ?? 0) || 1;
 	const segments = [
-		{ key: "prompt", label: "提示词", value: t.input, color: "#d97757" },
-		{ key: "reply", label: "回复", value: t.output, color: "#76c878" },
-		{ key: "cacheR", label: "缓存读", value: t.cacheRead, color: "#4d8df6" },
-		{ key: "cacheW", label: "缓存写", value: t.cacheWrite, color: "#8791a1" },
+		{ key: "prompt", label: "提示词", value: t?.input ?? 0, color: "#d97757" },
+		{ key: "reply", label: "回复", value: t?.output ?? 0, color: "#76c878" },
+		{ key: "cacheR", label: "缓存读", value: t?.cacheRead ?? 0, color: "#4d8df6" },
+		{ key: "cacheW", label: "缓存写", value: t?.cacheWrite ?? 0, color: "#8791a1" },
 	].filter((s) => s.value > 0);
 	return (
 		<div className="token-composition">

@@ -60,9 +60,24 @@ async fn test_daemon_full_lifecycle() {
     reader.read_line(&mut line).await.unwrap();
     let resp: serde_json::Value = serde_json::from_str(&line).expect("parse create_session response");
     assert_eq!(resp["id"], "req-c1");
+    let session_id = resp["data"]["sessionId"].as_str().unwrap().to_string();
+
+    // 2b. Test list_sessions
+    let list_req = serde_json::json!({
+        "id": "req-ls1",
+        "type": "list_sessions"
+    });
+    writer.write_all(format!("{}\n", list_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse list_sessions response");
+    assert_eq!(resp["id"], "req-ls1");
     assert_eq!(resp["ok"], true);
-    assert_eq!(resp["data"]["name"], "Rust Test Session");
-    let _session_id = resp["data"]["sessionId"].as_str().unwrap().to_string();
+    let session_list = resp["data"]["sessions"].as_array().unwrap();
+    assert_eq!(session_list.len(), 1);
+    assert_eq!(session_list[0]["sessionId"], session_id);
 
     // 3. Test AppOp: create_task
     let task_req = serde_json::json!({

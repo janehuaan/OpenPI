@@ -1087,10 +1087,10 @@ export function ChatSurface({
 	// Status-bar metrics derived from session stats + the latest assistant message.
 	const lastAssistant = [...(conversation?.messages ?? [])].reverse().find((m) => m.role === "assistant" && m.usage);
 	const lastUsage = lastAssistant?.usage;
-	const lastTotal = lastUsage ? lastUsage.input + lastUsage.cacheRead + lastUsage.cacheWrite : 0;
-	const lastHit = lastTotal > 0 ? Math.round((lastUsage!.cacheRead / lastTotal) * 100) : undefined;
+	const lastTotal = lastUsage ? (lastUsage.input ?? 0) + (lastUsage.cacheRead ?? 0) + (lastUsage.cacheWrite ?? 0) : 0;
+	const lastHit = lastTotal > 0 ? Math.round(((lastUsage?.cacheRead ?? 0) / lastTotal) * 100) : undefined;
 	const avgHit =
-		stats && stats.tokens.total > 0 ? Math.round((stats.tokens.cacheRead / stats.tokens.total) * 100) : undefined;
+		stats?.tokens?.total && stats.tokens.total > 0 ? Math.round(((stats.tokens.cacheRead ?? 0) / stats.tokens.total) * 100) : undefined;
 	const lastCost = lastUsage?.cost?.total ?? 0;
 	const ctxPercent = stats?.contextUsage ? Math.round(stats.contextUsage.percent * 100) : undefined;
 	const compactThreshold = stats?.compaction

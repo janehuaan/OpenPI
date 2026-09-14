@@ -953,8 +953,12 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 					client.request({ type: "app", op: { name: "list_tasks" } }) as Promise<{ tasks: TaskWithRuns[] }>,
 				]);
 				health = h;
-				sessions = sList.sessions ?? [];
-				taskData = tList.tasks ?? [];
+				sessions = Array.isArray((sList as any)?.sessions)
+					? (sList as any).sessions
+					: (Array.isArray(sList) ? sList : []);
+				taskData = Array.isArray((tList as any)?.tasks)
+					? (tList as any).tasks
+					: (Array.isArray(tList) ? tList : []);
 			} catch {
 				daemonRunning = false;
 			}
@@ -1010,7 +1014,8 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 
 		prune_stopped_instances: async () => {
 			const client = await getClient();
-			const { sessions } = (await client.request({ type: "list_sessions" })) as { sessions: SessionInfo[] };
+			const res = (await client.request({ type: "list_sessions" })) as any;
+			const sessions: SessionInfo[] = Array.isArray(res?.sessions) ? res.sessions : (Array.isArray(res) ? res : []);
 			let deleted = 0;
 			for (const s of sessions) {
 				if (!s.running) {
@@ -1103,8 +1108,9 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				}
 			}
 
-			const sList = (await client.request({ type: "list_sessions" })) as { sessions: SessionInfo[] };
-			const found = sList.sessions?.find((s) => s.sessionId === instanceId);
+			const sList = (await client.request({ type: "list_sessions" })) as any;
+			const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+			const found = sessionArray.find((s) => s.sessionId === instanceId);
 
 			return {
 				instance: {
@@ -1133,12 +1139,15 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		get_conversation_stats: async ({ instanceId }: { instanceId: string }) => {
 			const client = await getClient();
 			try {
-				const stats = await client.request({
+				const stats = (await client.request({
 					type: "rpc",
 					sessionId: instanceId,
 					command: { type: "get_session_stats" },
-				});
-				return stats ?? null;
+				})) as any;
+				if (!stats || typeof stats !== "object" || !stats.tokens) {
+					return null;
+				}
+				return stats;
 			} catch {
 				return null;
 			}
@@ -1149,8 +1158,9 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) return null;
 			try {
 				const client = await getClient();
-				const sList = (await client.request({ type: "list_sessions" })) as { sessions?: SessionInfo[] };
-				const session = sList.sessions?.find((item) => item.sessionId === instanceId);
+				const sList = (await client.request({ type: "list_sessions" })) as any;
+				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const session = sessionArray.find((item) => item.sessionId === instanceId);
 				if (!session?.cwd) return null;
 
 				// 1. Check scoped session-state task file: <cwd>/.pi/tasks/<instanceId>.json
@@ -1194,8 +1204,9 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) return [];
 			try {
 				const client = await getClient();
-				const sList = (await client.request({ type: "list_sessions" })) as { sessions?: SessionInfo[] };
-				const session = sList.sessions?.find((item) => item.sessionId === instanceId);
+				const sList = (await client.request({ type: "list_sessions" })) as any;
+				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const session = sessionArray.find((item) => item.sessionId === instanceId);
 				if (!session?.cwd) return [];
 				const eventFile = join(session.cwd, ".pi", "events", `${instanceId}.jsonl`);
 				if (!existsSync(eventFile)) return [];
@@ -1215,8 +1226,9 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			if (!instanceId) return null;
 			try {
 				const client = await getClient();
-				const sList = (await client.request({ type: "list_sessions" })) as { sessions?: SessionInfo[] };
-				const session = sList.sessions?.find((item) => item.sessionId === instanceId);
+				const sList = (await client.request({ type: "list_sessions" })) as any;
+				const sessionArray: SessionInfo[] = Array.isArray(sList?.sessions) ? sList.sessions : (Array.isArray(sList) ? sList : []);
+				const session = sessionArray.find((item) => item.sessionId === instanceId);
 				if (!session?.cwd) return null;
 				const taskFile = join(session.cwd, ".pi", "tasks", `${instanceId}.json`);
 				if (!existsSync(taskFile)) return null;

@@ -873,9 +873,9 @@ export function ReferenceWorkspacePreview({
 		contextWindow > 0
 			? Math.min(contextTokens / contextWindow, 1)
 			: undefined;
-	const cacheRead = stats?.tokens.cacheRead ?? 0;
-	const cacheWrite = stats?.tokens.cacheWrite ?? 0;
-	const cacheEligibleTokens = (stats?.tokens.input ?? 0) + cacheRead;
+	const cacheRead = stats?.tokens?.cacheRead ?? 0;
+	const cacheWrite = stats?.tokens?.cacheWrite ?? 0;
+	const cacheEligibleTokens = (stats?.tokens?.input ?? 0) + cacheRead;
 	const cacheHitPercent = cacheEligibleTokens > 0 ? Math.round((cacheRead / cacheEligibleTokens) * 100) : undefined;
 	const messageSignature = `${messages
 		.map((message, index) => {
@@ -1232,9 +1232,9 @@ export function ReferenceWorkspacePreview({
 			return true;
 		}
 		if (lowerCmd === "/stats" || lowerCmd === "/统计") {
-			const inTokens = stats?.tokens.input ?? 0;
-			const outTokens = stats?.tokens.output ?? 0;
-			const cacheR = stats?.tokens.cacheRead ?? 0;
+			const inTokens = stats?.tokens?.input ?? 0;
+			const outTokens = stats?.tokens?.output ?? 0;
+			const cacheR = stats?.tokens?.cacheRead ?? 0;
 			const toolsUsed = stats?.toolCalls ?? 0;
 			setAttachmentNotice(`会话统计：输入 ${inTokens} | 输出 ${outTokens} | 缓存命中 ${cacheR} | 工具调用 ${toolsUsed} 次`);
 			return true;
