@@ -1,0 +1,21 @@
+[package]
+name = "openpi-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openpi-proto = { path = "../openpi-proto" }
+openpi-storage = { path = "../openpi-storage" }
+openpi-scheduler = { path = "../openpi-scheduler" }
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+futures-util.workspace = true
