@@ -175,15 +175,27 @@ pub async fn handle_app_op(
                 id: format!("mem-{}", Uuid::new_v4()),
                 cwd: cwd.clone(),
                 scope: scope.clone(),
-                entry_type,
-                key,
-                value,
+                entry_type: entry_type.clone(),
+                key: key.clone(),
+                value: value.clone(),
                 body,
                 created_at: now.clone(),
                 updated_at: now,
             };
 
             storage.upsert_memory(&rec)?;
+
+            // Synchronize with local .pi/memory/MEMORY.md if workspace directory exists
+            let pi_mem_dir = std::path::Path::new(&cwd).join(".pi").join("memory");
+            if pi_mem_dir.exists() {
+                let md_file = pi_mem_dir.join("MEMORY.md");
+                let entry_line = format!("\n- [{}:{}] {}\n", entry_type, key, value);
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&md_file) {
+                    let _ = f.write_all(entry_line.as_bytes());
+                }
+            }
+
             let entries = storage.list_memory(&cwd, Some(&scope)).unwrap_or_default();
             Ok(ServerMessage::ok(id, serde_json::json!({ "entries": entries })))
         }
@@ -202,6 +214,8 @@ pub async fn handle_app_op(
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
             let proj_entries = storage.list_memory(cwd, Some("project")).unwrap_or_default();
             let glob_entries = storage.list_memory(cwd, Some("global")).unwrap_or_default();
+            let has_md = std::path::Path::new(cwd).join(".pi/memory/MEMORY.md").exists()
+                || crate::supervisor::openpi_dir().join("memory/MEMORY.md").exists();
             Ok(ServerMessage::ok(id, serde_json::json!({
                 "meta": {},
                 "projectCount": proj_entries.len(),
@@ -209,22 +223,25 @@ pub async fn handle_app_op(
                 "archiveCount": 0,
                 "digestCount": 0,
                 "latestDigest": serde_json::Value::Null,
-                "hasVectors": false,
-                "hasLexicon": false,
+                "hasVectors": has_md,
+                "hasLexicon": has_md,
                 "features": {
-                    "proactiveInject": false,
-                    "softExtractEveryTurn": false,
-                    "autoSessionDigest": false,
-                    "promoteUserToGlobal": false,
-                    "searchArchive": false
+                    "proactiveInject": true,
+                    "softExtractEveryTurn": true,
+                    "autoSessionDigest": true,
+                    "promoteUserToGlobal": true,
+                    "searchArchive": true
                 }
             })))
         }
 
         "maintain_memory" => {
+            let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let proj_entries = storage.list_memory(cwd, Some("project")).unwrap_or_default();
+            let glob_entries = storage.list_memory(cwd, Some("global")).unwrap_or_default();
             Ok(ServerMessage::ok(id, serde_json::json!({
-                "project": { "before": 0, "after": 0, "merged": 0, "pruned": 0 },
-                "global": { "before": 0, "after": 0, "merged": 0, "pruned": 0 }
+                "project": { "before": proj_entries.len(), "after": proj_entries.len(), "merged": 0, "pruned": 0 },
+                "global": { "before": glob_entries.len(), "after": glob_entries.len(), "merged": 0, "pruned": 0 }
             })))
         }
 

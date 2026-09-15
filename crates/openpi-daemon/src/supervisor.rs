@@ -124,7 +124,7 @@ const CODE_MODE_UNATTENDED_DIRECTIVE: &str = "\
 
 pub struct ManagedSession {
     pub info: SessionInfo,
-    pub child_stdin: Option<ChildStdin>,
+    pub child_stdin: Arc<Mutex<Option<ChildStdin>>>,
     pub child: Option<Child>,
     pub pending: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>>,
 }
@@ -137,7 +137,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new() -> Self {
-        let (event_tx, _) = broadcast::channel(1024);
+        let (event_tx, _) = broadcast::channel(16384);
         let mut map = HashMap::new();
         let path = instances_path();
         if path.exists() {
@@ -152,7 +152,7 @@ impl Supervisor {
                             r.session_id.clone(),
                             ManagedSession {
                                 info: r,
-                                child_stdin: None,
+                                child_stdin: Arc::new(Mutex::new(None)),
                                 child: None,
                                 pending: Arc::new(Mutex::new(HashMap::new())),
                             },
@@ -177,7 +177,7 @@ impl Supervisor {
                                         sid.clone(),
                                         ManagedSession {
                                             info,
-                                            child_stdin: None,
+                                            child_stdin: Arc::new(Mutex::new(None)),
                                             child: None,
                                             pending: Arc::new(Mutex::new(HashMap::new())),
                                         },
@@ -343,7 +343,7 @@ impl Supervisor {
                 id.clone(),
                 ManagedSession {
                     info: info.clone(),
-                    child_stdin: None,
+                    child_stdin: Arc::new(Mutex::new(None)),
                     child: None,
                     pending: Arc::new(Mutex::new(HashMap::new())),
                 },
@@ -464,13 +464,15 @@ impl Supervisor {
         let stdin = child.stdin.take().expect("child stdin piped");
         let stdout = child.stdout.take().expect("child stdout piped");
 
-        session.child_stdin = Some(stdin);
+        *session.child_stdin.lock().await = Some(stdin);
         session.child = Some(child);
         session.info.running = true;
 
         let tx = self.event_tx.clone();
         let sid = session_id.to_string();
         let pending = session.pending.clone();
+        let sessions_clone = self.sessions.clone();
+        let child_stdin_clone = session.child_stdin.clone();
 
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -505,51 +507,92 @@ impl Supervisor {
                 }
             }
             info!("Subprocess stdout stream ended for session {}", sid);
+
+            // Reaping & cleanup: mark session dead so it can cleanly respawn on demand
+            *child_stdin_clone.lock().await = None;
+            let mut sessions = sessions_clone.lock().await;
+            if let Some(s) = sessions.get_mut(&sid) {
+                s.info.running = false;
+                if let Some(mut c) = s.child.take() {
+                    tokio::spawn(async move {
+                        let _ = c.wait().await;
+                    });
+                }
+                let mut p = s.pending.lock().await;
+                for (_, sender) in p.drain() {
+                    let _ = sender.send(Err("Subprocess exited unexpectedly".to_string()));
+                }
+            }
         });
 
         Ok(())
     }
 
+    pub async fn mark_session_dead(&self, session_id: &str) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.info.running = false;
+            *session.child_stdin.lock().await = None;
+            if let Some(mut child) = session.child.take() {
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+            }
+            let mut p = session.pending.lock().await;
+            for (_, tx) in p.drain() {
+                let _ = tx.send(Err("Session process died".into()));
+            }
+        }
+    }
+
     pub async fn send_rpc(&self, session_id: &str, command: &Value) -> anyhow::Result<Value> {
-        let (rx, cmd_line) = {
+        let (child_stdin, pending) = {
             let mut sessions = self.sessions.lock().await;
             let session = match sessions.get_mut(session_id) {
                 Some(s) => s,
                 None => anyhow::bail!("Session not found: {}", session_id),
             };
-
-            let stdin = match &mut session.child_stdin {
-                Some(s) => s,
-                None => anyhow::bail!("Session {} has no running process", session_id),
-            };
-
-            let mut cmd = command.clone();
-            let req_id = match cmd.get("id").and_then(|v| v.as_str()) {
-                Some(s) => s.to_string(),
-                None => {
-                    let new_id = uuid::Uuid::new_v4().to_string();
-                    if let Some(obj) = cmd.as_object_mut() {
-                        obj.insert("id".to_string(), Value::String(new_id.clone()));
-                    }
-                    new_id
-                }
-            };
-
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            {
-                let mut p = session.pending.lock().await;
-                p.insert(req_id, tx);
-            }
-
-            let mut line = serde_json::to_string(&cmd)?;
-            line.push('\n');
-            stdin.write_all(line.as_bytes()).await?;
-            stdin.flush().await?;
-
-            (rx, line)
+            (session.child_stdin.clone(), session.pending.clone())
         };
 
-        let _ = cmd_line;
+        let mut stdin_guard = child_stdin.lock().await;
+        let stdin = match stdin_guard.as_mut() {
+            Some(s) => s,
+            None => anyhow::bail!("Session {} has no running process", session_id),
+        };
+
+        let mut cmd = command.clone();
+        let req_id = match cmd.get("id").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                let new_id = uuid::Uuid::new_v4().to_string();
+                if let Some(obj) = cmd.as_object_mut() {
+                    obj.insert("id".to_string(), Value::String(new_id.clone()));
+                }
+                new_id
+            }
+        };
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut p = pending.lock().await;
+            p.insert(req_id, tx);
+        }
+
+        let mut line = serde_json::to_string(&cmd)?;
+        line.push('\n');
+
+        if let Err(e) = stdin.write_all(line.as_bytes()).await {
+            drop(stdin_guard);
+            self.mark_session_dead(session_id).await;
+            anyhow::bail!("Failed to write to session stdin (process died): {}", e);
+        }
+        if let Err(e) = stdin.flush().await {
+            drop(stdin_guard);
+            self.mark_session_dead(session_id).await;
+            anyhow::bail!("Failed to flush session stdin (process died): {}", e);
+        }
+        drop(stdin_guard);
 
         match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
             Ok(Ok(Ok(data))) => Ok(data),
@@ -562,9 +605,12 @@ impl Supervisor {
     pub async fn stop_session(&self, session_id: &str) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(session_id) {
-            session.child_stdin = None;
+            *session.child_stdin.lock().await = None;
             if let Some(mut child) = session.child.take() {
                 let _ = child.kill().await;
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
             }
             session.info.running = false;
             let mut p = session.pending.lock().await;
