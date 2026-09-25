@@ -2545,6 +2545,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "openpi-jev",
  "openpi-memory",
  "openpi-proto",
  "openpi-scheduler",

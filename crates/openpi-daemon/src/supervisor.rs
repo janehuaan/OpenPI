@@ -180,6 +180,7 @@ pub struct ManagedSession {
 pub struct Supervisor {
     sessions: Arc<Mutex<HashMap<String, ManagedSession>>>,
     event_tx: broadcast::Sender<(String, Value)>,
+    pub jev: Arc<openpi_jev::JevCoordinator>,
 }
 
 impl Supervisor {
@@ -252,9 +253,13 @@ impl Supervisor {
             }
         }
 
+        let jev = Arc::new(openpi_jev::JevCoordinator::new());
+        jev.spawn_async_warmup();
+
         let supervisor = Self {
             sessions: Arc::new(Mutex::new(map)),
             event_tx,
+            jev,
         };
 
         // Save consolidated records in background
@@ -588,6 +593,7 @@ impl Supervisor {
         let pending = session.pending.clone();
         let sessions_clone = self.sessions.clone();
         let child_stdin_clone = session.child_stdin.clone();
+        let jev_clone = self.jev.clone();
 
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -597,8 +603,9 @@ impl Supervisor {
                     continue;
                 }
                 match serde_json::from_str::<Value>(&line) {
-                    Ok(event) => {
-                        if event.get("type").and_then(|v| v.as_str()) == Some("response") {
+                    Ok(mut event) => {
+                        let ev_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if ev_type == "response" {
                             if let Some(req_id) = event.get("id").and_then(|v| v.as_str()) {
                                 let mut p = pending.lock().await;
                                 if let Some(sender) = p.remove(req_id) {
@@ -614,6 +621,23 @@ impl Supervisor {
                                 }
                             }
                         }
+
+                        // Jev Hook: Process tool outputs (compress verbose logs & mask leaks)
+                        if ev_type == "tool_execution_end" || ev_type == "tool_output" {
+                            if let Some(result_val) = event.get_mut("result") {
+                                if let Some(res_str) = result_val.as_str() {
+                                    let (compressed, leak) = jev_clone.process_command_output(res_str);
+                                    if leak.has_leaks || compressed.was_compressed {
+                                        *result_val = serde_json::Value::String(compressed.content);
+                                        event["jev_meta"] = serde_json::json!({
+                                            "tokens_saved": compressed.estimated_tokens_saved,
+                                            "leaks_redacted": leak.leak_count,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
                         let _ = tx.send((sid.clone(), event));
                     }
                     Err(e) => {

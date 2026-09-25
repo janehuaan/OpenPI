@@ -11,6 +11,7 @@ pub async fn handle_app_op(
     op: &Value,
     storage: &Storage,
     scheduler: &Scheduler,
+    jev: &openpi_jev::JevCoordinator,
 ) -> anyhow::Result<ServerMessage> {
     let name = match op.get("name").and_then(|n| n.as_str()) {
         Some(n) => n,
@@ -495,6 +496,52 @@ pub async fn handle_app_op(
                 storage.set_kv("profile", &serialized)?;
             }
             Ok(ServerMessage::ok(id, serde_json::json!({ "saved": true })))
+        }
+
+        // --- Jev System 1 Decision Ops ---
+        "jev_status" => {
+            let status = jev.status().await;
+            let status_str = match status {
+                openpi_jev::EngineStatus::Ready => "Ready",
+                openpi_jev::EngineStatus::WarmingUp => "WarmingUp",
+                openpi_jev::EngineStatus::Degraded => "Degraded",
+            };
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "status": status_str,
+                "engine": "ModernBERT-base (FP32)",
+                "ready": status == openpi_jev::EngineStatus::Ready,
+            })))
+        }
+
+        "jev_route" => {
+            let prompt = op.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
+            let has_workspace = op.get("has_workspace").and_then(|w| w.as_bool()).unwrap_or(true);
+            let decision = jev.route_prompt(prompt, has_workspace);
+            Ok(ServerMessage::ok(id, serde_json::to_value(decision)?))
+        }
+
+        "jev_check_command" => {
+            let cmd = op.get("command").and_then(|c| c.as_str()).unwrap_or("");
+            let verdict = jev.pre_check_command(cmd);
+            Ok(ServerMessage::ok(id, serde_json::to_value(verdict)?))
+        }
+
+        "jev_process_output" => {
+            let raw_output = op.get("output").and_then(|o| o.as_str()).unwrap_or("");
+            let (comp, leak) = jev.process_command_output(raw_output);
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "compressed": comp,
+                "leak": leak,
+            })))
+        }
+
+        "jev_evaluate_task" => {
+            let goal = op.get("goal").and_then(|g| g.as_str()).unwrap_or("");
+            let cmd = op.get("command").and_then(|c| c.as_str()).unwrap_or("");
+            let output = op.get("output").and_then(|o| o.as_str()).unwrap_or("");
+            let successes = op.get("successes").and_then(|s| s.as_u64()).unwrap_or(1) as usize;
+            let verdict = jev.evaluate_task_completion(goal, cmd, output, successes);
+            Ok(ServerMessage::ok(id, serde_json::to_value(verdict)?))
         }
 
         // Default handler

@@ -893,7 +893,7 @@ pub async fn handle_invoke(
             Ok(json!([]))
         }
 
-        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" => {
+        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" => {
             let mut op = args.clone();
             let op_name = match channel.as_str() {
                 "write_memory_entry" => "write_memory",

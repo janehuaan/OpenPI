@@ -11,6 +11,7 @@ openpi-scheduler = { path = "../openpi-scheduler" }
 openpi-memory = { path = "../openpi-memory" }
 openpi-state = { path = "../openpi-state" }
 openpi-tools = { path = "../openpi-tools" }
+openpi-jev = { path = "../openpi-jev" }
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true

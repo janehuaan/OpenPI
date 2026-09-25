@@ -211,7 +211,7 @@ async fn handle_connection(
                 }
             }
             ClientRequest::App { id, op } => {
-                handle_app_op(&id, &op, &storage, &scheduler).await?
+                handle_app_op(&id, &op, &storage, &scheduler, &supervisor.jev).await?
             }
             ClientRequest::Shutdown { id } => {
                 let _ = write_tx.send(ServerMessage::ok(id, serde_json::json!({"shutting_down": true})).to_json_line()?).await;

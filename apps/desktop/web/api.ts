@@ -439,7 +439,44 @@ export const desktopApi = {
 		if (!api?.onRuntimeUpdateProgress) return () => undefined;
 		return api.onRuntimeUpdateProgress(handler);
 	},
+
+	// ── Jev System 1 Decision Engine ──
+	getJevStatus: () => call<JevStatus>("jev_status"),
+	routePrompt: (prompt: string, hasWorkspace = true) =>
+		call<JevRouteDecision>("jev_route", { prompt, has_workspace: hasWorkspace }),
+	checkCommand: (command: string) => call<JevGateVerdict>("jev_check_command", { command }),
+	processOutput: (output: string) => call<{ compressed: unknown; leak: unknown }>("jev_process_output", { output }),
+	evaluateTask: (goal: string, command: string, output: string, successes = 1) =>
+		call<{ should_stop: boolean; confidence: number; rationale: string }>("jev_evaluate_task", {
+			goal,
+			command,
+			output,
+			successes,
+		}),
 };
+
+export interface JevStatus {
+	status: "Ready" | "WarmingUp" | "Degraded";
+	engine: string;
+	ready: boolean;
+}
+
+export interface JevRouteDecision {
+	mode: "chat" | "code";
+	recommended_tier: "fast" | "thinking" | "max";
+	confidence: number;
+	requires_workspace: boolean;
+	reason: string;
+}
+
+export interface JevGateVerdict {
+	action: "allow" | "warn" | "require_confirmation" | "deny" | "modify_command";
+	reasons?: string[];
+	reason?: string;
+	prompt?: string;
+	risk_score?: number;
+	safe_command?: string;
+}
 
 export interface RuntimeInfo {
 	currentVersion: string;
