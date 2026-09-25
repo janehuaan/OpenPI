@@ -180,9 +180,40 @@ async fn handle_connection(
                 if let Err(e) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
                     ServerMessage::err(id, e.to_string())
                 } else {
+                    let cmd_type = command.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     match supervisor.send_rpc(&session_id, &command).await {
-                        Ok(data) => ServerMessage::ok(id, data),
-                        Err(e) => ServerMessage::err(id, e.to_string()),
+                        Ok(data) => {
+                            if cmd_type == "set_model" {
+                                if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
+                                    let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                                    let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
+                                    let _ = supervisor.update_session_model(&session_id, model_str).await;
+                                }
+                            }
+                            ServerMessage::ok(id, data)
+                        }
+                        Err(e) => {
+                            let err_str = e.to_string();
+                            if cmd_type == "set_model" && err_str.contains("Model not found") {
+                                warn!("Model not found in running process for {}, respawning session process to reload models...", session_id);
+                                if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
+                                    let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                                    let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
+                                    let _ = supervisor.update_session_model(&session_id, model_str).await;
+                                }
+                                let _ = supervisor.stop_session(&session_id).await;
+                                if let Ok(_) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
+                                    match supervisor.send_rpc(&session_id, &command).await {
+                                        Ok(data) => ServerMessage::ok(id, data),
+                                        Err(retry_err) => ServerMessage::err(id, retry_err.to_string()),
+                                    }
+                                } else {
+                                    ServerMessage::err(id, err_str)
+                                }
+                            } else {
+                                ServerMessage::err(id, err_str)
+                            }
+                        }
                     }
                 }
             }

@@ -456,6 +456,18 @@ impl Supervisor {
         Ok(())
     }
 
+    pub async fn update_session_model(&self, id: &str, model: String) -> anyhow::Result<()> {
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(id) {
+                s.info.model = Some(model);
+                s.info.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+        }
+        self.save_records().await;
+        Ok(())
+    }
+
     pub async fn ensure_process(
         &self,
         session_id: &str,
@@ -544,7 +556,12 @@ impl Supervisor {
         }
 
         if let Some(m) = &session.info.model {
-            cmd.arg("--model").arg(m);
+            if let Some((prov, mid)) = m.split_once('/') {
+                cmd.arg("--provider").arg(prov);
+                cmd.arg("--model").arg(mid);
+            } else {
+                cmd.arg("--model").arg(m);
+            }
         } else {
             let settings_file = openpi_dir().join("agent").join("settings.json");
             if let Ok(c) = std::fs::read_to_string(&settings_file) {

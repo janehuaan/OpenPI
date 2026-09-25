@@ -1080,8 +1080,27 @@ pub async fn handle_invoke(
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
                 command: json!({ "type": "set_model", "provider": provider, "modelId": model_id }),
-            }).await?;
-            Ok(res)
+            }).await;
+            let final_res = match res {
+                Ok(data) => Ok(data),
+                Err(err) => {
+                    if err.contains("Model not found") && !sid.is_empty() {
+                        let _ = client.request(ClientRequest::StopSession {
+                            id: Uuid::new_v4().to_string(),
+                            session_id: sid.to_string(),
+                        }).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                        client.request(ClientRequest::Rpc {
+                            id: Uuid::new_v4().to_string(),
+                            session_id: sid.to_string(),
+                            command: json!({ "type": "set_model", "provider": provider, "modelId": model_id }),
+                        }).await
+                    } else {
+                        Err(err)
+                    }
+                }
+            }?;
+            Ok(final_res)
         }
 
         "set_conversation_thinking_level" => {
