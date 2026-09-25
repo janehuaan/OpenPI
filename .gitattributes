@@ -1,0 +1,11 @@
+# Ignore frontend and scripts for GitHub language statistics to highlight the Rust full-stack backend
+apps/desktop/web/** linguist-vendored
+apps/desktop/electron/** linguist-vendored
+packages/** linguist-vendored
+extensions/** linguist-vendored
+scripts/** linguist-vendored
+
+# Also treat package-lock as generated
+package-lock.json linguist-generated
+pnpm-lock.yaml linguist-generated
+yarn.lock linguist-generated
