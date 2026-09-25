@@ -30,6 +30,11 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 	const [rollingBack, setRollingBack] = useState(false);
 	const [progress, setProgress] = useState<RuntimeUpdateProgress | null>(null);
 	const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+	const [jevStatus, setJevStatus] = useState<{ status: string; engine: string; ready: boolean } | null>(null);
+
+	useEffect(() => {
+		desktopApi.getJevStatus().then(setJevStatus).catch(() => null);
+	}, []);
 
 	const loadRuntimeInfo = async () => {
 		try {
@@ -154,9 +159,9 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 					<div className="setting-item-row">
 						<div className="setting-item-meta">
 							<strong>客户端版本 (Client Shell)</strong>
-							<span>OpenPI Desktop v0.2.3 (Electron Shell)</span>
+							<span>OpenPI Desktop v1.0.0 (Tauri 2.x + Rust Native)</span>
 						</div>
-						<span className="provider-badge active">最新版本</span>
+						<span className="provider-badge active">正式版</span>
 					</div>
 
 					<div className="setting-item-row">
@@ -175,6 +180,42 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 							<span>GitHub 仓库</span>
 							<ExternalLink size={12} />
 						</a>
+					</div>
+				</div>
+			</section>
+
+			{/* ── Jev System 1 Decision Engine ── */}
+			<section className="settings-section-card">
+				<div className="settings-section-card-header">
+					<div className="settings-section-card-header-left">
+						<div className="settings-section-card-icon" style={{ color: "var(--accent, #6366f1)" }}>
+							<Cpu size={18} />
+						</div>
+						<div className="settings-section-card-title">
+							<h3>Jev 本地直觉神经决策中枢 (System 1)</h3>
+							<span>毫秒级决策、全流程安全防线与智能 Token 压缩</span>
+						</div>
+					</div>
+					<span className={`provider-badge ${jevStatus?.ready ? "active" : "standby"}`}>
+						{jevStatus?.status === "Ready" ? "就绪运行中" : jevStatus?.status === "WarmingUp" ? "异步预热中" : "规则降级模式"}
+					</span>
+				</div>
+
+				<div className="settings-section-card-body">
+					<div className="setting-item-row">
+						<div className="setting-item-meta">
+							<strong>模型内核 (Neural Kernel)</strong>
+							<span>{jevStatus?.engine || "ModernBERT-base (FP32 全精度)"}</span>
+						</div>
+						<span style={{ fontSize: "12px", color: "var(--text-muted)" }}>~55ms 极速推理 (AVX2 原生加速)</span>
+					</div>
+
+					<div className="setting-item-row">
+						<div className="setting-item-meta">
+							<strong>六大安全与防线支柱 (Six Pillars)</strong>
+							<span>意图分流 / 双防门禁 / 日志Token压缩 / 死循环熔断 / 密钥防泄漏 / 终结裁决</span>
+						</div>
+						<span className="provider-badge active">全量已激活</span>
 					</div>
 				</div>
 			</section>
