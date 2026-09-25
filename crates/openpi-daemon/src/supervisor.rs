@@ -604,7 +604,7 @@ impl Supervisor {
                 }
                 match serde_json::from_str::<Value>(&line) {
                     Ok(mut event) => {
-                        let ev_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let ev_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if ev_type == "response" {
                             if let Some(req_id) = event.get("id").and_then(|v| v.as_str()) {
                                 let mut p = pending.lock().await;
@@ -622,18 +622,70 @@ impl Supervisor {
                             }
                         }
 
-                        // Jev Hook: Process tool outputs (compress verbose logs & mask leaks)
-                        if ev_type == "tool_execution_end" || ev_type == "tool_output" {
-                            if let Some(result_val) = event.get_mut("result") {
-                                if let Some(res_str) = result_val.as_str() {
-                                    let (compressed, leak) = jev_clone.process_command_output(res_str);
-                                    if leak.has_leaks || compressed.was_compressed {
-                                        *result_val = serde_json::Value::String(compressed.content);
-                                        event["jev_meta"] = serde_json::json!({
-                                            "tokens_saved": compressed.estimated_tokens_saved,
-                                            "leaks_redacted": leak.leak_count,
+                        // Jev Hook 1: Pre-Execution Safety Gate on tool start
+                        if ev_type == "tool_execution_start" {
+                            let cmd = event.get("args").and_then(|a| a.get("command")).and_then(|c| c.as_str()).unwrap_or("").to_string();
+                            if !cmd.is_empty() {
+                                let verdict = jev_clone.pre_check_command(&cmd);
+                                match verdict {
+                                    openpi_jev::types::GateVerdict::Deny { reason } => {
+                                        tracing::warn!("🛑 [Jev SafetyGate] Intercepted high-risk command: `{}`. Reason: {}", cmd, reason);
+                                        event["jev_blocked"] = serde_json::json!({
+                                            "blocked": true,
+                                            "reason": reason,
                                         });
                                     }
+                                    openpi_jev::types::GateVerdict::RequireConfirmation { prompt, reasons, risk_score } => {
+                                        tracing::warn!("⚠️ [Jev SafetyGate] High-risk command needs confirmation: `{}`", cmd);
+                                        event["jev_confirmation"] = serde_json::json!({
+                                            "prompt": prompt,
+                                            "reasons": reasons,
+                                            "risk_score": risk_score,
+                                        });
+                                    }
+                                    openpi_jev::types::GateVerdict::ModifyCommand { safe_command, reason } => {
+                                        tracing::info!("💡 [Jev SafetyGate] Auto-patched command: `{}` -> `{}`", cmd, safe_command);
+                                        event["jev_modified"] = serde_json::json!({
+                                            "safe_command": safe_command,
+                                            "reason": reason,
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+
+                        // Jev Hook 2: Process tool outputs (compress logs, mask leaks, check loop breaks)
+                        if ev_type == "tool_execution_end" || ev_type == "tool_output" {
+                            let cmd = event.get("args").and_then(|a| a.get("command")).and_then(|c| c.as_str()).unwrap_or("").to_string();
+                            let is_error = event.get("isError").and_then(|b| b.as_bool()).unwrap_or(false);
+                            let original_result = event.get("result").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                            if let Some(res_str) = original_result {
+                                let (compressed, leak) = jev_clone.process_command_output(&res_str);
+                                if leak.has_leaks || compressed.was_compressed {
+                                    event["result"] = serde_json::Value::String(compressed.content);
+                                    event["jev_meta"] = serde_json::json!({
+                                        "tokens_saved": compressed.estimated_tokens_saved,
+                                        "lines_truncated": compressed.lines_truncated,
+                                        "leaks_redacted": leak.leak_count,
+                                    });
+                                }
+
+                                // Loop Breaker & Stop Decider hooks
+                                if is_error {
+                                    if let Some(loop_res) = jev_clone.record_command_result(&cmd, false, &res_str).await {
+                                        if loop_res.should_break {
+                                            tracing::warn!("🛑 [Jev LoopBreaker] Hard circuit breaker tripped! Count: {}", loop_res.loop_count);
+                                            event["jev_loop_breaker"] = serde_json::json!({
+                                                "should_break": true,
+                                                "loop_count": loop_res.loop_count,
+                                                "corrective_hint": loop_res.corrective_hint,
+                                            });
+                                        }
+                                    }
+                                } else {
+                                    jev_clone.record_command_result(&cmd, true, &res_str).await;
                                 }
                             }
                         }

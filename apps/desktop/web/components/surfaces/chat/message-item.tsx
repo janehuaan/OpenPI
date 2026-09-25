@@ -123,14 +123,16 @@ export const MessageItem = memo(function MessageItem({
 						{calls.map((call, index) => {
 							const detailText = call.detail || "";
 							const foldedMatch = detailText.match(/~([0-9]+)\s+tokens\s+saved/);
-							const isAssertionBlocked = detailText.includes("[Assertion Gate]");
+							const isAssertionBlocked = detailText.includes("[Assertion Gate]") || detailText.includes("[Jev SafetyGate]");
 							const isRollbackTriggered = detailText.includes("[Physical Rollback]");
+							const isJevRedacted = detailText.includes("[REDACTED_");
+							const isJevLoopBreak = detailText.includes("[Jev LoopBreaker]");
 							const isCallSubagent = call.name === "subagent";
 
 							return (
 								<details className={`tool-trace ${message.isError ? "error" : ""}`} key={`${call.name}-${index}`}>
 									<summary>
-										<span className="flex items-center gap-1.5">
+										<span className="flex items-center gap-1.5 flex-wrap">
 											{isCallSubagent ? <Bot size={14} className="text-sky-400" /> : <Wrench size={14} />}
 											{call.name}
 											{foldedMatch && (
@@ -138,9 +140,19 @@ export const MessageItem = memo(function MessageItem({
 													⚡ 省 {foldedMatch[1]} Tokens
 												</span>
 											)}
+											{isJevRedacted && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="Jev 猎手已自动脱敏代码与凭证泄露">
+													🔒 凭证脱敏
+												</span>
+											)}
 											{isAssertionBlocked && (
-												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20" title="底层物理门禁捕获异常并拦截">
-													🛡️ 物理门禁拦截
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20" title="Jev 门禁捕获高危指令并拦截">
+													🛡️ 门禁拦截
+												</span>
+											)}
+											{isJevLoopBreak && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-red-500/15 text-red-400 border border-red-500/20" title="Jev 循环熔断器已介入，打破死循环">
+													🛑 死循环熔断
 												</span>
 											)}
 											{isRollbackTriggered && (
