@@ -16,6 +16,18 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
 
     let pi_cli_path = std::env::var("OPENPI_PI_CLI_PATH").unwrap_or_else(|_| {
+        let candidates = [
+            PathBuf::from("/Users/huaan/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
+            format!("{}/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", home).into(),
+            format!("{}/.openpi/runtime/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", home).into(),
+            PathBuf::from("/Applications/OpenPI.app/Contents/Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
+        ];
+        for c in &candidates {
+            if c.exists() {
+                return c.to_string_lossy().to_string();
+            }
+        }
+
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let packaged_cli = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/cli.js");

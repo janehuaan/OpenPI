@@ -82,7 +82,7 @@ export interface AgentInstance {
 	id: string;
 	status: InstanceStatus;
 	mode: AgentMode;
-	cwd: string;
+	cwd?: string;
 	label?: string;
 	sessionId?: string;
 	sessionFile?: string;

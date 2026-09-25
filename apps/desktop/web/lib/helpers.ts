@@ -356,7 +356,8 @@ export function instanceTitle(instance: AgentInstance, sessionName?: string): st
 }
 
 /** Compact path for secondary sidebar line. */
-export function shortWorkspacePath(cwd: string): string {
+export function shortWorkspacePath(cwd?: string): string {
+	if (!cwd) return "";
 	const normalized = cwd.replace(/\\/g, "/");
 	const parts = normalized.split("/").filter(Boolean);
 	if (parts.length <= 2) return normalized.startsWith("/") ? normalized : cwd;

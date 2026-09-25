@@ -12,11 +12,11 @@
 	--bg: #0c0e14;
 	--bg-elevated: #161a25;
 	--bg-muted: #10141d;
-	--sidebar-bg: #090b10;
-	--rail-bg: #06080d;
-	--border: rgba(255, 255, 255, 0.13);
-	--border-subtle: rgba(255, 255, 255, 0.08);
-	--border-strong: rgba(255, 255, 255, 0.24);
+	--sidebar-bg: #0c0e14;
+	--rail-bg: #08090f;
+	--border: rgba(255, 255, 255, 0.12);
+	--border-subtle: rgba(255, 255, 255, 0.07);
+	--border-strong: rgba(255, 255, 255, 0.22);
 	--text: #f0f6fc;
 	--text-secondary: #94a3b8;
 	--text-tertiary: #64748b;
@@ -44,13 +44,13 @@
 :root[data-theme-flavor="dark-oled"],
 [data-theme-flavor="dark-oled"] {
 	--bg: #000000;
-	--bg-elevated: #111115;
-	--bg-muted: #09090c;
-	--sidebar-bg: #060608;
-	--rail-bg: #020203;
-	--border: #23232b;
-	--border-subtle: #16161c;
-	--border-strong: #3a3a46;
+	--bg-elevated: #101014;
+	--bg-muted: #08080b;
+	--sidebar-bg: #000000;
+	--rail-bg: #000000;
+	--border: #1f1f26;
+	--border-subtle: #14141a;
+	--border-strong: #33333e;
 	--text: #ffffff;
 	--text-secondary: #a1a1aa;
 	--text-tertiary: #71717a;
@@ -77,14 +77,14 @@
 /* ── 1.3 Tokyo Night (Solid Performance — 0 GPU Blur) ── */
 :root[data-theme-flavor="dark-tokyo"],
 [data-theme-flavor="dark-tokyo"] {
-	--bg: #1a1b26;
-	--bg-elevated: #24283b;
-	--bg-muted: #1f2335;
+	--bg: #16161e;
+	--bg-elevated: #202230;
+	--bg-muted: #1a1b26;
 	--sidebar-bg: #16161e;
-	--rail-bg: #13141c;
-	--border: #292e42;
-	--border-subtle: #202436;
-	--border-strong: #414868;
+	--rail-bg: #13141a;
+	--border: #272a3e;
+	--border-subtle: #1e2030;
+	--border-strong: #3e4466;
 	--text: #c0caf5;
 	--text-secondary: #9aa5ce;
 	--text-tertiary: #565f89;
@@ -111,13 +111,13 @@
 /* ── 1.4 Cyberpunk Neon (Solid Performance — 0 GPU Blur) ── */
 :root[data-theme-flavor="dark-cyberpunk"],
 [data-theme-flavor="dark-cyberpunk"] {
-	--bg: #0b0c14;
-	--bg-elevated: #151824;
-	--bg-muted: #11131c;
+	--bg: #08090f;
+	--bg-elevated: #141724;
+	--bg-muted: #0e1019;
 	--sidebar-bg: #08090f;
 	--rail-bg: #05050a;
-	--border: #232a42;
-	--border-subtle: #171c2e;
+	--border: #1f253b;
+	--border-subtle: #141826;
 	--border-strong: rgba(0, 240, 255, 0.50);
 	--text: #f0f4fc;
 	--text-secondary: #94a3b8;
@@ -151,14 +151,14 @@
 [data-theme="light"][data-theme-flavor="light-default"],
 :root[data-theme="light"]:not([data-theme-flavor]),
 [data-theme="light"]:not([data-theme-flavor]) {
-	--bg: #f8fafc;
+	--bg: #f1f5f9;
 	--bg-elevated: #ffffff;
-	--bg-muted: #f1f5f9;
+	--bg-muted: #e2e8f0;
 	--sidebar-bg: #f1f5f9;
 	--rail-bg: #e2e8f0;
-	--border: #e2e8f0;
-	--border-subtle: #edf2f7;
-	--border-strong: #cbd5e1;
+	--border: #cbd5e1;
+	--border-subtle: #e2e8f0;
+	--border-strong: #94a3b8;
 	--text: #0f172a;
 	--text-secondary: #475569;
 	--text-tertiary: #94a3b8;
@@ -173,10 +173,10 @@
 	--ok-soft: rgba(22, 163, 74, 0.10);
 	--warn: #d97706;
 	--warn-soft: rgba(217, 119, 6, 0.10);
-	--glass-bg: rgba(255, 255, 255, 0.88);
-	--glass-bg-subtle: rgba(255, 255, 255, 0.70);
+	--glass-bg: #ffffff;
+	--glass-bg-subtle: #f1f5f9;
 	--glass-bg-elevated: #ffffff;
-	--glass-bg-hover: #f8fafc;
+	--glass-bg-hover: #e2e8f0;
 	--shadow: 0 14px 36px rgba(30, 35, 60, 0.08), 0 2px 8px rgba(30, 35, 60, 0.03);
 	--shadow-soft: 0 2px 8px rgba(30, 35, 60, 0.04);
 	color-scheme: light;
@@ -185,7 +185,7 @@
 /* ── 2.2 Warm Sand (Solid Performance — 0 GPU Blur) ── */
 :root[data-theme-flavor="light-warm"],
 [data-theme-flavor="light-warm"] {
-	--bg: #fbf9f5;
+	--bg: #f5ede0;
 	--bg-elevated: #f4ecdf;
 	--bg-muted: #ede2d2;
 	--sidebar-bg: #f5ede0;
@@ -198,7 +198,7 @@
 	--text-tertiary: #9c8b83;
 	--accent: #c2652b;
 	--accent-hover: #a6521e;
-	--accent-soft: rgba(194, 101, 43, 0.14);
+	--accent-soft: rgba(194, 101, 43, 0.16);
 	--accent-contrast: #ffffff;
 	--focus: #a35832;
 	--danger: #c53030;
@@ -209,24 +209,24 @@
 	--warn-soft: rgba(183, 121, 31, 0.12);
 	--glass-bg: #f5efe4;
 	--glass-bg-subtle: #ede4d6;
-	--glass-bg-elevated: #fbf9f5;
-	--glass-bg-hover: #ede4d6;
-	--shadow: 0 14px 38px rgba(80, 60, 45, 0.07), 0 2px 8px rgba(80, 60, 45, 0.03);
-	--shadow-soft: 0 2px 8px rgba(80, 60, 45, 0.04);
+	--glass-bg-elevated: #f4ecdf;
+	--glass-bg-hover: #ede2d2;
+	--shadow: 0 14px 38px rgba(80, 60, 45, 0.08), 0 2px 8px rgba(80, 60, 45, 0.04);
+	--shadow-soft: 0 2px 8px rgba(80, 60, 45, 0.05);
 	color-scheme: light;
 }
 
 /* ── 2.3 Nord Frost (Solid Performance — 0 GPU Blur) ── */
 :root[data-theme-flavor="light-nord"],
 [data-theme-flavor="light-nord"] {
-	--bg: #f3f6fa;
-	--bg-elevated: #ffffff;
-	--bg-muted: #e4edf6;
+	--bg: #eaf1f8;
+	--bg-elevated: #e2ebf4;
+	--bg-muted: #dfe8f2;
 	--sidebar-bg: #eaf1f8;
-	--rail-bg: #dbe6f2;
-	--border: #d2dfed;
-	--border-subtle: #e2ecf7;
-	--border-strong: #bacfe4;
+	--rail-bg: #dfe8f2;
+	--border: #cadceb;
+	--border-subtle: #dbe6f2;
+	--border-strong: #b2ccdf;
 	--text: #1e293b;
 	--text-secondary: #475569;
 	--text-tertiary: #64748b;
@@ -241,10 +241,10 @@
 	--ok-soft: rgba(5, 150, 105, 0.12);
 	--warn: #d97706;
 	--warn-soft: rgba(217, 119, 6, 0.12);
-	--glass-bg: #ffffff;
-	--glass-bg-subtle: #e5ecf5;
-	--glass-bg-elevated: #ffffff;
-	--glass-bg-hover: #edf3fa;
+	--glass-bg: #eaf1f8;
+	--glass-bg-subtle: #dfe8f2;
+	--glass-bg-elevated: #e2ebf4;
+	--glass-bg-hover: #dfe8f2;
 	--shadow: 0 14px 40px rgba(35, 60, 85, 0.08), 0 2px 8px rgba(35, 60, 85, 0.03);
 	--shadow-soft: 0 2px 8px rgba(35, 60, 85, 0.04);
 	color-scheme: light;
@@ -330,14 +330,14 @@ html, body, #root {
 /* ── 4.3 Left Sidebar (Conversations, Projects, Spaces) ── */
 .reference-leftbar,
 .conversation-sidebar {
-	background: var(--sidebar-bg) !important;
+	background: var(--bg) !important;
 	border-right: 1px solid var(--border) !important;
 }
 
 .reference-brand,
 .sidebar-title {
 	border-bottom: 1px solid var(--border-subtle) !important;
-	background: var(--sidebar-bg) !important;
+	background: var(--bg) !important;
 }
 
 .reference-brand strong,
@@ -419,7 +419,8 @@ html, body, #root {
 .conversation-row.selected,
 .space-row.selected,
 .reference-space.selected,
-.reference-project-session-item.selected {
+.reference-project-session-item.selected,
+.reference-project-session-row.selected .reference-project-session-item {
 	background: var(--accent-soft) !important;
 	border-color: color-mix(in srgb, var(--accent) 32%, transparent) !important;
 	border-left: 3px solid var(--accent) !important;
@@ -442,15 +443,24 @@ html, body, #root {
 
 .reference-session-row.selected strong,
 .conversation-row.selected strong,
-.space-row.selected strong {
+.space-row.selected strong,
+.reference-session-row.selected .reference-session-title,
+.reference-project-session-item.selected .reference-session-title,
+.reference-project-session-row.selected .reference-session-title {
 	font-weight: 650 !important;
 	color: var(--text) !important;
+}
+
+.reference-session-row.selected .reference-session-icon,
+.reference-project-session-item.selected .reference-session-icon,
+.reference-project-session-row.selected .reference-session-icon {
+	color: var(--accent) !important;
 }
 
 /* ── 4.7 Bottom User Account Profile Card ── */
 .reference-account,
 .sidebar-account {
-	background: var(--sidebar-bg) !important;
+	background: var(--bg) !important;
 	border-top: 1px solid var(--border-subtle) !important;
 }
 
@@ -495,6 +505,13 @@ html, body, #root {
 .reference-main-header {
 	background: var(--bg) !important;
 	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.chat-surface,
+.operations-surface,
+.tasks-surface,
+.capabilities-surface {
+	background: var(--bg) !important;
 }
 
 .reference-title h1,
@@ -559,8 +576,50 @@ html, body, #root {
 	color: var(--text) !important;
 }
 
-.reference-assistant-message p {
+.reference-assistant-message p,
+.reference-assistant-message .md-p {
 	color: var(--text) !important;
+}
+
+.reference-assistant-message .md-h,
+.reference-assistant-message .md-h1,
+.reference-assistant-message .md-h2,
+.reference-assistant-message .md-h3,
+.reference-assistant-message .md-h4,
+.reference-assistant-message .md-h5,
+.reference-assistant-message .md-h6,
+.reference-assistant-message h1,
+.reference-assistant-message h2,
+.reference-assistant-message h3,
+.reference-assistant-message h4,
+.reference-assistant-message h5,
+.reference-assistant-message h6,
+.md-h,
+.md-h1,
+.md-h2,
+.md-h3,
+.md-h4,
+.md-h5,
+.md-h6 {
+	color: var(--text) !important;
+	font-weight: 650 !important;
+}
+
+.reference-assistant-message .md-list,
+.reference-assistant-message .md-list-ol,
+.reference-assistant-message li,
+.reference-assistant-message strong,
+.reference-assistant-message em,
+.md-list li,
+.md-list strong,
+.md-list em {
+	color: var(--text) !important;
+}
+
+.reference-assistant-message .md-hr,
+.md-hr {
+	border: none !important;
+	border-top: 1px solid var(--border-subtle, var(--border)) !important;
 }
 
 /* ── 4.10 Reasoning (Deep Thinking) Block ── */
@@ -813,7 +872,7 @@ html, body, #root {
 	background: var(--bg-elevated) !important;
 	border: 1px solid var(--border-strong) !important;
 	box-shadow: var(--shadow) !important;
-	transition: border-color 160ms ease, box-shadow 160ms ease;
+	transition: width 240ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms ease, box-shadow 160ms ease !important;
 }
 
 .reference-composer:focus-within {
@@ -972,7 +1031,7 @@ html, body, #root {
 .capability-page-header,
 .task-page-header {
 	border-bottom: 1px solid var(--border-subtle) !important;
-	background: var(--sidebar-bg) !important;
+	background: var(--bg) !important;
 }
 
 /* ── 4.16 Right Split View Panel (Live Preview & Markdown Artifacts) ── */
@@ -984,7 +1043,7 @@ html, body, #root {
 
 .live-preview-toolbar,
 .reference-context > header {
-	background: var(--sidebar-bg) !important;
+	background: var(--bg) !important;
 	border-bottom: 1px solid var(--border-subtle) !important;
 }
 
@@ -1080,8 +1139,18 @@ html, body, #root {
 
 .theme-mode-card.active {
 	border-color: var(--accent) !important;
-	background: var(--accent-soft) !important;
+	background: color-mix(in srgb, var(--accent) 16%, var(--bg-muted)) !important;
 	box-shadow: 0 0 0 1.5px var(--accent) !important;
+}
+
+.theme-mode-card-icon {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+}
+
+.theme-mode-card.active .theme-mode-card-icon {
+	background: color-mix(in srgb, var(--accent) 22%, var(--bg-muted)) !important;
+	border-color: var(--accent) !important;
 }
 
 .theme-flavor-card {
@@ -1156,4 +1225,352 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb:hover {
 	background: var(--text-tertiary);
+}
+
+/* ── 4.20 Right Context Panel & Auxiliary Controls ── */
+.reference-context {
+	background: var(--bg) !important;
+	border-left: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.reference-context > header {
+	background: var(--bg) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.reference-context > header strong {
+	color: var(--text) !important;
+}
+
+.reference-context > header button {
+	background: var(--bg-muted) !important;
+	color: var(--text-secondary) !important;
+	border: 1px solid var(--border-subtle) !important;
+}
+
+.reference-context > header button:hover {
+	background: var(--bg-elevated) !important;
+	color: var(--text) !important;
+	border-color: var(--border) !important;
+}
+
+.reference-context-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 14px !important;
+	box-shadow: var(--shadow-soft) !important;
+	color: var(--text) !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+.reference-context-card h2 {
+	color: var(--text) !important;
+}
+
+.reference-context-workspace strong {
+	color: var(--text) !important;
+}
+
+.reference-context-workspace small {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-context-workspace .reference-title-folder {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid var(--border-subtle) !important;
+}
+
+.reference-context-counts div {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	border-radius: 8px !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+.reference-context-counts div:hover {
+	background: var(--bg-elevated) !important;
+	border-color: var(--border) !important;
+}
+
+.reference-context-counts strong {
+	color: var(--text) !important;
+}
+
+.reference-context-counts span {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-environment span {
+	color: var(--text-secondary) !important;
+}
+
+.reference-environment strong {
+	color: var(--text) !important;
+}
+
+.reference-context-usage > div:first-child span,
+.reference-context-usage > span {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-context-usage > div:first-child strong {
+	color: var(--text) !important;
+}
+
+.reference-context-usage > div:first-child strong.usage-warn {
+	color: var(--warn) !important;
+}
+
+.reference-context-progress {
+	background: var(--border-subtle) !important;
+	border-radius: 999px !important;
+}
+
+.reference-context-progress span {
+	background: var(--accent) !important;
+	border-radius: 999px !important;
+}
+
+.reference-context-progress span.warn {
+	background: var(--warn) !important;
+}
+
+.reference-token-grid span {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	border-radius: 8px !important;
+}
+
+.reference-token-grid strong {
+	color: var(--text) !important;
+}
+
+.reference-usage-total {
+	border-top: 1px solid var(--border-subtle) !important;
+}
+
+.reference-usage-total span {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-usage-total strong {
+	color: var(--text) !important;
+}
+
+.reference-provider-balance {
+	background: var(--accent-soft) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--accent) !important;
+}
+
+.reference-provider-balance strong {
+	color: var(--accent) !important;
+}
+
+.reference-file-item {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text) !important;
+	border-radius: 8px !important;
+	transition: all 120ms ease !important;
+}
+
+.reference-file-item:hover {
+	background: var(--bg-elevated) !important;
+	border-color: var(--accent) !important;
+	color: var(--text) !important;
+	box-shadow: var(--shadow-soft) !important;
+}
+
+.reference-file-item.selected {
+	background: var(--accent-soft) !important;
+	border-color: var(--accent) !important;
+	color: var(--accent) !important;
+}
+
+.reference-file-item svg {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-file-item:hover svg {
+	color: var(--accent) !important;
+}
+
+.reference-file-dir {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-file-empty {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-memory-search {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.reference-memory-search input {
+	background: transparent !important;
+	color: var(--text) !important;
+}
+
+.reference-memory-search input::placeholder {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-memory-list span {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+}
+
+.reference-tool-list span {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border-subtle) !important;
+	color: var(--text) !important;
+}
+
+.reference-tool-list svg {
+	color: var(--accent) !important;
+}
+
+.reference-tool-list em {
+	color: var(--accent) !important;
+}
+
+/* Floating Scroll to Bottom button */
+.reference-scroll-to-bottom {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border-strong) !important;
+	color: var(--text) !important;
+	box-shadow: var(--shadow) !important;
+	transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.reference-scroll-to-bottom:hover {
+	background: var(--accent) !important;
+	border-color: var(--accent) !important;
+	color: var(--accent-contrast) !important;
+	transform: translateY(-2px) scale(1.04) !important;
+	box-shadow: 0 8px 24px var(--accent-soft) !important;
+}
+
+/* ── 4.15 Header Streaming Status Pill ── */
+.reference-streaming-badge {
+	background: var(--accent-soft) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent) !important;
+	color: var(--accent) !important;
+	font-weight: 550 !important;
+}
+
+.reference-streaming-badge .spin {
+	color: var(--accent) !important;
+}
+
+/* ── 4.16 Streaming Typing Indicator & Turn Progress ── */
+.reference-streaming-indicator span {
+	background: var(--accent) !important;
+	box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent) !important;
+}
+
+.turn-progress {
+	color: var(--text-secondary) !important;
+}
+
+.turn-progress-dots span,
+.turn-progress-dot {
+	background: var(--accent) !important;
+	box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent) !important;
+}
+
+.turn-progress-label {
+	color: var(--text) !important;
+	font-weight: 500 !important;
+}
+
+.turn-progress-elapsed {
+	color: var(--text-tertiary) !important;
+}
+
+/* ── 4.17 Left Sidebar Project Engineering Tree & Actions ── */
+.reference-folder,
+.reference-space-folder,
+.reference-title-folder,
+.reference-context-workspace .reference-title-folder {
+	color: var(--accent) !important;
+}
+
+.reference-project-toggle,
+.reference-space-toggle {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-project-toggle:hover,
+.reference-space-toggle:hover {
+	color: var(--text) !important;
+	background: var(--bg-muted) !important;
+}
+
+.reference-project-select {
+	color: var(--text) !important;
+}
+
+.reference-project-meta strong {
+	color: var(--text) !important;
+}
+
+.reference-project-meta small {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-project-sessions {
+	border-left: 1.5px solid var(--border) !important;
+}
+
+.reference-project-session-item {
+	color: var(--text-secondary) !important;
+}
+
+.reference-project-session-item:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+}
+
+.reference-project-session-item.selected,
+.reference-project-session-row.selected {
+	background: var(--accent-soft) !important;
+	border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
+	color: var(--accent) !important;
+}
+
+.reference-project-session-item.selected .reference-session-title,
+.reference-project-session-row.selected .reference-session-title {
+	color: var(--text) !important;
+	font-weight: 600 !important;
+}
+
+.reference-project-session-item.selected .reference-session-icon,
+.reference-project-session-row.selected .reference-session-icon {
+	color: var(--accent) !important;
+}
+
+.reference-project-actions button,
+.reference-session-actions button,
+.reference-project-new-session,
+.reference-project-more {
+	color: var(--text-tertiary) !important;
+}
+
+.reference-project-actions button:hover,
+.reference-session-actions button:hover,
+.reference-project-new-session:hover,
+.reference-project-more:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
 }

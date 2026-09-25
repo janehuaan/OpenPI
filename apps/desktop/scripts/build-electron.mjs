@@ -13,7 +13,7 @@
 import { build } from "esbuild";
 
 /** Electron's own module, plus anything with native bindings, stays external. */
-const EXTERNAL = ["electron"];
+const EXTERNAL = ["electron", "onnxruntime-node", "tokenizers", "sharp"];
 
 const shared = {
 	bundle: true,

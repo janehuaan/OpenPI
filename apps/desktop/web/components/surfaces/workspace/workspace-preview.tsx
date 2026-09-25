@@ -23,6 +23,7 @@ import {
 	SUPPORTED_IMAGE_TYPES,
 } from "../../../lib/app-types";
 import { isDiffContent } from "../../../lib/diff";
+import { ErrorBoundary } from "../../error-boundary";
 import { draftStore } from "../../../lib/draft-store";
 import {
 	contentImages,
@@ -191,7 +192,7 @@ import { ReasoningBlock } from "./reasoning-block";
 import { TurnProgressRow } from "./turn-progress-row";
 import { ComposerStatusDock } from "./composer-status-dock";
 
-type ChatNavView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
+type ChatNavView = "chat" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
 
 function shortModelName(name: string): string {
 	const trimmed = name.trim();
@@ -235,7 +236,7 @@ export function ReferenceWorkspacePreview({
 	configuring,
 	sending,
 	appMode,
-	slashCommands,
+	slashCommands = [],
 	onSelectConversation,
 	onOpenProject,
 	onNewProjectSession,
@@ -257,6 +258,7 @@ export function ReferenceWorkspacePreview({
 	onNavigate,
 	sidebarOpen,
 	onToggleSidebar,
+	onCollapseSidebar,
 	gitStatus,
 	gitLoading,
 	onRefreshGit,
@@ -266,6 +268,7 @@ export function ReferenceWorkspacePreview({
 	activeView,
 	customContent,
 	onOpenShortcuts,
+	onSwitchWorkspace,
 }: {
 	projectInstances: AgentInstance[];
 	chatInstances: AgentInstance[];
@@ -310,6 +313,7 @@ export function ReferenceWorkspacePreview({
 	onAppModeChange(mode: AppMode): void;
 	onNavigate(view: ChatNavView): void;
 	onToggleSidebar?(): void;
+	onCollapseSidebar?(): void;
 	gitStatus?: GitStatusResult | null;
 	gitLoading?: boolean;
 	onRefreshGit?: () => void;
@@ -319,6 +323,7 @@ export function ReferenceWorkspacePreview({
 	activeView?: string;
 	customContent?: ReactNode;
 	onOpenShortcuts?: () => void;
+	onSwitchWorkspace?: (cwd?: string) => void;
 }) {
 	const { effectiveMode, toggle: toggleTheme } = useTheme();
 	const initialKey = selectedInstanceId ?? "__new_draft__";
@@ -478,11 +483,31 @@ export function ReferenceWorkspacePreview({
 	const draftInput = useRef<HTMLTextAreaElement>(null);
 	const feedScroll = useRef<HTMLElement>(null);
 	const chatView = useRef<HTMLDivElement>(null);
+	const bottomAnchorRef = useRef<HTMLDivElement>(null);
 	const projectList = useRef<HTMLDivElement>(null);
 	const chatList = useRef<HTMLDivElement>(null);
 	const autoFollow = useRef(true);
+	const isUserManuallyScrolledUp = useRef(false);
 	const initialScrollSettleUntil = useRef(0);
-	const [contextPanelOpen, setContextPanelOpen] = useState(false);
+	const [contextPanelOpen, setContextPanelOpen] = useState(() => {
+		try {
+			const saved = localStorage.getItem("openpi.contextPanelOpen");
+			if (saved !== null) return saved === "true";
+		} catch {}
+		return true;
+	});
+
+	useEffect(() => {
+		try {
+			localStorage.setItem("openpi.contextPanelOpen", String(contextPanelOpen));
+		} catch {}
+	}, [contextPanelOpen]);
+
+	useEffect(() => {
+		const handleToggle = () => setContextPanelOpen((prev) => !prev);
+		window.addEventListener("openpi:toggle-context", handleToggle);
+		return () => window.removeEventListener("openpi:toggle-context", handleToggle);
+	}, []);
 	const [sidebarSearch, setSidebarSearch] = useState("");
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 	const instances = [...projectInstances, ...chatInstances];
@@ -528,11 +553,21 @@ export function ReferenceWorkspacePreview({
 	}, [messages, currentModelName, isWorking]);
 
 	const workingStartedAtRef = useRef<number>(0);
+	const wasWorkingRef = useRef(false);
 	useEffect(() => {
 		if (isWorking) {
 			workingStartedAtRef.current = Date.now();
+			if (!wasWorkingRef.current) {
+				// Agent started executing: auto-collapse left and right sidebars for max message canvas
+				if (sidebarOpen !== false) {
+					if (onCollapseSidebar) onCollapseSidebar();
+					else onToggleSidebar?.();
+				}
+				setContextPanelOpen(false);
+			}
 		}
-	}, [isWorking]);
+		wasWorkingRef.current = isWorking;
+	}, [isWorking, sidebarOpen, onToggleSidebar, onCollapseSidebar]);
 
 	const handleSafeAbort = useCallback(() => {
 		// Prevent accidental misfires: ignore abort clicks within 800ms of generation start
@@ -740,7 +775,7 @@ export function ReferenceWorkspacePreview({
 	}, [feedItems]);
 
 	const currentModel = modelOptions.find(
-		(model) => model.provider === conversation?.state.model?.provider && model.id === conversation.state.model.id,
+		(model) => model.provider === conversation?.state?.model?.provider && model.id === conversation?.state?.model?.id,
 	);
 	const usesVisionFallback =
 		attachments.length > 0 &&
@@ -822,8 +857,8 @@ export function ReferenceWorkspacePreview({
 			return true;
 		});
 	}, [workspaceSummary?.files, IGNORED_EXTENSIONS]);
-	const visibleMemory = memoryEntries.filter((entry) =>
-		entry.toLowerCase().includes(memoryQuery.trim().toLowerCase()),
+	const visibleMemory = (Array.isArray(memoryEntries) ? memoryEntries : []).filter((entry) =>
+		typeof entry === "string" && entry.toLowerCase().includes(memoryQuery.trim().toLowerCase()),
 	);
 
 	const modelId = conversation?.state.model?.id || currentModel?.id || "";
@@ -887,7 +922,7 @@ export function ReferenceWorkspacePreview({
 		.join("|")}:${runningTools.length}:${isWorking}`;
 	const agentSlash = useMemo(
 		() =>
-			slashCommands.map((line) => {
+			(Array.isArray(slashCommands) ? slashCommands : []).map((line) => {
 				const parsed = parseCommand(line);
 				return {
 					id: `agent:${parsed.name}`,
@@ -922,24 +957,53 @@ export function ReferenceWorkspacePreview({
 			.slice(0, 30);
 	}, [agentSlash, localSlashItems, slashQuery]);
 
-	const forceScrollToBottom = useCallback(() => {
+	const forceScrollToBottom = useCallback((smooth = false) => {
 		const feed = feedScroll.current;
 		if (feed) {
-			feed.scrollTop = feed.scrollHeight;
+			if (smooth) {
+				feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
+			} else {
+				feed.scrollTop = feed.scrollHeight;
+			}
 		}
+		bottomAnchorRef.current?.scrollIntoView({
+			block: "end",
+			behavior: smooth ? "smooth" : "auto",
+		});
 	}, []);
 
-	useLayoutEffect(() => {
+	const pulseScrollToBottom = useCallback(() => {
+		if (isUserManuallyScrolledUp.current) return () => {};
 		autoFollow.current = true;
-		initialScrollSettleUntil.current = Date.now() + 600;
+		forceScrollToBottom();
+		const delays = [30, 80, 180, 350, 700, 1200, 1800];
+		const timers = delays.map((ms) =>
+			window.setTimeout(() => {
+				if (!isUserManuallyScrolledUp.current) {
+					forceScrollToBottom();
+				}
+			}, ms),
+		);
+		return () => {
+			for (const t of timers) {
+				window.clearTimeout(t);
+			}
+		};
+	}, [forceScrollToBottom]);
+
+	useLayoutEffect(() => {
+		isUserManuallyScrolledUp.current = false;
+		autoFollow.current = true;
+		initialScrollSettleUntil.current = Date.now() + 2500;
 		setShowScrollToBottom(false);
 		setModelMenuOpen(false);
 		setSlashOpen(false);
-		forceScrollToBottom();
-	}, [conversation?.instance.id, selectedInstanceId, forceScrollToBottom]);
+		return pulseScrollToBottom();
+	}, [conversation?.instance?.id, selectedInstanceId, pulseScrollToBottom]);
 
 	useLayoutEffect(() => {
-		if (autoFollow.current) {
+		if (!isUserManuallyScrolledUp.current) {
+			autoFollow.current = true;
 			forceScrollToBottom();
 		}
 	}, [messageSignature, forceScrollToBottom]);
@@ -967,15 +1031,15 @@ export function ReferenceWorkspacePreview({
 	}, [chatInstances, showAllSessions, showAllSpaces, spaces]);
 
 	useEffect(() => {
-		if (!autoFollow.current) return;
+		if (isUserManuallyScrolledUp.current) return;
 		let rafId: number;
 		let count = 0;
 		const tick = () => {
-			if (autoFollow.current) {
+			if (!isUserManuallyScrolledUp.current) {
 				forceScrollToBottom();
 			}
 			count++;
-			if (count < 6) {
+			if (count < 8) {
 				rafId = window.requestAnimationFrame(tick);
 			}
 		};
@@ -987,7 +1051,8 @@ export function ReferenceWorkspacePreview({
 		const target = chatView.current;
 		if (!target) return;
 		const observer = new ResizeObserver(() => {
-			if (autoFollow.current) {
+			if (!isUserManuallyScrolledUp.current) {
+				autoFollow.current = true;
 				forceScrollToBottom();
 			}
 		});
@@ -996,40 +1061,65 @@ export function ReferenceWorkspacePreview({
 	}, [forceScrollToBottom]);
 
 	function handleFeedWheel(event: WheelEvent<HTMLElement>): void {
-		if (event.deltaY < 0) {
+		if (event.deltaY < -2) {
 			// User is actively scrolling UP to inspect past history
 			initialScrollSettleUntil.current = 0;
+			isUserManuallyScrolledUp.current = true;
+			autoFollow.current = false;
+			setShowScrollToBottom(true);
+		} else if (event.deltaY > 2) {
+			// User is scrolling DOWN towards bottom
+			const feed = feedScroll.current;
+			if (feed) {
+				const distance = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+				if (distance < 70) {
+					isUserManuallyScrolledUp.current = false;
+					autoFollow.current = true;
+					setShowScrollToBottom(false);
+				}
+			}
 		}
 	}
 
 	function handleFeedScroll(): void {
 		const feed = feedScroll.current;
 		if (!feed) return;
-		const isAwayFromBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight > 160;
+		const distance = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
+		const isAwayFromBottom = distance > 120;
+
 		if (Date.now() < initialScrollSettleUntil.current) {
-			// During initial session load or transition, layout reflows should not cancel auto-follow
-			if (isAwayFromBottom && autoFollow.current) {
+			// During initial load / transition, layout reflows should stay locked to bottom
+			if (isAwayFromBottom && !isUserManuallyScrolledUp.current) {
 				feed.scrollTop = feed.scrollHeight;
 				return;
 			}
 		}
-		autoFollow.current = !isAwayFromBottom;
-		setShowScrollToBottom(isAwayFromBottom);
+
+		if (distance <= 40) {
+			// Reached the bottom
+			isUserManuallyScrolledUp.current = false;
+			autoFollow.current = true;
+			setShowScrollToBottom(false);
+		} else if (isUserManuallyScrolledUp.current) {
+			setShowScrollToBottom(true);
+		} else {
+			// Content grew or layout shifted without user scrolling up: keep pinned to bottom
+			if (autoFollow.current) {
+				feed.scrollTop = feed.scrollHeight;
+				setShowScrollToBottom(false);
+			} else {
+				setShowScrollToBottom(isAwayFromBottom);
+			}
+		}
 	}
 
 	function scrollToBottom(smooth?: boolean | unknown): void {
 		const isSmooth = smooth !== false;
+		isUserManuallyScrolledUp.current = false;
 		autoFollow.current = true;
-		initialScrollSettleUntil.current = Date.now() + 400;
+		initialScrollSettleUntil.current = Date.now() + 1000;
 		setShowScrollToBottom(false);
-		const feed = feedScroll.current;
-		if (feed) {
-			if (isSmooth) {
-				feed.scrollTo({ top: feed.scrollHeight, behavior: "smooth" });
-			} else {
-				feed.scrollTop = feed.scrollHeight;
-			}
-		}
+		forceScrollToBottom(isSmooth);
 	}
 
 	async function addFiles(files: File[]): Promise<void> {
@@ -1135,7 +1225,7 @@ export function ReferenceWorkspacePreview({
 		}
 		if (lowerCmd === "/compact" || lowerCmd === "/压缩") {
 			setAttachmentNotice("正在压缩上下文并提炼结构化检查点…");
-			if (conversation?.instance.id) {
+			if (conversation?.instance?.id) {
 				desktopApi
 					.compactConversation(conversation.instance.id, args || undefined)
 					.then(() => {
@@ -1211,7 +1301,7 @@ export function ReferenceWorkspacePreview({
 			return true;
 		}
 		if (lowerCmd === "/rename" || lowerCmd === "/重命名") {
-			if (args && conversation?.instance.id) {
+			if (args && conversation?.instance?.id) {
 				desktopApi.renameConversation(conversation.instance.id, args).then(() => {
 					setAttachmentNotice(`会话已重命名为：${args}`);
 				}).catch(() => {});
@@ -1417,6 +1507,10 @@ export function ReferenceWorkspacePreview({
 
 		(document.activeElement as HTMLElement)?.blur();
 		draftInput.current?.focus();
+		isUserManuallyScrolledUp.current = false;
+		autoFollow.current = true;
+		setShowScrollToBottom(false);
+		pulseScrollToBottom();
 		await onSend(message, attachments, documents);
 		draftStore.clearDraft(activeKey);
 		setDraft("");
@@ -1429,6 +1523,10 @@ export function ReferenceWorkspacePreview({
 		const message = draft.trim();
 		if (!message && attachments.length === 0 && documents.length === 0) return;
 		const activeKey = selectedInstanceId ?? "__new_draft__";
+		isUserManuallyScrolledUp.current = false;
+		autoFollow.current = true;
+		setShowScrollToBottom(false);
+		pulseScrollToBottom();
 		if (onSteer) {
 			await onSteer(message, attachments);
 		} else {
@@ -1459,10 +1557,10 @@ export function ReferenceWorkspacePreview({
 
 	return (
 		<div
-			className={`reference-workspace ${sidebarOpen === false ? "left-collapsed" : ""} ${!contextPanelOpen || Boolean(customContent) ? "context-collapsed" : ""}`}
+			className={`reference-workspace ${sidebarOpen === false ? "left-collapsed" : ""} ${!contextPanelOpen || Boolean(customContent) ? "context-collapsed" : ""} ${isWorking ? "agent-executing" : ""}`}
 		>
 			<aside className="reference-leftbar">
-				<header className="reference-brand">
+				<header className="reference-brand" data-tauri-drag-region>
 					<div className="reference-brand-left">
 						<img className="reference-brand-mark" src="./openpi-mark.svg" alt="" />
 						<strong>OpenPI</strong>
@@ -1548,10 +1646,11 @@ export function ReferenceWorkspacePreview({
 					<div className={`reference-spaces ${showAllSpaces ? "expanded" : ""}`} ref={projectList}>
 						{spaces.map(([cwd, spaceInstances]) => {
 							const isCollapsed = Boolean(collapsedProjects[cwd]);
-							const isCurrentWorkspace = cwd === workspace;
+							const isProjectActive = spaceInstances.some((instance) => instance.id === selectedInstanceId);
+							const isSpaceSelected = isProjectActive && isCollapsed;
 							return (
 								<div className="reference-project-group" key={cwd}>
-									<div className={`reference-space ${isCurrentWorkspace ? "selected" : ""}`}>
+									<div className={`reference-space ${isSpaceSelected ? "selected" : ""}`}>
 										<button
 											type="button"
 											className="reference-project-toggle"
@@ -1843,11 +1942,13 @@ export function ReferenceWorkspacePreview({
 								<PanelLeftOpen size={16} />
 							</button>
 						)}
-						{customContent}
+						<ErrorBoundary fallbackView={() => onNavigate?.("chat")}>
+							{customContent}
+						</ErrorBoundary>
 					</div>
 				) : (
 					<>
-				<header className="reference-main-header">
+				<header className="reference-main-header" data-tauri-drag-region>
 					<div className="reference-title">
 						{sidebarOpen === false && onToggleSidebar && (
 							<button
@@ -1878,7 +1979,68 @@ export function ReferenceWorkspacePreview({
 									</button>
 								)}
 							</h1>
-							<p>{workspace ? `${shortWorkspacePath(workspace)} 工作区` : "未选择工作区"}</p>
+							{(appMode === "code" || conversation?.instance.mode === "code") && (
+								<Popover>
+									<PopoverTrigger asChild>
+										<button
+											type="button"
+											className="reference-workspace-chip"
+											title="点击切换会话关联的工作区"
+										>
+											<Folder size={12} className="reference-ws-icon" />
+											<span>{workspace ? `${shortWorkspacePath(workspace)} 工作区` : "未关联工作区"}</span>
+											<ChevronDown size={11} className="reference-chip-arrow" />
+										</button>
+									</PopoverTrigger>
+									<PopoverContent className="reference-project-menu reference-workspace-menu" align="start">
+										<span className="reference-menu-label">会话工作区</span>
+										{spaces.length > 0 && (
+											<>
+												{spaces.map(([cwd]) => {
+													const isSelected = cwd === workspace;
+													const projectName = cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd;
+													return (
+														<button
+															key={cwd}
+															type="button"
+															className={`reference-menu-ws-item ${isSelected ? "active" : ""}`}
+															onClick={() => onSwitchWorkspace?.(cwd)}
+														>
+															<Folder size={14} />
+															<span className="reference-ws-item-labels">
+																<span className="reference-ws-name">{projectName}</span>
+																<small className="reference-ws-path">{shortWorkspacePath(cwd)}</small>
+															</span>
+															{isSelected && <Check size={14} className="reference-ws-check" />}
+														</button>
+													);
+												})}
+												<div className="reference-menu-divider" />
+											</>
+										)}
+										<button
+											type="button"
+											onClick={async () => {
+												const picked = await desktopApi.selectWorkspace(workspace);
+												if (picked) {
+													onSwitchWorkspace?.(picked);
+												}
+											}}
+										>
+											<FolderPlus size={14} /> 打开其他本地文件夹…
+										</button>
+										{workspace && (
+											<button
+												type="button"
+												className="danger"
+												onClick={() => onSwitchWorkspace?.(undefined)}
+											>
+												<FolderMinus size={14} /> 脱离工作区 (独立通用会话)
+											</button>
+										)}
+									</PopoverContent>
+								</Popover>
+							)}
 						</div>
 					</div>
 					<div className="reference-header-actions">
@@ -2224,6 +2386,11 @@ export function ReferenceWorkspacePreview({
 								<span />
 							</div>
 						)}
+						<div
+							ref={bottomAnchorRef}
+							className="reference-bottom-anchor"
+							style={{ height: 1, width: "100%", pointerEvents: "none" }}
+						/>
 					</div>
 				</section>
 				<footer className="reference-composer-shelf">
@@ -2421,7 +2588,7 @@ export function ReferenceWorkspacePreview({
 												conversation?.state.model?.name ?? conversation?.state.model?.id ?? "Model",
 											)}
 										</span>
-										{supportsThinking && conversation?.state.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
+										{supportsThinking && conversation?.state?.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
 											<>
 												<span className="reference-model-sep">·</span>
 												<span className="reference-model-thinking">
@@ -2590,6 +2757,7 @@ export function ReferenceWorkspacePreview({
 						</div>
 					</div>
 					<ComposerStatusDock
+						showGit={appMode === "code" || conversation?.instance.mode === "code"}
 						gitStatus={gitStatus}
 						loading={gitLoading}
 						onRefreshGit={onRefreshGit}

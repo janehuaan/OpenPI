@@ -29,6 +29,16 @@ const TOOL_LABELS: Record<string, string> = {
 	edit: "编辑文件",
 	write: "写入文件",
 	apply_patch: "应用补丁",
+	subagent: "调度子代理",
+	subagent_status: "检查子代理状态",
+	subagent_stop: "终止子代理",
+	subagent_risk: "评估子代理风险",
+	browser: "浏览器操作",
+	web_search: "网络搜索",
+	web_fetch: "获取网页",
+	task: "任务规划",
+	mcp: "调用 MCP",
+	mcp_script: "执行 MCP 脚本",
 };
 
 export function toolLabel(toolName: string): string {
@@ -56,10 +66,11 @@ export function reduceTurnProgress(
 	if (type === "turn_start") return { ...current, stage: "thinking", label: "正在思考…", toolCount: 0 };
 	if (type === "tool_execution_start" || type === "tool_execution_update") {
 		const name = typeof event.toolName === "string" ? event.toolName : undefined;
+		const isSubagent = name === "subagent";
 		return {
 			...current,
 			stage: "tool",
-			label: name ? toolLabel(name) : "正在执行工具…",
+			label: isSubagent ? "🤖 正在执行独立子任务…" : name ? toolLabel(name) : "正在执行工具…",
 			toolName: name,
 			lastToolName: name ?? current.lastToolName,
 		};

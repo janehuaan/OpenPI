@@ -107,7 +107,7 @@ export const THEME_PRESETS: ThemePreset[] = [
 		tag: "0 GPU · 暖沙纸本",
 		mode: "light",
 		swatches: {
-			bg: "#fbf9f5",
+			bg: "#f5ede0",
 			elevated: "#f4ecdf",
 			accent: "#c2652b",
 			text: "#2c2523",
@@ -120,8 +120,8 @@ export const THEME_PRESETS: ThemePreset[] = [
 		tag: "0 GPU · 极光冷白",
 		mode: "light",
 		swatches: {
-			bg: "#f3f6fa",
-			elevated: "#ffffff",
+			bg: "#eaf1f8",
+			elevated: "#e2ebf4",
 			accent: "#0284c7",
 			text: "#1e293b",
 		},

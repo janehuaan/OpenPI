@@ -69,7 +69,7 @@ export function TasksSurface({
 }) {
 	return (
 		<section className="tasks-surface">
-			<header className="surface-header task-page-header">
+			<header className="surface-header task-page-header" data-tauri-drag-region>
 				{onClose ? (
 					<button
 						type="button"

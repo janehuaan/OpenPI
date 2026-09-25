@@ -272,8 +272,8 @@ export function ChatSurface({
 	);
 	const attachmentInput = useRef<HTMLInputElement>(null);
 	const draftInput = useRef<HTMLTextAreaElement>(null);
-	const conversationInstanceId = useRef(conversation?.instance.id);
-	conversationInstanceId.current = conversation?.instance.id;
+	const conversationInstanceId = useRef(conversation?.instance?.id);
+	conversationInstanceId.current = conversation?.instance?.id;
 	const dragDepth = useRef(0);
 	const messageScroll = useRef<HTMLDivElement>(null);
 	const messageThread = useRef<HTMLDivElement>(null);
@@ -341,7 +341,7 @@ export function ChatSurface({
 		return optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
 	}, [conversation?.messages, optimisticMessage]);
 
-	const mediaScope = conversation?.instance.id
+	const mediaScope = conversation?.instance?.id
 		? `conversation:${conversation.instance.id}`
 		: workspace
 			? `workspace:${workspace}`
@@ -370,7 +370,7 @@ export function ChatSurface({
 				.join(",")}`
 		: "";
 	const currentModel = modelOptions.find(
-		(model) => model.provider === conversation?.state.model?.provider && model.id === conversation.state.model.id,
+		(model) => model.provider === conversation?.state?.model?.provider && model.id === conversation?.state?.model?.id,
 	);
 	const supportsThinking = modelSupportsReasoning(currentModel ?? conversation?.state.model);
 	const availableThinkingLevels: ThinkingLevel[] =
@@ -445,7 +445,7 @@ export function ChatSurface({
 
 	const agentSlash = useMemo(
 		() =>
-			slashCommands.map((line) => {
+			(Array.isArray(slashCommands) ? slashCommands : []).map((line) => {
 				const parsed = parseCommand(line);
 				return {
 					id: `agent:${parsed.name}`,
@@ -571,7 +571,7 @@ export function ChatSurface({
 		setSlashOpen(false);
 		dragDepth.current = 0;
 		forceScrollToBottom();
-	}, [conversation?.instance.id, forceScrollToBottom]);
+	}, [conversation?.instance?.id, forceScrollToBottom]);
 
 	useLayoutEffect(() => {
 		if (autoFollow.current) {
@@ -819,7 +819,7 @@ export function ChatSurface({
 		}
 
 		setPreparingImages(true);
-		const startingConversationId = conversation?.instance.id;
+		const startingConversationId = conversation?.instance?.id;
 		try {
 			const prepared: ImageAttachment[] = [];
 			let totalSize = attachments.reduce((total, image) => total + image.data.length, 0);
@@ -1713,7 +1713,7 @@ export function ChatSurface({
 												{shortModelName(
 													conversation?.state.model?.name ?? conversation?.state.model?.id ?? "模型",
 												)}
-												{supportsThinking && conversation?.state.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
+												{supportsThinking && conversation?.state?.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
 													<>
 														<span className="model-picker-sep">·</span>
 														{conversation.state.thinkingLevel}

@@ -241,7 +241,7 @@ export function GitSurface({
 	if (!isRepo) {
 		return (
 			<section className="git-surface" aria-label="版本管理">
-				<header className="git-surface-header">
+				<header className="git-surface-header" data-tauri-drag-region>
 					<div className="git-header-left">
 						{onClose && (
 							<button
@@ -280,7 +280,7 @@ export function GitSurface({
 	return (
 		<section className="git-surface" aria-label="版本管理中心">
 			{/* Top Bar */}
-			<header className="git-surface-header">
+			<header className="git-surface-header" data-tauri-drag-region>
 				<div className="git-header-left">
 					{onClose && (
 						<button

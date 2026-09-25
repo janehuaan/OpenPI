@@ -56,6 +56,7 @@ type OpenPiBridge = {
 	onNavigate?: (handler: (view: string, extra?: unknown) => void) => () => void;
 	onNewConversation?: (handler: () => void) => () => void;
 	onComposerPrefill?: (handler: (draft: { text: string; images?: string[] }) => void) => () => void;
+	onSendMessage?: (handler: (payload: { text: string; images?: any[] }) => void) => () => void;
 	onAutoPilotEvent?: (handler: (payload: { task: AutoPilotTask }) => void) => () => void;
 	onRuntimeUpdateProgress?: (handler: (progress: RuntimeUpdateProgress) => void) => () => void;
 };
@@ -121,6 +122,10 @@ export const desktopApi = {
 		call<ConversationCapabilities>("install_conversation_package", { instanceId, source, local }),
 	removeConversationPackage: (instanceId: string, source: string, local = false) =>
 		call<ConversationCapabilities>("remove_conversation_package", { instanceId, source, local }),
+	installSkill: (data: { id: string; name: string; description: string; content?: string; instanceId?: string }) =>
+		call<ConversationCapabilities>("install_skill", data),
+	removeSkill: (data: { id: string; instanceId?: string }) =>
+		call<ConversationCapabilities>("remove_skill", data),
 	setConversationModel: (instanceId: string, provider: string, modelId: string) =>
 		call<ConversationState>("set_conversation_model", { instanceId, provider, modelId }),
 	setConversationThinkingLevel: (instanceId: string, level: ThinkingLevel) =>
@@ -152,6 +157,8 @@ export const desktopApi = {
 		call<unknown>("compact_conversation", { instanceId, customInstructions }),
 	renameConversation: (instanceId: string, name: string) =>
 		call<AgentInstance>("rename_conversation", { instanceId, name }),
+	setConversationWorkspace: (instanceId: string, cwd?: string) =>
+		call<{ ok: boolean; cwd: string }>("set_conversation_workspace", { instanceId, cwd }),
 	deleteConversation: (instanceId: string) => call<boolean>("delete_conversation", { instanceId }),
 	watchConversation: (instanceId: string) => call<boolean>("watch_conversation_stream", { instanceId }),
 	stopWatchingConversation: (instanceId: string) => call<boolean>("stop_conversation_stream", { instanceId }),
@@ -391,6 +398,11 @@ export const desktopApi = {
 		const api = bridge();
 		if (!api?.onComposerPrefill) return () => undefined;
 		return api.onComposerPrefill(handler);
+	},
+	onSendMessage: (handler: (payload: { text: string; images?: any[] }) => void) => {
+		const api = bridge();
+		if (!api?.onSendMessage) return () => undefined;
+		return api.onSendMessage(handler);
 	},
 
 	// ── Auto-Pilot Autonomous Delivery & Self-Healing Loop ──────────────────────────

@@ -64,109 +64,6 @@ async fn handle_connection(
     let subscribed_sessions = Arc::new(Mutex::new(HashSet::<String>::new()));
     let subs_clone = subscribed_sessions.clone();
 
-    // Event broadcast forwarder
-    let mut event_rx = supervisor.subscribe_events();
-    let (event_tx, mut event_rx_forward) = tokio::sync::mpsc::channel::<String>(2048);
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
-        // Multi-session delta buffer: key = (session_id, content_index, delta_type), value = accumulated text
-        let mut pending_deltas: std::collections::HashMap<(String, usize, String), String> = std::collections::HashMap::new();
-
-        loop {
-            tokio::select! {
-                biased;
-                res = event_rx.recv() => {
-                    match res {
-                        Ok((session_id, event)) => {
-                            let subs = subs_clone.lock().await;
-                            if !subs.contains(&session_id) {
-                                continue;
-                            }
-
-                            // Check if event is an assistant streaming delta: text_delta or thinking_delta
-                            let delta_type = if event.get("type").and_then(|v| v.as_str()) == Some("message_update") {
-                                event.get("assistantMessageEvent")
-                                    .and_then(|ame| ame.get("type"))
-                                    .and_then(|t| t.as_str())
-                            } else {
-                                None
-                            };
-
-                            let is_delta = delta_type == Some("text_delta") || delta_type == Some("thinking_delta");
-
-                            if is_delta {
-                                let dtype = delta_type.unwrap().to_string();
-                                let ame = &event["assistantMessageEvent"];
-                                let content_index = ame.get("contentIndex").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                                let delta = ame.get("delta").and_then(|v| v.as_str()).unwrap_or("");
-
-                                let key = (session_id, content_index, dtype);
-                                pending_deltas.entry(key).or_default().push_str(delta);
-                            } else {
-                                // Non-delta event: flush any pending deltas for this session before dispatching
-                                let keys_to_flush: Vec<(String, usize, String)> = pending_deltas
-                                    .keys()
-                                    .filter(|(s, _, _)| s == &session_id)
-                                    .cloned()
-                                    .collect();
-
-                                for key in keys_to_flush {
-                                    if let Some(text) = pending_deltas.remove(&key) {
-                                        if !text.is_empty() {
-                                            let batched_event = serde_json::json!({
-                                                "type": "message_update",
-                                                "assistantMessageEvent": {
-                                                    "type": key.2,
-                                                    "contentIndex": key.1,
-                                                    "delta": text
-                                                }
-                                            });
-                                            let msg = ServerMessage::event(&key.0, batched_event);
-                                            if let Ok(line) = msg.to_json_line() {
-                                                let _ = event_tx.send(line).await;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let msg = ServerMessage::event(&session_id, event);
-                                if let Ok(line) = msg.to_json_line() {
-                                    let _ = event_tx.send(line).await;
-                                }
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(missed)) => {
-                            warn!("IPC broadcast event stream lagged, dropped {} events", missed);
-                            continue;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-                _ = interval.tick() => {
-                    // Flush accumulated deltas on 16ms frame interval (~60fps)
-                    for ((sid, idx, dtype), text) in pending_deltas.drain() {
-                        if text.is_empty() {
-                            continue;
-                        }
-                        let batched_event = serde_json::json!({
-                            "type": "message_update",
-                            "assistantMessageEvent": {
-                                "type": dtype,
-                                "contentIndex": idx,
-                                "delta": text
-                            }
-                        });
-                        let msg = ServerMessage::event(&sid, batched_event);
-                        if let Ok(line) = msg.to_json_line() {
-                            let _ = event_tx.send(line).await;
-                        }
-                    }
-                }
-            }
-        }
-    });
-
     let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<String>(2048);
     tokio::spawn(async move {
         while let Some(line) = write_rx.recv().await {
@@ -178,10 +75,36 @@ async fn handle_connection(
         }
     });
 
+    // Event broadcast forwarder directly into write_tx
+    let mut event_rx = supervisor.subscribe_events();
     let write_tx_events = write_tx.clone();
+
     tokio::spawn(async move {
-        while let Some(line) = event_rx_forward.recv().await {
-            let _ = write_tx_events.send(line).await;
+        loop {
+            match event_rx.recv().await {
+                Ok((session_id, event)) => {
+                    let subs = subs_clone.lock().await;
+                    if !subs.is_empty()
+                        && !subs.contains(&session_id)
+                        && !subs.iter().any(|s| session_id.contains(s) || s.contains(&session_id))
+                    {
+                        continue;
+                    }
+                    drop(subs);
+
+                    let msg = ServerMessage::event(&session_id, event);
+                    if let Ok(line) = msg.to_json_line() {
+                        if let Err(_) = write_tx_events.send(line).await {
+                            break;
+                        }
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    warn!("IPC broadcast event stream lagged, dropped {} events", missed);
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 
@@ -278,6 +201,12 @@ async fn handle_connection(
             ClientRequest::RenameSession { id, session_id, name } => {
                 match supervisor.rename_session(&session_id, Some(name)).await {
                     Ok(_) => ServerMessage::ok(id, serde_json::json!({"renamed": true})),
+                    Err(e) => ServerMessage::err(id, e.to_string()),
+                }
+            }
+            ClientRequest::UpdateSessionWorkspace { id, session_id, cwd } => {
+                match supervisor.update_session_workspace(&session_id, cwd).await {
+                    Ok(_) => ServerMessage::ok(id, serde_json::json!({"updated": true})),
                     Err(e) => ServerMessage::err(id, e.to_string()),
                 }
             }

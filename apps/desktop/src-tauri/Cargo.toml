@@ -1,0 +1,35 @@
+[package]
+name = "openpi-desktop"
+version = "0.2.3"
+description = "OpenPI Desktop application powered by Tauri v2 and native Rust backend"
+authors = ["OpenPI Contributors"]
+edition = "2021"
+
+[lib]
+name = "openpi_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.3", features = ["tray-icon", "image-png"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+anyhow = "1.0"
+thiserror = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sysinfo = "0.31"
+base64.workspace = true
+
+openpi-proto = { path = "../../../crates/openpi-proto" }
+openpi-storage = { path = "../../../crates/openpi-storage" }
+openpi-scheduler = { path = "../../../crates/openpi-scheduler" }
+openpi-memory = { path = "../../../crates/openpi-memory" }
+openpi-tools = { path = "../../../crates/openpi-tools" }
+openpi-daemon = { path = "../../../crates/openpi-daemon" }

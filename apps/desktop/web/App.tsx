@@ -21,7 +21,6 @@ import {
 	FilePreviewDialog,
 	TasksSurface,
 	GitSurface,
-	FloatingHud,
 } from "./components/surfaces";
 import { FilePreviewContext, type FilePreviewRequest } from "./lib/file-links";
 import {
@@ -49,7 +48,7 @@ import {
 	getHighestThinkingLevel,
 } from "./lib/helpers";
 import { reduceTurnProgress, submittedTurnProgress, type TurnProgress } from "./lib/turn-progress";
-import { hashForView, initialView, isView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
+import { hashForView, initialView, isView, normalizeView, VIEW_STORAGE_KEY, viewFromHash } from "./lib/view-route";
 import { draftStore } from "./lib/draft-store";
 import { exportAndDownloadConversation } from "./lib/export-markdown";
 import { useGlobalKeybindings } from "./lib/keybindings";
@@ -161,22 +160,6 @@ export function App() {
 		if (typeof window === "undefined") return "chat";
 		return initialView(window.location.hash, window.localStorage.getItem(VIEW_STORAGE_KEY));
 	});
-	const [isHudMode, setIsHudMode] = useState(() => {
-		if (typeof window === "undefined") return false;
-		return window.location.hash.includes("hud") || window.location.search.includes("hud");
-	});
-
-	useEffect(() => {
-		const checkHud = () => {
-			setIsHudMode(window.location.hash.includes("hud") || window.location.search.includes("hud"));
-		};
-		window.addEventListener("hashchange", checkHud);
-		window.addEventListener("popstate", checkHud);
-		return () => {
-			window.removeEventListener("hashchange", checkHud);
-			window.removeEventListener("popstate", checkHud);
-		};
-	}, []);
 	const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
 	const [taskQuery, setTaskQuery] = useState("");
 	const [chatQuery, setChatQuery] = useState("");
@@ -544,7 +527,10 @@ export function App() {
 		if (!desktopApi.isNative) return;
 		let disposed = false;
 		const unlisten = desktopApi.onConversationEvent((payload) => {
-			if (disposed || payload.instanceId !== selectedInstanceIdRef.current || !isRecord(payload.event)) return;
+			if (disposed || !isRecord(payload.event)) return;
+			const currentId = selectedInstanceIdRef.current;
+			const isMatch = currentId && (payload.instanceId === currentId || payload.instanceId.includes(currentId) || currentId.includes(payload.instanceId));
+			if (!isMatch) return;
 			const event = payload.event;
 			const eventType = typeof event.type === "string" ? event.type : undefined;
 			const assistantMessageEvent = isRecord(event.assistantMessageEvent)
@@ -632,6 +618,22 @@ export function App() {
 				setPendingConversationUiRequests((current) =>
 					current.filter((pending) => pending.instanceId !== payload.instanceId),
 				);
+				setConversation((current) => {
+					if (current?.instance?.id !== payload.instanceId) return current;
+					return {
+						...current,
+						state: { ...current.state, isStreaming: false },
+						messages: current.messages.map((m) => {
+							if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
+							return {
+								...m,
+								toolCalls: m.toolCalls.map((tc) =>
+									tc.status === "running" ? { ...tc, status: "error", result: "Stream closed abruptly before tool finished." } : tc
+								),
+							};
+						}),
+					};
+				});
 				if (eventType === "stream_error" && typeof payload.event.error === "string") {
 					setError(payload.event.error);
 				}
@@ -654,7 +656,7 @@ export function App() {
 				setStreamConnectedInstanceId(payload.instanceId);
 				setStreamingInstances((prev) => new Set(prev).add(payload.instanceId));
 				setConversation((current) =>
-					current?.instance.id === payload.instanceId
+					current?.instance?.id === payload.instanceId
 						? { ...current, state: { ...current.state, isStreaming: true } }
 						: current,
 				);
@@ -668,7 +670,7 @@ export function App() {
 					return next;
 				});
 				setConversation((current) =>
-					current?.instance.id === payload.instanceId
+					current?.instance?.id === payload.instanceId
 						? { ...current, state: { ...current.state, isStreaming: false } }
 						: current,
 				);
@@ -1001,6 +1003,15 @@ export function App() {
 					});
 					if (!next.state.isStreaming && !streamingInstances.has(instanceId)) {
 						clearRunningTools(instanceId);
+						next.messages = next.messages.map((m) => {
+							if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
+							return {
+								...m,
+								toolCalls: m.toolCalls.map((tc) =>
+									tc.status === "running" ? { ...tc, status: "error", result: "Stream closed abruptly before tool finished." } : tc
+								),
+							};
+						});
 					}
 					if (messageAccepted) {
 						setOptimisticMessage((current) => (current === pending ? undefined : current));
@@ -1173,22 +1184,21 @@ export function App() {
 		.filter((run) => run.taskId === selectedTaskId)
 		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 	const selectedRun = snapshot.runs.find((run) => run.id === selectedRunId) ?? taskRuns[0];
-	const activeConversation = conversation?.instance.id === selectedInstanceId ? conversation : undefined;
+	const activeConversation = conversation?.instance?.id === selectedInstanceId ? conversation : undefined;
 	const selectedAgentInstance =
 		activeConversation?.instance ?? snapshot.instances.find((instance) => instance.id === selectedInstanceId);
 	const activeAgentMode = selectedAgentInstance?.mode ?? preferredMode;
+	const currentInstance = snapshot.instances.find((instance) => instance.id === selectedInstanceId);
 	const activeCodeWorkspace =
 		selectedAgentInstance?.mode === "code" ? selectedAgentInstance.cwd : (codeWorkspace ?? setup.workspace);
 	const selectedWorkspace =
-		activeConversation?.instance.cwd ??
-		snapshot.instances.find((instance) => instance.id === selectedInstanceId)?.cwd ??
-		setup.workspace;
+		activeConversation?.instance?.cwd ?? currentInstance?.cwd;
 	const operationView =
 		view === "memory" || view === "intelligence" || view === "daemon" || view === "git";
 
 	const loadGitStatus = useCallback(
 		async (cwd?: string) => {
-			const targetCwd = cwd ?? selectedWorkspace ?? setup.workspace;
+			const targetCwd = cwd ?? selectedWorkspace;
 			if (!targetCwd) {
 				setGitStatus(null);
 				return;
@@ -1203,7 +1213,7 @@ export function App() {
 				setGitLoading(false);
 			}
 		},
-		[selectedWorkspace, setup.workspace],
+		[selectedWorkspace],
 	);
 
 	useEffect(() => {
@@ -1329,7 +1339,10 @@ export function App() {
 		setBusy("new-conversation");
 		setError(undefined);
 		try {
-			let workspace = mode === "personal" ? undefined : (requestedWorkspace ?? selectedWorkspace ?? setup.workspace);
+			let workspace =
+				mode === "code"
+					? (requestedWorkspace ?? selectedWorkspace ?? codeWorkspace ?? setup.workspace)
+					: requestedWorkspace;
 			if (mode === "code" && !workspace) {
 				workspace = await desktopApi.selectWorkspace(codeWorkspace ?? selectedWorkspace ?? setup.workspace);
 				if (!workspace) return;
@@ -1380,7 +1393,7 @@ export function App() {
 		setBusy("send-message");
 		setError(undefined);
 		const prompt = messageWithDocuments(message, documents);
-		const selectedConversation = conversation?.instance.id === selectedInstanceId ? conversation : undefined;
+		const selectedConversation = conversation?.instance?.id === selectedInstanceId ? conversation : undefined;
 		const pending: OptimisticUserMessage = {
 			instanceId: selectedInstanceId,
 			baselineMessageCount: selectedConversation?.messages.length ?? 0,
@@ -1398,10 +1411,8 @@ export function App() {
 				const newMode = appMode === "code" ? "code" : appMode === "personal" ? "personal" : "work";
 				let workspace =
 					newMode === "code"
-						? codeWorkspace
-						: newMode === "personal"
-							? undefined
-							: (selectedWorkspace ?? setup.workspace);
+						? (codeWorkspace ?? selectedWorkspace ?? setup.workspace)
+						: undefined;
 				if (newMode === "code" && !workspace) {
 					workspace = await desktopApi.selectWorkspace(setup.workspace);
 					if (!workspace) throw new Error("请选择一个项目后再发送。");
@@ -1563,6 +1574,39 @@ export function App() {
 		if (selectedAgentInstance) await createConversation("code", workspace);
 	}
 
+	async function handleSwitchConversationWorkspace(targetCwd?: string): Promise<void> {
+		const instanceId = selectedInstanceId;
+		if (!instanceId) return;
+		try {
+			const res = await desktopApi.setConversationWorkspace(instanceId, targetCwd);
+			const newCwd = targetCwd ? (res?.cwd || targetCwd) : undefined;
+			setSnapshot((current) => ({
+				...current,
+				instances: current.instances.map((entry) =>
+					entry.id === instanceId ? { ...entry, cwd: newCwd } : entry,
+				),
+			}));
+			setConversation((current) => {
+				if (!current || current.instance.id !== instanceId) return current;
+				return {
+					...current,
+					instance: {
+						...current.instance,
+						cwd: newCwd,
+					},
+				};
+			});
+			if (newCwd) {
+				void loadGitStatus(newCwd);
+			} else {
+				setGitStatus(null);
+				setWorkspaceSummary(undefined);
+			}
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	}
+
 	function handleModeChange(nextMode: AppMode): void {
 		setAppMode(nextMode);
 		setView("chat");
@@ -1661,7 +1705,7 @@ export function App() {
 	useEffect(() => {
 		const unsubNavigate = desktopApi.onNavigate((targetView) => {
 			if (isView(targetView)) {
-				setView(targetView);
+				setView(normalizeView(targetView));
 			}
 		});
 		const unsubNew = desktopApi.onNewConversation(() => {
@@ -1676,10 +1720,20 @@ export function App() {
 				images: draft.images,
 			});
 		});
+		const unsubSend = desktopApi.onSendMessage?.((payload) => {
+			setView("chat");
+			void sendMessage(payload.text, payload.images || []);
+		});
+		const unsubSelect = (window as any).openpi?.onSelectConversation?.((id: string) => {
+			selectConversation(id);
+			setView("chat");
+		});
 		return () => {
 			unsubNavigate();
+			unsubSelect?.();
 			unsubNew();
 			unsubPrefill?.();
+			unsubSend?.();
 		};
 	}, [handleNewConversation]);
 
@@ -1806,7 +1860,7 @@ export function App() {
 		setError(undefined);
 		try {
 			const state = await action(instanceId);
-			setConversation((current) => (current?.instance.id === instanceId ? { ...current, state } : current));
+			setConversation((current) => (current?.instance?.id === instanceId ? { ...current, state } : current));
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
@@ -1833,13 +1887,12 @@ export function App() {
 		key: string,
 		action: (instanceId: string) => Promise<ConversationCapabilities>,
 	): Promise<void> {
-		if (!selectedInstanceId) return;
-		const instanceId = selectedInstanceId;
+		const instanceId = selectedInstanceId ?? "";
 		setBusy(key);
 		setError(undefined);
 		try {
 			const next = await action(instanceId);
-			if (selectedInstanceIdRef.current === instanceId) setCapabilities(next);
+			setCapabilities(next);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
@@ -2014,6 +2067,17 @@ export function App() {
 		if (!instanceId) return;
 		try {
 			const next = await desktopApi.getConversation(instanceId);
+			if (!next.state.isStreaming && !streamingInstances.has(instanceId)) {
+				next.messages = next.messages.map((m) => {
+					if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
+					return {
+						...m,
+						toolCalls: m.toolCalls.map((tc) =>
+							tc.status === "running" ? { ...tc, status: "error", result: "Aborted." } : tc
+						),
+					};
+				});
+			}
 			if (selectedInstanceIdRef.current === instanceId) setConversation(next);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -2037,23 +2101,6 @@ export function App() {
 		};
 	}, []);
 
-	if (isHudMode) {
-		return (
-			<FloatingHud
-				onOpenMainWithPrompt={async (prompt) => {
-					try {
-						const conv = await desktopApi.createConversation({ label: prompt.slice(0, 30), mode: "work" });
-						if (conv?.id) {
-							await desktopApi.sendMessage(conv.id, prompt, []);
-						}
-						await desktopApi.focusMainWindow();
-					} catch (e) {
-						console.error("Failed to open prompt in main window:", e);
-					}
-				}}
-			/>
-		);
-	}
 
 	let pageContent: ReactNode = null;
 	let mainContent: ReactNode;
@@ -2073,16 +2120,59 @@ export function App() {
 				}}
 				onUseSkill={(name) => openCapabilityPrompt(`/skill:${name} `)}
 				onConfigureMcp={() => openCapabilityPrompt("/mcp setup")}
-				onInstallPackage={(marketPackage) =>
+				onInstallPackage={(marketPackage) => {
+					if (marketPackage.kind === "skills") {
+						const skillId = marketPackage.id.replace(/^skill-/, "");
+						void mutateCapabilities(`install-skill-${skillId}`, (instanceId) =>
+							desktopApi.installSkill({
+								id: skillId,
+								name: marketPackage.name,
+								description: marketPackage.description,
+								content: marketPackage.skillContent,
+								instanceId,
+							}),
+						);
+						return;
+					}
 					void mutateCapabilities(`install-market-${marketPackage.id}`, (instanceId) =>
 						desktopApi.installConversationPackage(instanceId, marketPackage.source),
-					)
-				}
+					);
+				}}
+				onInstallSkill={(skill) => {
+					const skillId = skill.id.replace(/^skill-/, "");
+					void mutateCapabilities(`install-skill-${skillId}`, (instanceId) =>
+						desktopApi.installSkill({
+							id: skillId,
+							name: skill.name,
+							description: skill.description,
+							content: skill.skillContent,
+							instanceId,
+						}),
+					);
+				}}
+				onRemoveSkill={(id) => {
+					const skillId = id.replace(/^skill-/, "").replace(/^skill:/, "");
+					void mutateCapabilities(`remove-skill-${skillId}`, (instanceId) =>
+						desktopApi.removeSkill({ id: skillId, instanceId }),
+					);
+				}}
 				onRemoveMcp={(source, local) =>
 					void mutateCapabilities("remove-mcp", (instanceId) =>
 						desktopApi.removeConversationPackage(instanceId, source, local),
 					)
 				}
+				onRemovePackage={(source) => {
+					if (source.startsWith("skill:")) {
+						const skillId = source.replace(/^skill:/, "");
+						void mutateCapabilities(`remove-skill-${skillId}`, (instanceId) =>
+							desktopApi.removeSkill({ id: skillId, instanceId }),
+						);
+						return;
+					}
+					void mutateCapabilities(`remove-${source}`, (instanceId) =>
+						desktopApi.removeConversationPackage(instanceId, source),
+					);
+				}}
 			/>
 		);
 	} else if (view === "git") {
@@ -2216,6 +2306,7 @@ export function App() {
 			appMode={appMode}
 			sidebarOpen={sidebarOpen}
 			onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+			onCollapseSidebar={() => setSidebarOpen(false)}
 			onSelectConversation={(instanceId) => {
 				setView("chat");
 				setAppMode("chat");
@@ -2287,6 +2378,7 @@ export function App() {
 			onRefreshGit={loadGitStatus}
 			onOpenGit={() => setView("git")}
 			onNavigate={(next) => setView(next)}
+			onSwitchWorkspace={handleSwitchConversationWorkspace}
 			prefillDraft={composerDraftRequest}
 		/>
 	);

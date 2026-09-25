@@ -85,7 +85,7 @@ export function ConversationSidebar({
 	const spaces = useMemo(() => {
 		const seen = new Set<string>();
 		return projects.filter((instance) => {
-			const cwd = instance.cwd.trim();
+			const cwd = instance.cwd?.trim();
 			if (!cwd || seen.has(cwd)) return false;
 			seen.add(cwd);
 			return true;
@@ -183,7 +183,7 @@ export function ConversationSidebar({
 							</span>
 							<span className="space-copy">
 								<strong>{shortWorkspacePath(space.cwd)}</strong>
-								<small>~/{space.cwd.split(/[\\/]/).pop() ?? "workspace"}</small>
+								<small>~/{space.cwd ? (space.cwd.split(/[\\/]/).pop() ?? "workspace") : "workspace"}</small>
 							</span>
 							<span className="space-dot" />
 						</button>

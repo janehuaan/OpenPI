@@ -28,31 +28,45 @@ pub fn sessions_dir() -> PathBuf {
     openpi_dir().join("sessions")
 }
 
-pub fn resolve_node_executable() -> (PathBuf, bool) {
-    if let Ok(p) = std::env::var("OPENPI_NODE_PATH") {
-        let pb = PathBuf::from(&p);
-        if pb.exists() {
-            let is_electron = p.to_lowercase().contains("openpi") || p.to_lowercase().contains("electron");
-            return (pb, is_electron);
-        }
+pub fn find_session_file(sid: &str) -> PathBuf {
+    let direct = sessions_dir().join(format!("{}.jsonl", sid));
+    if direct.exists() {
+        return direct;
     }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            if let Some(res) = parent.parent() {
-                if let Some(contents) = res.parent() {
-                    let macos_openpi = contents.join("MacOS").join("OpenPI");
-                    if macos_openpi.exists() {
-                        return (macos_openpi, true);
+    let agent_sessions = openpi_dir().join("agent").join("sessions");
+    if agent_sessions.exists() {
+        if let Ok(entries) = std::fs::read_dir(&agent_sessions) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    if let Ok(files) = std::fs::read_dir(&p) {
+                        for f in files.flatten() {
+                            let fp = f.path();
+                            if let Some(name) = fp.file_name().and_then(|n| n.to_str()) {
+                                if name.contains(sid) && name.ends_with(".jsonl") {
+                                    return fp;
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+    direct
+}
+
+pub fn resolve_node_executable() -> (PathBuf, bool) {
+    if let Ok(p) = std::env::var("OPENPI_NODE_PATH") {
+        let pb = PathBuf::from(&p);
+        if pb.is_file() && pb.exists() {
+            let is_electron = p.to_lowercase().contains("openpi") || p.to_lowercase().contains("electron");
+            return (pb, is_electron);
+        }
+    }
 
     let home = std::env::var("HOME").unwrap_or_default();
     let candidates = [
-        PathBuf::from("/Applications/OpenPI.app/Contents/MacOS/OpenPI"),
         PathBuf::from(format!("{}/.local/bin/node", home)),
         PathBuf::from("/opt/homebrew/bin/node"),
         PathBuf::from("/usr/local/bin/node"),
@@ -60,10 +74,18 @@ pub fn resolve_node_executable() -> (PathBuf, bool) {
     ];
 
     for c in &candidates {
-        if c.exists() {
-            let is_electron = c.to_string_lossy().to_lowercase().contains("openpi")
-                || c.to_string_lossy().to_lowercase().contains("electron");
-            return (c.clone(), is_electron);
+        if c.is_file() && c.exists() {
+            return (c.clone(), false);
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("which").arg("node").output() {
+        if output.status.success() {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let p = PathBuf::from(&path_str);
+            if p.is_file() && p.exists() {
+                return (p, false);
+            }
         }
     }
 
@@ -75,6 +97,40 @@ pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return pb;
+        }
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        PathBuf::from("/Users/huaan/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
+        PathBuf::from(format!("{}/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js", home)),
+        openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
+        openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js"),
+        PathBuf::from("/Applications/OpenPI.app/Contents/Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
+    ];
+
+    for c in &candidates {
+        if c.exists() {
+            return c.clone();
+        }
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundle = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js");
+            if bundle.exists() {
+                return bundle;
+            }
+            let rpc = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js");
+            if rpc.exists() {
+                return rpc;
+            }
+            if let Some(res) = dir.parent() {
+                let res_rpc = res.join("Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js");
+                if res_rpc.exists() {
+                    return res_rpc;
+                }
+            }
         }
     }
 
@@ -95,32 +151,23 @@ pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
         }
     }
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let bundle = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js");
-            if bundle.exists() {
-                return bundle;
-            }
-            let rpc = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js");
-            if rpc.exists() {
-                return rpc;
-            }
-        }
-    }
-
-    let user_runtime = openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js");
-    if user_runtime.exists() {
-        return user_runtime;
-    }
-
     cli
 }
 
+const CODE_MODE_TOOLS: &str = "\
+read,bash,edit,write,grep,find,ls,memory,session_search,\
+system_os,system_screen,system_process,\
+browser,web_search,web_fetch,\
+subagent,subagent_status,subagent_stop,subagent_risk,\
+task,mcp,mcpScript";
+
 const CODE_MODE_UNATTENDED_DIRECTIVE: &str = "\
-【OpenPI 研发自愈准则】：\n\
-1. 目标导向与按需验证：仅在执行代码编写或实质性文件修改后，才执行针对性的语法/类型检查或单测验证；严禁在普通问答、代码解释或只读探索任务中盲目触发大型全局编译与重构。\n\
-2. 缺陷收敛闭环：若自己引入了编译报错或测试失败，必须主动定位源码根因并实施修复，直至消除当前变更引入的缺陷。\n\
-3. 高效执行：回答问题务求直击要害，杜绝不必要的空转工具调用。长耗时重型任务（如 docker build/镜像生成）执行前先用 pgrep/docker ps 探测避免多进程竞争与死锁。";
+【OpenPI 敏捷研发与自愈准则】：\n\
+1. 敏捷内联先行（严禁杀鸡用牛刀）：项目初始化、脚手架创建（如 Package.swift/Cargo.toml）、单文件编写、常规配置与局部修复，必须在当前主会话直接调用 write/edit 工具秒级交付，严禁无谓派发 subagent 造成空等与膨胀！\n\
+2. 杜绝官僚式反问：严禁停下来询问用户“请确认执行方式：1. 子代理驱动 2. 内联顺序”等伪选择题。需求明确直接执行，不把内部运行机制甩锅给用户打断心流。\n\
+3. 目标导向与按需验证：仅在代码实质修改后执行针对性验证；严禁在普通问答或只读探索中盲目触发大型全局编译与重构。\n\
+4. 缺陷收敛闭环：若自己引入了编译报错或测试失败，必须主动定位源码根因并实施修复，直至消除当前变更引入的缺陷。\n\
+5. 权衡合理委派：仅在遇到真正的大规模跨文件检索、独立多模块并行构建或超长耗时任务时，才在后台静默委派 subagent。";
 
 pub struct ManagedSession {
     pub info: SessionInfo,
@@ -162,26 +209,41 @@ impl Supervisor {
             }
         }
 
-        // Auto-discover any session files in ~/.openpi/sessions/*.jsonl that are not in instances.json
-        let s_dir = sessions_dir();
-        if s_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&s_dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                            let sid = stem.to_string();
-                            if !map.contains_key(&sid) {
-                                if let Some(info) = Self::inspect_session_file(&p, &sid) {
-                                    map.insert(
-                                        sid.clone(),
-                                        ManagedSession {
-                                            info,
-                                            child_stdin: Arc::new(Mutex::new(None)),
-                                            child: None,
-                                            pending: Arc::new(Mutex::new(HashMap::new())),
-                                        },
-                                    );
+        // Auto-discover session files in ~/.openpi/sessions and ~/.openpi/agent/sessions/**
+        let scan_dirs = vec![
+            sessions_dir(),
+            openpi_dir().join("agent").join("sessions"),
+        ];
+        for base_dir in scan_dirs {
+            if !base_dir.exists() {
+                continue;
+            }
+            let mut stack = vec![base_dir];
+            while let Some(dir) = stack.pop() {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            stack.push(p);
+                        } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                            if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                                let sid = if let Some((_, uuid_part)) = stem.split_once('_') {
+                                    uuid_part.to_string()
+                                } else {
+                                    stem.to_string()
+                                };
+                                if !map.contains_key(&sid) {
+                                    if let Some(info) = Self::inspect_session_file(&p, &sid) {
+                                        map.insert(
+                                            sid.clone(),
+                                            ManagedSession {
+                                                info,
+                                                child_stdin: Arc::new(Mutex::new(None)),
+                                                child: None,
+                                                pending: Arc::new(Mutex::new(HashMap::new())),
+                                            },
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -376,16 +438,68 @@ impl Supervisor {
         Ok(())
     }
 
+    pub async fn update_session_workspace(&self, id: &str, cwd: String) -> anyhow::Result<()> {
+        let _ = self.stop_session(id).await;
+        {
+            let mut sessions = self.sessions.lock().await;
+            if let Some(s) = sessions.get_mut(id) {
+                s.info.cwd = cwd;
+                s.info.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+        }
+        self.save_records().await;
+        Ok(())
+    }
+
     pub async fn ensure_process(
         &self,
         session_id: &str,
         pi_cli_path: &str,
     ) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
-        let session = match sessions.get_mut(session_id) {
-            Some(s) => s,
-            None => anyhow::bail!("Session not found: {}", session_id),
-        };
+        if !sessions.contains_key(session_id) {
+            let session_file = find_session_file(session_id);
+            let info = if session_file.exists() {
+                Self::inspect_session_file(&session_file, session_id).unwrap_or_else(|| {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    SessionInfo {
+                        session_id: session_id.to_string(),
+                        cwd: std::env::var("HOME").unwrap_or_default(),
+                        mode: SessionMode::Code,
+                        name: None,
+                        model: None,
+                        in_memory: None,
+                        running: false,
+                        created_at: now.clone(),
+                        updated_at: now,
+                    }
+                })
+            } else {
+                let now = chrono::Utc::now().to_rfc3339();
+                SessionInfo {
+                    session_id: session_id.to_string(),
+                    cwd: std::env::var("HOME").unwrap_or_default(),
+                    mode: SessionMode::Code,
+                    name: None,
+                    model: None,
+                    in_memory: None,
+                    running: false,
+                    created_at: now.clone(),
+                    updated_at: now,
+                }
+            };
+            sessions.insert(
+                session_id.to_string(),
+                ManagedSession {
+                    info,
+                    child_stdin: Arc::new(Mutex::new(None)),
+                    child: None,
+                    pending: Arc::new(Mutex::new(HashMap::new())),
+                },
+            );
+        }
+
+        let session = sessions.get_mut(session_id).unwrap();
 
         if session.child.is_some() {
             return Ok(());
@@ -393,7 +507,7 @@ impl Supervisor {
 
         let (node_bin, is_electron) = resolve_node_executable();
         let rpc_entry = resolve_pi_rpc_entry(pi_cli_path);
-        let session_file = sessions_dir().join(format!("{}.jsonl", session_id));
+        let session_file = find_session_file(session_id);
 
         let _ = std::fs::create_dir_all(sessions_dir());
         let _ = std::fs::create_dir_all(openpi_dir().join("agent"));
@@ -430,7 +544,7 @@ impl Supervisor {
 
         if session.info.mode == SessionMode::Code {
             cmd.arg("--tools")
-                .arg("read,bash,edit,write,grep,find,ls,memory,session_search,system_os")
+                .arg(CODE_MODE_TOOLS)
                 .arg("--append-system-prompt")
                 .arg(CODE_MODE_UNATTENDED_DIRECTIVE);
         }
@@ -445,6 +559,7 @@ impl Supervisor {
             std::env::var("PATH").unwrap_or_default()
         );
         cmd.env("PATH", default_path);
+        cmd.env("NODE_PATH", "/Users/huaan/openpi-next/node_modules");
         cmd.env("PI_CODING_AGENT_DIR", openpi_dir().join("agent"));
         cmd.env("PI_CODING_AGENT_SESSION_DIR", sessions_dir());
 

@@ -449,7 +449,7 @@ input.ui-command-input:focus-visible {
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
-	background: var(--bg-elevated);
+	background: var(--bg);
 }
 
 /* ——— buttons ——— */
@@ -781,6 +781,7 @@ input.ui-command-input:focus-visible {
 .platform-darwin .surface-header,
 .platform-darwin .operation-page-header,
 .platform-darwin .capability-page-header,
+.platform-darwin .settings-header,
 .platform-darwin .task-page-header,
 .platform-darwin .git-surface-header {
 	-webkit-app-region: drag;
@@ -788,6 +789,7 @@ input.ui-command-input:focus-visible {
 .platform-darwin .surface-header *,
 .platform-darwin .operation-page-header *,
 .platform-darwin .capability-page-header *,
+.platform-darwin .settings-header *,
 .platform-darwin .task-page-header *,
 .platform-darwin .git-surface-header * {
 	-webkit-app-region: no-drag;
@@ -798,6 +800,7 @@ input.ui-command-input:focus-visible {
 .platform-darwin .reference-workspace.left-collapsed .surface-header,
 .platform-darwin .reference-workspace.left-collapsed .operation-page-header,
 .platform-darwin .reference-workspace.left-collapsed .capability-page-header,
+.platform-darwin .reference-workspace.left-collapsed .settings-header,
 .platform-darwin .reference-workspace.left-collapsed .task-page-header,
 .platform-darwin .reference-workspace.left-collapsed .git-surface-header {
 	padding-left: 82px;

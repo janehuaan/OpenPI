@@ -28,7 +28,7 @@ const repo = resolve(desktop, "../..");
 const runtime = join(desktop, "runtime");
 
 /** Extensions to ship, by workspace directory name. */
-const EXTENSIONS = ["memory", "session-state"];
+const EXTENSIONS = ["memory", "session-state", "sentinel"];
 
 /**
  * pi is loaded at runtime, not bundled: it resolves its own assets (themes,
@@ -70,6 +70,10 @@ log(`openpi-daemon  ${size(join(runtime, "openpi-daemon"))}`);
 // set of the agent types and typebox validators.
 const externals = [
 	"@earendil-works/pi-coding-agent",
+	"onnxruntime-node",
+	"tokenizers",
+	"@xenova/transformers",
+	"sharp",
 ];
 
 mkdirSync(join(runtime, "extensions"), { recursive: true });
@@ -124,10 +128,48 @@ function copyPi() {
 
 	// jiti is how pi loads an extension file; without it every extension fails
 	// with "Cannot find module 'jiti'", bundled or not.
-	const jitiFrom = join(from, "node_modules/jiti");
+	const candidateJitiPaths = [
+		join(from, "node_modules/jiti"),
+		join(repo, "node_modules/jiti"),
+	];
+	const pnpmDir = join(repo, "node_modules/.pnpm");
+	if (existsSync(pnpmDir)) {
+		try {
+			for (const entry of readdirSync(pnpmDir)) {
+				if (entry.startsWith("jiti@")) {
+					candidateJitiPaths.push(join(pnpmDir, entry, "node_modules/jiti"));
+				}
+			}
+		} catch {}
+	}
+	candidateJitiPaths.push("/Applications/OpenPI.app/Contents/Resources/openpi/node_modules/jiti");
+
+	const jitiFrom = candidateJitiPaths.find((p) => existsSync(p));
+	if (!jitiFrom) throw new Error("jiti not found beside pi-coding-agent or in node_modules");
 	const jitiTo = join(runtime, "node_modules/jiti");
-	if (!existsSync(jitiFrom)) throw new Error("jiti not found beside pi-coding-agent");
 	cpSync(jitiFrom, jitiTo, { recursive: true });
+
+	const neededDeps = [
+		"@earendil-works/chord",
+		"@earendil-works/pi-agent-core",
+		"@earendil-works/pi-ai",
+		"@earendil-works/pi-telemetry",
+		"cross-spawn",
+		"diff",
+		"ignore",
+		"minimatch",
+		"semver",
+		"typebox",
+		"yaml",
+	];
+	for (const dep of neededDeps) {
+		const depFrom = join(repo, "node_modules", dep);
+		if (existsSync(depFrom)) {
+			const depTo = join(runtime, "node_modules", dep);
+			mkdirSync(dirname(depTo), { recursive: true });
+			cpSync(depFrom, depTo, { recursive: true });
+		}
+	}
 }
 copyPi();
 log(`node_modules   ${size(join(runtime, "node_modules"))}`);

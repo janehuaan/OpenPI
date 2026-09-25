@@ -112,10 +112,11 @@ export const MessageItem = memo(function MessageItem({
 	// toolResult must use the same avatar+stack grid as assistant messages,
 	// otherwise summary rows are wider and misaligned with assistant text.
 	if (message.role === "toolResult") {
+		const isSubagent = calls.some((c) => c.name === "subagent" || c.name === "subagent_status" || c.name === "subagent_stop");
 		return (
 			<article className="message tool-result">
-				<div className="message-avatar tool-avatar">
-					<Wrench size={14} />
+				<div className={`message-avatar tool-avatar ${isSubagent ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" : ""}`}>
+					{isSubagent ? <Bot size={14} className="text-sky-400" /> : <Wrench size={14} />}
 				</div>
 				<div className="message-stack">
 					<div className="message-body">
@@ -124,13 +125,13 @@ export const MessageItem = memo(function MessageItem({
 							const foldedMatch = detailText.match(/~([0-9]+)\s+tokens\s+saved/);
 							const isAssertionBlocked = detailText.includes("[Assertion Gate]");
 							const isRollbackTriggered = detailText.includes("[Physical Rollback]");
-							const isSubagent = call.name === "subagent";
+							const isCallSubagent = call.name === "subagent";
 
 							return (
 								<details className={`tool-trace ${message.isError ? "error" : ""}`} key={`${call.name}-${index}`}>
 									<summary>
 										<span className="flex items-center gap-1.5">
-											<Wrench size={14} />
+											{isCallSubagent ? <Bot size={14} className="text-sky-400" /> : <Wrench size={14} />}
 											{call.name}
 											{foldedMatch && (
 												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="输出已脱水提纯，防止上下文溢出">
@@ -147,7 +148,7 @@ export const MessageItem = memo(function MessageItem({
 													⚓ 自动物理回滚
 												</span>
 											)}
-											{isSubagent && (
+											{isCallSubagent && (
 												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-sky-500/15 text-sky-400 border border-sky-500/20">
 													🤖 独立子任务
 												</span>

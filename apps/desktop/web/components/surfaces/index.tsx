@@ -29,7 +29,7 @@ export { TasksSurface } from "./panels/tasks-surface";
 export { GitSurface } from "./panels/git-surface";
 
 // HUD
-export { FloatingHud } from "./hud/floating-hud";
+
 
 // Workspace
 export { ReferenceWorkspacePreview } from "./workspace/workspace-preview";

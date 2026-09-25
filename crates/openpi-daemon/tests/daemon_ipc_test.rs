@@ -171,6 +171,100 @@ async fn test_daemon_full_lifecycle() {
     assert_eq!(memories.len(), 1);
     assert_eq!(memories[0]["value"], "pure-rust");
 
+    // 6. Test extract_document
+    let sample_text = "Hello OpenPI Extracted Content";
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, sample_text.as_bytes());
+    let doc_req = serde_json::json!({
+        "id": "req-doc1",
+        "type": "app",
+        "op": {
+            "name": "extract_document",
+            "fileName": "sample.txt",
+            "dataBase64": b64
+        }
+    });
+    writer.write_all(format!("{}\n", doc_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse extract_document response");
+    assert_eq!(resp["id"], "req-doc1");
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["text"], sample_text);
+
+    // 7. Test save_memory_handbook and get_memory_hub
+    let hb_req = serde_json::json!({
+        "id": "req-hb1",
+        "type": "app",
+        "op": {
+            "name": "save_memory_handbook",
+            "content": "# Test Handbook\nRule 1: Always verify."
+        }
+    });
+    writer.write_all(format!("{}\n", hb_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse save_memory_handbook response");
+    assert_eq!(resp["ok"], true);
+
+    let hub_req = serde_json::json!({
+        "id": "req-hub1",
+        "type": "app",
+        "op": {
+            "name": "get_memory_hub"
+        }
+    });
+    writer.write_all(format!("{}\n", hub_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse get_memory_hub response");
+    assert_eq!(resp["ok"], true);
+    assert!(resp["data"]["handbook"].as_str().unwrap().contains("Rule 1: Always verify."));
+
+    // 8. Test memory archive on delete and restore
+    let del_req = serde_json::json!({
+        "id": "req-del1",
+        "type": "app",
+        "op": {
+            "name": "delete_memory",
+            "cwd": "/tmp",
+            "scope": "project",
+            "type": "architecture",
+            "key": "backend"
+        }
+    });
+    writer.write_all(format!("{}\n", del_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse delete_memory response");
+    assert_eq!(resp["ok"], true);
+
+    let list_archive_req = serde_json::json!({
+        "id": "req-arc1",
+        "type": "app",
+        "op": {
+            "name": "list_archived_memory",
+            "scope": "project"
+        }
+    });
+    writer.write_all(format!("{}\n", list_archive_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let resp: serde_json::Value = serde_json::from_str(&line).expect("parse list_archived_memory response");
+    assert_eq!(resp["ok"], true);
+    let archives = resp["data"].as_array().unwrap();
+    assert_eq!(archives.len(), 1);
+    assert_eq!(archives[0]["key"], "backend");
+
     // Clean up
     daemon_handle.abort();
     let _ = std::fs::remove_file(sock_path);

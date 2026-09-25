@@ -36,6 +36,7 @@ export interface ComposerStatusDockProps {
 	 * Extensible slot for developing new custom data widgets below the input box.
 	 */
 	extraDataSlot?: React.ReactNode;
+	showGit?: boolean;
 	className?: string;
 }
 
@@ -47,6 +48,7 @@ export function ComposerStatusDock({
 	tokenStats,
 	onOpenContextPanel,
 	extraDataSlot,
+	showGit = true,
 	className = "",
 }: ComposerStatusDockProps) {
 	const isRepo = gitStatus?.isRepo ?? false;
@@ -155,7 +157,7 @@ export function ComposerStatusDock({
 							</button>
 						)}
 					</div>
-				) : (
+				) : showGit ? (
 					<div className="dock-git-group non-repo">
 						<button
 							type="button"
@@ -167,7 +169,7 @@ export function ComposerStatusDock({
 							<span>未检测到 Git 仓库</span>
 						</button>
 					</div>
-				)}
+				) : null}
 			</div>
 
 			{/* Right: Real-time Token Statistics & Extensible Data Slot */}

@@ -39,7 +39,7 @@ export function IntelligenceSurface({
 	const workspaceLabel = workspace ? shortWorkspacePath(workspace) : "未选择工作区";
 	return (
 		<section className="operations-surface">
-			<header className="surface-header operation-page-header">
+			<header className="surface-header operation-page-header" data-tauri-drag-region>
 				{onClose ? (
 					<button
 						type="button"

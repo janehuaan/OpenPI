@@ -55,6 +55,7 @@ export type ClientRequest =
 	| { id: string; type: "stop_session"; sessionId: string }
 	| { id: string; type: "delete_session"; sessionId: string }
 	| { id: string; type: "rename_session"; sessionId: string; name: string }
+	| { id: string; type: "update_session_workspace"; sessionId: string; cwd: string }
 	| { id: string; type: "subscribe"; sessionId: string }
 	| { id: string; type: "unsubscribe"; sessionId: string }
 	/** Forwarded verbatim to the session's pi subprocess. */
@@ -358,4 +359,4 @@ export function decodeLines(
 export * from "./diff.ts";
 export * from "./symbols.ts";
 export * from "./autopilot.ts";
-
+export * from "./decider/index.ts";

@@ -234,7 +234,7 @@ export function MemorySurface({
 
 	return (
 		<section className="operation-panel-page">
-			<header className="operation-page-header">
+			<header className="operation-page-header" data-tauri-drag-region>
 				{onClose && (
 					<button
 						type="button"

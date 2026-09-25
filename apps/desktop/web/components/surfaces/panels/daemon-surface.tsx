@@ -43,7 +43,7 @@ export function DaemonSurface({
 	const healthMissing = snapshot.daemonRunning && !snapshot.health?.version && !snapshot.health?.uptimeMs;
 	return (
 		<section className="operations-surface">
-			<header className="surface-header operation-page-header">
+			<header className="surface-header operation-page-header" data-tauri-drag-region>
 				{onClose ? (
 					<button
 						type="button"

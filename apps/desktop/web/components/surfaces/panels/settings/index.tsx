@@ -25,6 +25,9 @@ export interface SettingsSurfaceProps {
 	onConfigureMcp?: () => void;
 	onInstallPackage?: (marketPackage: MarketplacePackage) => void;
 	onRemoveMcp?: (source: string, local: boolean) => void;
+	onRemovePackage?: (source: string) => void;
+	onInstallSkill?: (skill: MarketplacePackage) => void;
+	onRemoveSkill?: (id: string) => void;
 }
 
 export const SettingsSurface: FC<SettingsSurfaceProps> = ({
@@ -39,12 +42,15 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 	onConfigureMcp = () => {},
 	onInstallPackage = () => {},
 	onRemoveMcp = () => {},
+	onRemovePackage = () => {},
+	onInstallSkill,
+	onRemoveSkill,
 }) => {
 	const [tab, setTab] = useState<SettingsTabId>(initialTab);
 	const [refreshing, setRefreshing] = useState(false);
 	const [providerCount, setProviderCount] = useState(0);
 
-	const instanceId = conversation?.instance.id;
+	const instanceId = conversation?.instance?.id;
 
 	const loadMeta = async () => {
 		try {
@@ -68,27 +74,27 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 		}
 	};
 
-	const safeCaps: ConversationCapabilities = capabilities ?? {
-		skills: [],
-		tools: [],
-		extensions: [],
-		packages: [],
-		diagnostics: [],
+	const safeCaps: ConversationCapabilities = {
+		skills: capabilities?.skills ?? [],
+		tools: capabilities?.tools ?? [],
+		extensions: capabilities?.extensions ?? [],
+		packages: capabilities?.packages ?? [],
+		diagnostics: capabilities?.diagnostics ?? [],
 		mcp: {
-			configured: false,
-			loaded: false,
-			packageSources: [],
-			extensionPaths: [],
-			commands: [],
-			tools: [],
-			servers: [],
+			configured: Boolean(capabilities?.mcp?.configured),
+			loaded: Boolean(capabilities?.mcp?.loaded),
+			packageSources: capabilities?.mcp?.packageSources ?? [],
+			extensionPaths: capabilities?.mcp?.extensionPaths ?? [],
+			commands: capabilities?.mcp?.commands ?? [],
+			tools: capabilities?.mcp?.tools ?? [],
+			servers: capabilities?.mcp?.servers ?? [],
 		},
 	};
 
 	return (
 		<div className="settings-redesign-shell">
 			{/* Top Header */}
-			<header className="settings-header">
+			<header className="settings-header" data-tauri-drag-region>
 				<div className="settings-header-left">
 					<button
 						type="button"
@@ -141,6 +147,9 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 							onConfigureMcp={onConfigureMcp}
 							onInstallPackage={onInstallPackage}
 							onRemoveMcp={onRemoveMcp}
+							onRemovePackage={onRemovePackage}
+							onInstallSkill={onInstallSkill}
+							onRemoveSkill={onRemoveSkill}
 						/>
 					)}
 					{tab === "about" && <AboutTab capabilities={capabilities} />}

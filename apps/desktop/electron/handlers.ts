@@ -5,7 +5,7 @@
  * delegating to `@openpi/daemon` and `@openpi/scheduler`.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { execFile } from "node:child_process";
@@ -30,6 +30,7 @@ import {
 	type UserProfile,
 	WorkspaceSymbolIndexer,
 	type SymbolKind,
+	OpenPIDecider,
 } from "@openpi/shared";
 import { agentDir, defaultWorkspace, sessionsDir } from "./daemon-client.ts";
 import { eventChannelName, invokeChannelName, type EventChannel, type InvokeChannel } from "./channels.ts";
@@ -707,6 +708,66 @@ async function getConversationCapabilitiesHelper(instanceId?: string) {
 			},
 		}));
 
+	if (skills.length === 0) {
+		try {
+			const hubRes = (await client.request({ type: "app", op: { name: "get_memory_hub" } })) as any;
+			if (Array.isArray(hubRes?.skills)) {
+				for (const s of hubRes.skills) {
+					skills.push({
+						name: s.name,
+						description: s.description || "",
+						filePath: s.filePath || "",
+						disableModelInvocation: false,
+						sourceInfo: {
+							path: s.filePath || "",
+							source: s.name,
+							scope: "user",
+							origin: "top-level",
+						},
+					});
+				}
+			}
+		} catch {}
+	}
+
+	// Direct scan of local ~/.openpi/agent/skills
+	try {
+		const localSkillsDir = join(agentDir(), "skills");
+		if (existsSync(localSkillsDir)) {
+			const entries = readdirSync(localSkillsDir, { withFileTypes: true });
+			for (const entry of entries) {
+				if (entry.isDirectory()) {
+					const skillFile = join(localSkillsDir, entry.name, "SKILL.md");
+					if (existsSync(skillFile)) {
+						const skillName = entry.name;
+						if (!skills.some((s: any) => s.name === skillName)) {
+							const content = readFileSync(skillFile, "utf8");
+							let desc = "";
+							for (const line of content.split("\n").slice(0, 20)) {
+								if (line.startsWith("description:")) {
+									desc = line.replace(/^description:/, "").trim().replace(/^["']|["']$/g, "");
+									break;
+								}
+							}
+							skills.push({
+								name: skillName,
+								description: desc || "扩展技能",
+								filePath: skillFile,
+								disableModelInvocation: false,
+								sourceInfo: {
+									path: skillFile,
+									source: skillName,
+									scope: "user",
+									origin: "top-level",
+								},
+							});
+						}
+					}
+				}
+			}
+		}
+	} catch {}
+
 	const extensions = entries
 		.filter((e: any) => e.kind === "extension")
 		.map((e: any) => ({
@@ -729,6 +790,10 @@ async function getConversationCapabilitiesHelper(instanceId?: string) {
 		{ name: "grep", description: "搜索内容", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
 		{ name: "find", description: "查找文件", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
 		{ name: "ls", description: "列出目录", active: true, sourceInfo: { path: "builtin", source: "builtin", scope: "user", origin: "top-level" } },
+		{ name: "subagent", description: "调度独立子代理执行隔离任务", active: true, sourceInfo: { path: "extension", source: "pi-subagents", scope: "user", origin: "top-level" } },
+		{ name: "subagent_status", description: "检查子代理后台运行状态", active: true, sourceInfo: { path: "extension", source: "pi-subagents", scope: "user", origin: "top-level" } },
+		{ name: "mcp", description: "Model Context Protocol 网关代理", active: true, sourceInfo: { path: "extension", source: "pi-mcp-adapter", scope: "user", origin: "top-level" } },
+		{ name: "mcpScript", description: "批量链式调用 MCP 脚本", active: true, sourceInfo: { path: "extension", source: "pi-mcp-adapter", scope: "user", origin: "top-level" } },
 		{ name: "task", description: "任务状态追踪", active: true, sourceInfo: { path: "extension", source: "session-state", scope: "user", origin: "top-level" } },
 		{ name: "memory", description: "长期记忆管理", active: true, sourceInfo: { path: "extension", source: "memory", scope: "user", origin: "top-level" } },
 		{ name: "web_search", description: "网络搜索", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
@@ -741,6 +806,29 @@ async function getConversationCapabilitiesHelper(instanceId?: string) {
 		{ name: "github", description: "GitHub 操作与检查", active: true, sourceInfo: { path: "extension", source: "tools", scope: "user", origin: "top-level" } },
 	];
 
+	const hasMcpAdapter = packages.some((p: any) => p.source && p.source.includes("pi-mcp-adapter"));
+	const mcpServers: any[] = [];
+	const mcpCandidates = [
+		join(homedir(), ".openpi/agent/mcp.json"),
+		join(homedir(), ".config/mcp/mcp.json"),
+		join(process.cwd(), ".mcp.json"),
+	];
+	for (const p of mcpCandidates) {
+		if (existsSync(p)) {
+			try {
+				const raw = JSON.parse(readFileSync(p, "utf-8"));
+				const srvMap = raw.mcpServers || raw.servers || {};
+				for (const [sName, sCfg] of Object.entries(srvMap)) {
+					mcpServers.push({
+						name: sName,
+						config: sCfg,
+						sourcePath: p,
+					});
+				}
+			} catch {}
+		}
+	}
+
 	return {
 		skills,
 		extensions,
@@ -748,13 +836,13 @@ async function getConversationCapabilitiesHelper(instanceId?: string) {
 		packages,
 		diagnostics: [],
 		mcp: {
-			configured: false,
-			loaded: false,
-			packageSources: [],
+			configured: hasMcpAdapter,
+			loaded: hasMcpAdapter,
+			packageSources: hasMcpAdapter ? ["npm:pi-mcp-adapter@2.21.0"] : [],
 			extensionPaths: [],
-			commands: [],
-			tools: [],
-			servers: [],
+			commands: hasMcpAdapter ? ["/mcp", "/mcp setup"] : [],
+			tools: hasMcpAdapter ? ["mcp", "mcpScript"] : [],
+			servers: mcpServers,
 		},
 	};
 }
@@ -1015,7 +1103,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				id: s.sessionId,
 				status: s.running ? "online" : "stopped",
 				mode: s.mode === "code" ? "code" : "work",
-				cwd: s.cwd,
+				cwd: s.cwd === defaultWorkspace() && s.mode !== "code" ? undefined : s.cwd,
 				label: s.name,
 				sessionId: s.sessionId,
 				sessionFile: join(sessionsDir(), `${s.sessionId}.jsonl`),
@@ -1078,7 +1166,16 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 		create_conversation: async ({ label, cwd, mode, model, inMemory }: any = {}) => {
 			const client = await getClient();
 			const settings = readSettingsJson();
-			const effectiveMode = mode || settings.defaultMode || "chat";
+			let effectiveMode = mode;
+			if (!effectiveMode && label) {
+				const hasWorkspace = Boolean(cwd && existsSync(join(cwd, ".git")));
+				const routed = await OpenPIDecider.decideModeAsync(label, { cwd, hasWorkspace });
+				effectiveMode = routed.mode;
+				console.info(`[electron] Auto-routed conversation "${label.slice(0, 30)}" to ${effectiveMode} mode (${routed.reason})`);
+			}
+			if (!effectiveMode) {
+				effectiveMode = settings.defaultMode || "chat";
+			}
 			const effectiveModel =
 				model ||
 				(settings.defaultProvider && settings.defaultModel
@@ -1086,7 +1183,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 					: settings.defaultModel);
 			const session = (await client.request({
 				type: "create_session",
-				cwd: cwd || defaultWorkspace(),
+				cwd: cwd || (effectiveMode === "code" ? defaultWorkspace() : agentDir()),
 				mode: effectiveMode === "code" ? ("code" as SessionMode) : ("chat" as SessionMode),
 				name: label,
 				model: effectiveModel,
@@ -1122,7 +1219,7 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 				id: session.sessionId,
 				status: "online",
 				mode: session.mode === "code" ? "code" : "work",
-				cwd: session.cwd,
+				cwd: cwd ? session.cwd : (session.mode === "code" ? session.cwd : undefined),
 				label: session.name,
 				sessionId: session.sessionId,
 				createdAt: session.createdAt,
@@ -1221,7 +1318,9 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 					id: instanceId,
 					status: found?.running ? "online" : "stopped",
 					mode: found?.mode === "code" ? "code" : "work",
-					cwd: found?.cwd ?? defaultWorkspace(),
+					cwd: (found?.cwd === defaultWorkspace() && found?.mode !== "code")
+						? undefined
+						: (found?.cwd ?? (found?.mode === "code" ? defaultWorkspace() : undefined)),
 					label: found?.name ?? state?.sessionName,
 					sessionId: instanceId,
 					createdAt: found?.createdAt ?? new Date().toISOString(),
@@ -1548,6 +1647,18 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			};
 		},
 
+		set_conversation_workspace: async ({ instanceId, cwd }: { instanceId: string; cwd?: string }) => {
+			const client = await getClient();
+			const targetCwd = cwd || defaultWorkspace();
+			await client.request({
+				type: "update_session_workspace",
+				sessionId: instanceId,
+				cwd: targetCwd,
+			});
+			invalidateCachedSessionsList();
+			return { ok: true, cwd: cwd ? targetCwd : "" };
+		},
+
 		delete_conversation: async ({ instanceId }: { instanceId: string }) => {
 			invalidateCachedSessionsList();
 			sessionFileCache.delete(instanceId);
@@ -1667,6 +1778,28 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 
 		remove_conversation_package: async ({ source, instanceId }: any) => {
 			await app({ name: "remove_package", source });
+			return getConversationCapabilitiesHelper(instanceId);
+		},
+
+		install_skill: async ({ id, name, description, content, instanceId }: any) => {
+			const targetDir = join(agentDir(), "skills", id);
+			if (!existsSync(targetDir)) {
+				mkdirSync(targetDir, { recursive: true });
+			}
+			const skillFile = join(targetDir, "SKILL.md");
+			const formattedContent =
+				content && content.trim().startsWith("---")
+					? content
+					: `---\nname: ${id}\ndescription: "${(description || name || "").replace(/"/g, '\\"')}"\n---\n\n${content || `# ${name}\n\n${description}`}`;
+			writeFileSync(skillFile, formattedContent, "utf8");
+			return getConversationCapabilitiesHelper(instanceId);
+		},
+
+		remove_skill: async ({ id, instanceId }: any) => {
+			const targetDir = join(agentDir(), "skills", id);
+			if (existsSync(targetDir)) {
+				rmSync(targetDir, { recursive: true, force: true });
+			}
 			return getConversationCapabilitiesHelper(instanceId);
 		},
 
@@ -2316,8 +2449,6 @@ export function registerHandlers(ipcMain: IpcMain, getWindow: () => BrowserWindo
 			writeSettingsJson(settings);
 			return zhipuVisionConfig();
 		},
-		get_auto_start_milvus: async () => false,
-		set_auto_start_milvus: async () => false,
 
 		// ── Media ──────────────────────────────────────────────────────────
 		get_media_capabilities: async () => app({ name: "media_capabilities" }),

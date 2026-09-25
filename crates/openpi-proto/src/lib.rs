@@ -65,6 +65,7 @@ pub enum ClientRequest {
     StopSession { id: String, session_id: String },
     DeleteSession { id: String, session_id: String },
     RenameSession { id: String, session_id: String, name: String },
+    UpdateSessionWorkspace { id: String, session_id: String, cwd: String },
     Subscribe { id: String, session_id: String },
     Unsubscribe { id: String, session_id: String },
     Rpc {
@@ -88,6 +89,7 @@ impl ClientRequest {
             ClientRequest::StopSession { id, .. } => id,
             ClientRequest::DeleteSession { id, .. } => id,
             ClientRequest::RenameSession { id, .. } => id,
+            ClientRequest::UpdateSessionWorkspace { id, .. } => id,
             ClientRequest::Subscribe { id, .. } => id,
             ClientRequest::Unsubscribe { id, .. } => id,
             ClientRequest::Rpc { id, .. } => id,
@@ -108,16 +110,12 @@ pub enum ServerMessage {
 pub enum ServerResponse {
     Ok {
         id: String,
-        #[serde(rename = "type")]
-        response_type: String, // "response"
-        ok: bool, // true
+        ok: bool,
         data: Value,
     },
     Err {
         id: String,
-        #[serde(rename = "type")]
-        response_type: String, // "response"
-        ok: bool, // false
+        ok: bool,
         error: String,
     },
 }
@@ -125,8 +123,6 @@ pub enum ServerResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerEvent {
-    #[serde(rename = "type")]
-    pub event_type: String, // "event"
     pub session_id: String,
     pub event: Value,
 }
@@ -135,7 +131,6 @@ impl ServerMessage {
     pub fn ok(id: impl Into<String>, data: Value) -> Self {
         ServerMessage::Response(ServerResponse::Ok {
             id: id.into(),
-            response_type: "response".to_string(),
             ok: true,
             data,
         })
@@ -144,7 +139,6 @@ impl ServerMessage {
     pub fn err(id: impl Into<String>, error: impl Into<String>) -> Self {
         ServerMessage::Response(ServerResponse::Err {
             id: id.into(),
-            response_type: "response".to_string(),
             ok: false,
             error: error.into(),
         })
@@ -152,7 +146,6 @@ impl ServerMessage {
 
     pub fn event(session_id: impl Into<String>, event: Value) -> Self {
         ServerMessage::Event(ServerEvent {
-            event_type: "event".to_string(),
             session_id: session_id.into(),
             event,
         })
@@ -199,5 +192,9 @@ mod tests {
         let event_line = event.to_json_line().unwrap();
         assert!(event_line.contains(r#""sessionId":"s1""#));
         assert!(event_line.contains(r#""type":"event""#));
+
+        let parsed: Result<ServerMessage, _> = serde_json::from_str(line.trim());
+        println!("PARSED_RESULT: {:?}", parsed);
+        assert!(parsed.is_ok(), "Failed to parse ServerMessage: {:?}", parsed.err());
     }
 }

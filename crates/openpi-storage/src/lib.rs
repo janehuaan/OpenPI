@@ -282,6 +282,67 @@ impl Storage {
         Ok(runs)
     }
 
+    pub fn cancel_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE task_runs SET status = 'cancelled', finished_at = ?1, error = 'Cancelled by user' WHERE id = ?2",
+            rusqlite::params![now, run_id],
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT id, task_id, status, trigger, created_at, started_at, finished_at, exit_code, result, error, attempt
+             FROM task_runs WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![run_id], |row| {
+            Ok(TaskRunRecord {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                status: row.get(2)?,
+                trigger: row.get(3)?,
+                created_at: row.get(4)?,
+                started_at: row.get(5)?,
+                finished_at: row.get(6)?,
+                exit_code: row.get(7)?,
+                result: row.get(8)?,
+                error: row.get(9)?,
+                attempt: row.get(10)?,
+            })
+        })?;
+        if let Some(r) = rows.next() {
+            Ok(Some(r?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_run(&self, run_id: &str) -> anyhow::Result<Option<TaskRunRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, task_id, status, trigger, created_at, started_at, finished_at, exit_code, result, error, attempt
+             FROM task_runs WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(rusqlite::params![run_id], |row| {
+            Ok(TaskRunRecord {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                status: row.get(2)?,
+                trigger: row.get(3)?,
+                created_at: row.get(4)?,
+                started_at: row.get(5)?,
+                finished_at: row.get(6)?,
+                exit_code: row.get(7)?,
+                result: row.get(8)?,
+                error: row.get(9)?,
+                attempt: row.get(10)?,
+            })
+        })?;
+        if let Some(r) = rows.next() {
+            Ok(Some(r?))
+        } else {
+            Ok(None)
+        }
+    }
+
     // --- Memory Operations ---
     pub fn upsert_memory(&self, rec: &MemoryRecord) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
