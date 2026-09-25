@@ -81,6 +81,161 @@ pub fn load_agent_and_app_settings() -> (Value, Option<String>, Option<String>) 
     (merged, def_model, def_provider)
 }
 
+async fn execute_model_capability_probe(
+    base_url: &str,
+    api_key: &str,
+    model_id: &str,
+) -> (bool, u64, bool, bool, u64, u64, Option<String>) {
+    let mid_lower = model_id.to_lowercase();
+    let name_has_vision = mid_lower.contains("vision") || mid_lower.contains("vl") || mid_lower.contains("image")
+        || mid_lower.contains("gemini") || mid_lower.contains("claude") || mid_lower.contains("gpt-4") || mid_lower.contains("gpt-5")
+        || mid_lower.contains("mimo") || mid_lower.contains("agnes");
+    let name_has_reasoning = mid_lower.contains("thinking") || mid_lower.contains("r1") || mid_lower.contains("reason")
+        || mid_lower.contains("o1") || mid_lower.contains("o3") || mid_lower.contains("high");
+
+    let ctx = if mid_lower.contains("gemini") || mid_lower.contains("mimo") || mid_lower.contains("agnes") {
+        1000000
+    } else if mid_lower.contains("kimi") || mid_lower.contains("sensenova") {
+        262144
+    } else if mid_lower.contains("claude") {
+        200000
+    } else if mid_lower.contains("deepseek") || mid_lower.contains("qwen") || mid_lower.contains("glm") || mid_lower.contains("minimax") || mid_lower.contains("seed") {
+        131072
+    } else {
+        128000
+    };
+    let max_tok = if ctx >= 1000000 { 65536 } else if ctx >= 200000 { 16384 } else { 8192 };
+
+    if base_url.trim().is_empty() {
+        return (false, 0, name_has_vision, name_has_reasoning, ctx, max_tok, Some("服务商未配置 Base URL".to_string()));
+    }
+
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    // Test 1: Vision probe with minimal 1x1 png image
+    let payload_vis = serde_json::json!({
+        "model": model_id,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "1+1=?" },
+                    { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" } }
+                ]
+            }
+        ],
+        "max_tokens": 10
+    });
+
+    let mut cmd1 = Command::new("curl");
+    cmd1.arg("-s")
+        .arg("-m")
+        .arg("8")
+        .arg("-w")
+        .arg("\n%{http_code}\n%{time_total}")
+        .arg("-H")
+        .arg("Content-Type: application/json");
+    if !api_key.is_empty() {
+        cmd1.arg("-H").arg(format!("Authorization: Bearer {}", api_key));
+    }
+    cmd1.arg("-d").arg(serde_json::to_string(&payload_vis).unwrap_or_default());
+    cmd1.arg(&endpoint);
+
+    if let Ok(out) = cmd1.output() {
+        let full_str = String::from_utf8_lossy(&out.stdout).to_string();
+        let lines: Vec<&str> = full_str.trim_end().rsplitn(3, '\n').collect();
+        let (status, time_sec, body) = if lines.len() >= 2 {
+            let time = lines[0].parse::<f64>().unwrap_or(0.0);
+            let st = lines[1].parse::<u16>().unwrap_or(0);
+            let b = if lines.len() >= 3 { lines[2] } else { "" };
+            (st, time, b)
+        } else {
+            (0, 0.0, "")
+        };
+
+        if status >= 200 && status < 300 {
+            let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
+            let mut is_reasoning = name_has_reasoning;
+            if let Ok(v) = serde_json::from_str::<Value>(body) {
+                if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
+                    if let Some(msg) = choices.first().and_then(|c| c.get("message")) {
+                        if let Some(rc) = msg.get("reasoning_content").and_then(|r| r.as_str()) {
+                            if !rc.is_empty() { is_reasoning = true; }
+                        }
+                    }
+                }
+            }
+            return (true, latency_ms, true, is_reasoning, ctx, max_tok, None);
+        }
+    }
+
+    // Test 2: Pure text probe
+    let payload_txt = serde_json::json!({
+        "model": model_id,
+        "messages": [
+            { "role": "user", "content": "1+1=?" }
+        ],
+        "max_tokens": 10
+    });
+
+    let mut cmd2 = Command::new("curl");
+    cmd2.arg("-s")
+        .arg("-m")
+        .arg("8")
+        .arg("-w")
+        .arg("\n%{http_code}\n%{time_total}")
+        .arg("-H")
+        .arg("Content-Type: application/json");
+    if !api_key.is_empty() {
+        cmd2.arg("-H").arg(format!("Authorization: Bearer {}", api_key));
+    }
+    cmd2.arg("-d").arg(serde_json::to_string(&payload_txt).unwrap_or_default());
+    cmd2.arg(&endpoint);
+
+    if let Ok(out) = cmd2.output() {
+        let full_str = String::from_utf8_lossy(&out.stdout).to_string();
+        let lines: Vec<&str> = full_str.trim_end().rsplitn(3, '\n').collect();
+        let (status, time_sec, body) = if lines.len() >= 2 {
+            let time = lines[0].parse::<f64>().unwrap_or(0.0);
+            let st = lines[1].parse::<u16>().unwrap_or(0);
+            let b = if lines.len() >= 3 { lines[2] } else { "" };
+            (st, time, b)
+        } else {
+            (0, 0.0, "")
+        };
+
+        let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
+        if status >= 200 && status < 300 {
+            let mut is_reasoning = name_has_reasoning;
+            if let Ok(v) = serde_json::from_str::<Value>(body) {
+                if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
+                    if let Some(msg) = choices.first().and_then(|c| c.get("message")) {
+                        if let Some(rc) = msg.get("reasoning_content").and_then(|r| r.as_str()) {
+                            if !rc.is_empty() { is_reasoning = true; }
+                        }
+                    }
+                }
+            }
+            return (true, latency_ms, false, is_reasoning, ctx, max_tok, None);
+        } else {
+            let err_msg = if let Ok(v) = serde_json::from_str::<Value>(body) {
+                v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("API 请求失败").to_string()
+            } else if status == 401 {
+                "API Key 鉴权失败 (401)".to_string()
+            } else if status == 404 {
+                "模型不存在 (404)".to_string()
+            } else if status == 0 {
+                "网络请求超时".to_string()
+            } else {
+                format!("HTTP {}", status)
+            };
+            return (false, latency_ms, name_has_vision, name_has_reasoning, ctx, max_tok, Some(err_msg));
+        }
+    }
+
+    (false, 0, name_has_vision, name_has_reasoning, ctx, max_tok, Some("无法执行请求".to_string()))
+}
+
 pub async fn handle_invoke(
     app: AppHandle,
     client: DaemonClient,
@@ -2074,80 +2229,210 @@ pub async fn handle_invoke(
         }
 
         "probe_model_capabilities" => {
-            let model_id = args.get("modelId").and_then(|v| v.as_str()).unwrap_or("");
-            let mid_lower = model_id.to_lowercase();
-            let is_vision = mid_lower.contains("vision") || mid_lower.contains("vl") || mid_lower.contains("image") || mid_lower.contains("gemini") || mid_lower.contains("claude") || mid_lower.contains("gpt-4") || mid_lower.contains("gpt-5");
-            let is_reasoning = mid_lower.contains("thinking") || mid_lower.contains("r1") || mid_lower.contains("reasoner");
-            let ctx = if mid_lower.contains("gemini") || mid_lower.contains("deepseek") || mid_lower.contains("qwen") || mid_lower.contains("glm") || mid_lower.contains("minimax") {
-                1000000
-            } else if mid_lower.contains("kimi") || mid_lower.contains("sensenova") {
-                262144
-            } else if mid_lower.contains("claude") {
-                200000
-            } else {
-                128000
-            };
-            let max_tok = if ctx >= 1000000 { 65536 } else { 8192 };
-            let mut input = vec!["text".to_string()];
-            if is_vision {
-                input.push("image".to_string());
-            }
+            let model_id = args.get("modelId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut provider_id = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut base_url = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut api_key = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-            Ok(json!({
-                "modelId": model_id,
-                "ok": true,
-                "latencyMs": 42,
-                "contextWindow": ctx,
-                "maxTokens": max_tok,
-                "reasoning": is_reasoning,
-                "input": input,
-                "probedAt": chrono::Utc::now().timestamp_millis()
-            }))
-        }
-
-        "batch_probe_provider_models" => {
-            let provider_id = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("");
-            let mut results = Vec::new();
             let models_path = agent_dir().join("models.json");
-            if let Ok(content) = fs::read_to_string(&models_path) {
-                if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                    if let Some(p) = json.get("providers").and_then(|pr| pr.get(provider_id)) {
-                        if let Some(models) = p.get("models").and_then(|m| m.as_array()) {
-                            for m in models {
-                                let mid = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                                if mid.is_empty() { continue; }
-                                let mid_lower = mid.to_lowercase();
-                                let is_vision = mid_lower.contains("vision") || mid_lower.contains("vl") || mid_lower.contains("image") || mid_lower.contains("gemini") || mid_lower.contains("claude") || mid_lower.contains("gpt-4") || mid_lower.contains("gpt-5");
-                                let is_reasoning = mid_lower.contains("thinking") || mid_lower.contains("r1") || mid_lower.contains("reasoner");
-                                let ctx = if mid_lower.contains("gemini") || mid_lower.contains("deepseek") || mid_lower.contains("qwen") || mid_lower.contains("glm") || mid_lower.contains("minimax") {
-                                    1000000
-                                } else if mid_lower.contains("kimi") || mid_lower.contains("sensenova") {
-                                    262144
-                                } else if mid_lower.contains("claude") {
-                                    200000
-                                } else {
-                                    128000
-                                };
-                                let max_tok = if ctx >= 1000000 { 65536 } else { 8192 };
-                                let mut input = vec!["text".to_string()];
-                                if is_vision {
-                                    input.push("image".to_string());
+            if (base_url.is_empty() || api_key.is_empty() || provider_id.is_empty()) && models_path.exists() {
+                if let Ok(content) = fs::read_to_string(&models_path) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                            if !provider_id.is_empty() {
+                                if let Some(p) = providers.get(&provider_id) {
+                                    if base_url.is_empty() {
+                                        base_url = p.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    }
+                                    if api_key.is_empty() {
+                                        api_key = p.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    }
                                 }
-                                results.push(json!({
-                                    "modelId": mid,
-                                    "ok": true,
-                                    "latencyMs": 38,
-                                    "contextWindow": ctx,
-                                    "maxTokens": max_tok,
-                                    "reasoning": is_reasoning,
-                                    "input": input,
-                                    "probedAt": chrono::Utc::now().timestamp_millis()
-                                }));
+                            } else {
+                                for (p_key, p_val) in providers {
+                                    if let Some(models) = p_val.get("models").and_then(|m| m.as_array()) {
+                                        if models.iter().any(|m| m.get("id").and_then(|id| id.as_str()) == Some(&model_id)) {
+                                            provider_id = p_key.clone();
+                                            if base_url.is_empty() {
+                                                base_url = p_val.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            }
+                                            if api_key.is_empty() {
+                                                api_key = p_val.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+
+            let (ok, latency_ms, is_vision, is_reasoning, ctx, max_tok, err_opt) = execute_model_capability_probe(&base_url, &api_key, &model_id).await;
+            let mut input = vec!["text".to_string()];
+            if is_vision {
+                input.push("image".to_string());
+            }
+
+            // Persist the probed capability into models.json
+            if models_path.exists() && !provider_id.is_empty() {
+                if let Ok(content) = fs::read_to_string(&models_path) {
+                    if let Ok(mut root) = serde_json::from_str::<Value>(&content) {
+                        if let Some(providers) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
+                            if let Some(p) = providers.get_mut(&provider_id).and_then(|pr| pr.as_object_mut()) {
+                                if let Some(models) = p.get_mut("models").and_then(|m| m.as_array_mut()) {
+                                    for m in models {
+                                        if m.get("id").and_then(|v| v.as_str()) == Some(&model_id) {
+                                            if let Some(obj) = m.as_object_mut() {
+                                                obj.insert("input".to_string(), json!(input));
+                                                obj.insert("reasoning".to_string(), json!(is_reasoning));
+                                                obj.insert("contextWindow".to_string(), json!(ctx));
+                                                obj.insert("maxTokens".to_string(), json!(max_tok));
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(json!({
+                "modelId": model_id,
+                "ok": ok,
+                "latencyMs": latency_ms,
+                "contextWindow": ctx,
+                "maxTokens": max_tok,
+                "reasoning": is_reasoning,
+                "input": input,
+                "error": err_opt,
+                "probedAt": chrono::Utc::now().timestamp_millis(),
+                "details": {
+                    "visionSupport": is_vision,
+                    "detectedMaxTokens": max_tok,
+                    "detectedContext": ctx,
+                    "reasoningTokensDetected": is_reasoning
+                }
+            }))
+        }
+
+        "batch_probe_provider_models" => {
+            let provider_id = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("");
+            let specified_ids: Option<Vec<String>> = args.get("modelIds").and_then(|v| v.as_array()).map(|arr| {
+                arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()
+            });
+            let mut base_url = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut api_key = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            let models_path = agent_dir().join("models.json");
+            let mut model_ids_to_probe = Vec::new();
+
+            if models_path.exists() {
+                if let Ok(content) = fs::read_to_string(&models_path) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(p) = json.get("providers").and_then(|pr| pr.get(provider_id)) {
+                            if base_url.is_empty() {
+                                base_url = p.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            }
+                            if api_key.is_empty() {
+                                api_key = p.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            }
+                            if let Some(models) = p.get("models").and_then(|m| m.as_array()) {
+                                for m in models {
+                                    if let Some(mid) = m.get("id").and_then(|v| v.as_str()) {
+                                        if let Some(ref sids) = specified_ids {
+                                            if sids.iter().any(|s| s == mid) {
+                                                model_ids_to_probe.push(mid.to_string());
+                                            }
+                                        } else {
+                                            model_ids_to_probe.push(mid.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut results = Vec::new();
+            let mut probe_map: std::collections::HashMap<String, (bool, bool, u64, u64)> = std::collections::HashMap::new();
+
+            // Probe models concurrently in batches of 5
+            for chunk in model_ids_to_probe.chunks(5) {
+                let mut tasks = Vec::new();
+                for mid in chunk {
+                    let b = base_url.clone();
+                    let k = api_key.clone();
+                    let m = mid.clone();
+                    tasks.push(tokio::spawn(async move {
+                        let res = execute_model_capability_probe(&b, &k, &m).await;
+                        (m, res)
+                    }));
+                }
+                for t in tasks {
+                    if let Ok((mid, (ok, latency_ms, is_vision, is_reasoning, ctx, max_tok, err_opt))) = t.await {
+                        let mut input = vec!["text".to_string()];
+                        if is_vision {
+                            input.push("image".to_string());
+                        }
+                        probe_map.insert(mid.clone(), (is_vision, is_reasoning, ctx, max_tok));
+                        results.push(json!({
+                            "modelId": mid,
+                            "ok": ok,
+                            "latencyMs": latency_ms,
+                            "contextWindow": ctx,
+                            "maxTokens": max_tok,
+                            "reasoning": is_reasoning,
+                            "input": input,
+                            "error": err_opt,
+                            "probedAt": chrono::Utc::now().timestamp_millis(),
+                            "details": {
+                                "visionSupport": is_vision,
+                                "detectedMaxTokens": max_tok,
+                                "detectedContext": ctx,
+                                "reasoningTokensDetected": is_reasoning
+                            }
+                        }));
+                    }
+                }
+            }
+
+            // Persist all batch probe results to models.json
+            if models_path.exists() && !probe_map.is_empty() {
+                if let Ok(content) = fs::read_to_string(&models_path) {
+                    if let Ok(mut root) = serde_json::from_str::<Value>(&content) {
+                        if let Some(providers) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
+                            if let Some(p) = providers.get_mut(provider_id).and_then(|pr| pr.as_object_mut()) {
+                                if let Some(models) = p.get_mut("models").and_then(|m| m.as_array_mut()) {
+                                    for m in models {
+                                        if let Some(mid) = m.get("id").and_then(|v| v.as_str()) {
+                                            if let Some(&(is_vision, is_reasoning, ctx, max_tok)) = probe_map.get(mid) {
+                                                if let Some(obj) = m.as_object_mut() {
+                                                    let mut input = vec!["text".to_string()];
+                                                    if is_vision {
+                                                        input.push("image".to_string());
+                                                    }
+                                                    obj.insert("input".to_string(), json!(input));
+                                                    obj.insert("reasoning".to_string(), json!(is_reasoning));
+                                                    obj.insert("contextWindow".to_string(), json!(ctx));
+                                                    obj.insert("maxTokens".to_string(), json!(max_tok));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let count = results.len();
             Ok(json!({
                 "results": results,
