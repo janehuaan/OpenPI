@@ -19,5 +19,10 @@ APP_BUNDLE="$DIR/target/release/bundle/macos/OpenPI.app"
 echo "🔗 4. Embedding openpi-daemon into OpenPI.app/Contents/MacOS/..."
 cp "$DIR/target/release/openpi-daemon" "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
 
+# Embed upstream runtime into Resources
+echo "🔗 5. Embedding upstream pi runtime into OpenPI.app/Contents/Resources/openpi/..."
+mkdir -p "$APP_BUNDLE/Contents/Resources/openpi/node_modules"
+rsync -a --delete "$DIR/node_modules/@earendil-works/" "$APP_BUNDLE/Contents/Resources/openpi/node_modules/@earendil-works/"
+
 echo "🎉 OpenPI.app packaging complete at: $APP_BUNDLE"
 du -sh "$APP_BUNDLE"

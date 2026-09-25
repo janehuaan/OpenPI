@@ -380,6 +380,7 @@ pub async fn handle_invoke(
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
             let msg = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
             let images = args.get("images");
+            let streaming_behavior = args.get("streamingBehavior").and_then(|v| v.as_str());
 
             if !sid.is_empty() {
                 let _ = client.request(ClientRequest::Subscribe {
@@ -388,14 +389,19 @@ pub async fn handle_invoke(
                 }).await;
             }
 
+            let mut cmd = json!({
+                "type": "prompt",
+                "message": msg,
+                "images": images,
+            });
+            if let Some(sb) = streaming_behavior {
+                cmd["streamingBehavior"] = json!(sb);
+            }
+
             let res = client.request(ClientRequest::Rpc {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
-                command: json!({
-                    "type": "prompt",
-                    "message": msg,
-                    "images": images
-                }),
+                command: cmd,
             }).await;
 
             match res {
@@ -516,13 +522,58 @@ pub async fn handle_invoke(
 
         "respond_conversation_ui" => {
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
-            let resp = args.get("response").cloned().unwrap_or(json!({}));
+            let mut resp = args.get("response").cloned().unwrap_or(json!({}));
+            if let Some(obj) = resp.as_object_mut() {
+                obj.insert("type".to_string(), json!("extension_ui_response"));
+            }
             client.request(ClientRequest::Rpc {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
-                command: json!({ "type": "respond_ui", "response": resp }),
+                command: resp,
             }).await?;
             Ok(json!(true))
+        }
+
+        "fork_conversation" => {
+            let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
+            let entry_id = args.get("entryId").and_then(|v| v.as_str()).unwrap_or("");
+            let res = client.request(ClientRequest::Rpc {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_string(),
+                command: json!({ "type": "fork", "entryId": entry_id }),
+            }).await?;
+            Ok(res)
+        }
+
+        "clone_conversation" => {
+            let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
+            let res = client.request(ClientRequest::Rpc {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_string(),
+                command: json!({ "type": "clone" }),
+            }).await?;
+            Ok(res)
+        }
+
+        "get_conversation_tree" => {
+            let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
+            let res = client.request(ClientRequest::Rpc {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_string(),
+                command: json!({ "type": "get_tree" }),
+            }).await?;
+            Ok(res)
+        }
+
+        "export_conversation_html" => {
+            let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
+            let output_path = args.get("outputPath").and_then(|v| v.as_str());
+            let res = client.request(ClientRequest::Rpc {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_string(),
+                command: json!({ "type": "export_html", "outputPath": output_path }),
+            }).await?;
+            Ok(res)
         }
 
         "get_conversation_commands" => {
@@ -2129,10 +2180,63 @@ pub async fn handle_invoke(
             Ok(json!({ "success": true, "version": "0.2.3" }))
         }
 
-        "runtime_select_zip_file" => {
-            Ok(json!(null))
+        "open_external" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            if !url.is_empty() {
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(url).spawn();
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("cmd").args(["/c", "start", url]).spawn();
+                #[cfg(target_os = "linux")]
+                let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+            }
+            Ok(json!(true))
         }
 
+        "toggle_hud_window" => {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(visible) = window.is_visible() {
+                    if visible {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+            Ok(json!(true))
+        }
+
+        "run_terminal_command" => {
+            let cmd_str = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or(&home);
+            let output = std::process::Command::new("zsh")
+                .arg("-c")
+                .arg(cmd_str)
+                .current_dir(cwd)
+                .output();
+
+            match output {
+                Ok(out) => {
+                    let code = out.status.code().unwrap_or(0);
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({
+                        "exitCode": code,
+                        "stdout": stdout,
+                        "stderr": stderr
+                    }))
+                }
+                Err(e) => {
+                    Ok(json!({
+                        "exitCode": -1,
+                        "stdout": "",
+                        "stderr": e.to_string()
+                    }))
+                }
+            }
+        }
 
         "log_error" => {
             eprintln!("🔥 [FRONTEND_JS_ERROR] {:?}", args);

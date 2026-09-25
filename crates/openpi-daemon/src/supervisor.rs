@@ -753,6 +753,25 @@ impl Supervisor {
         };
 
         let mut cmd = command.clone();
+        let cmd_type = cmd.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        if cmd_type == "extension_ui_response" {
+            let mut line = serde_json::to_string(&cmd)?;
+            line.push('\n');
+            if let Err(e) = stdin.write_all(line.as_bytes()).await {
+                drop(stdin_guard);
+                self.mark_session_dead(session_id).await;
+                anyhow::bail!("Failed to write to session stdin (process died): {}", e);
+            }
+            if let Err(e) = stdin.flush().await {
+                drop(stdin_guard);
+                self.mark_session_dead(session_id).await;
+                anyhow::bail!("Failed to flush session stdin (process died): {}", e);
+            }
+            drop(stdin_guard);
+            return Ok(serde_json::json!(true));
+        }
+
         let req_id = match cmd.get("id").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => {
