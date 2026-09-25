@@ -13,6 +13,7 @@
     "dev": "vite --port 5179",
     "build:web": "vite build",
     "build": "vite build",
+    "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest --run"
   },
@@ -27,6 +28,7 @@
     "tailwind-merge": "3.6.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.11.5",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.1",
     "@vitejs/plugin-react": "5.0.4",
