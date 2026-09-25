@@ -34,7 +34,7 @@ impl JevCoordinator {
     pub fn new() -> Self {
         Self {
             engine: Arc::new(RwLock::new(None)),
-            status: Arc::new(RwLock::new(EngineStatus::WarmingUp)),
+            status: Arc::new(RwLock::new(EngineStatus::Ready)),
             router: SemanticRouter::new(),
             gate: SafetyGate::new(),
             compressor: OutputCompressor::default(),
@@ -45,12 +45,22 @@ impl JevCoordinator {
     }
 
     /// Background asynchronous warmup (Zero-lag cold start)
+    /// Only warm up local neural model if explicitly requested via OPENPI_WARMUP_LOCAL_MODEL=1
     pub fn spawn_async_warmup(&self) {
+        let should_warmup = std::env::var("OPENPI_WARMUP_LOCAL_MODEL")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if !should_warmup {
+            tracing::info!("💡 [JevCoordinator] 本地深度学习模型处于按需待命模式 (0 内存开销，按需懒加载)");
+            return;
+        }
+
         let engine_holder = self.engine.clone();
         let status_holder = self.status.clone();
 
         tokio::spawn(async move {
-            tracing::info!("⏳ [JevCoordinator] 开始在后台异步预热 ModernBERT-base (FP32) 引擎...");
+            tracing::info!("⏳ [JevCoordinator] 开始在后台异步预热 ModernBERT 引擎...");
             let start = std::time::Instant::now();
 
             match tokio::task::spawn_blocking(LocalVerdictEngine::try_load_default).await {
@@ -73,6 +83,34 @@ impl JevCoordinator {
                 }
             }
         });
+    }
+
+    /// Lazy-loads the local neural engine on demand if needed
+    pub async fn ensure_engine(&self) -> anyhow::Result<Arc<LocalVerdictEngine>> {
+        {
+            let lock = self.engine.read().await;
+            if let Some(ref engine) = *lock {
+                return Ok(engine.clone());
+            }
+        }
+
+        let mut lock = self.engine.write().await;
+        if let Some(ref engine) = *lock {
+            return Ok(engine.clone());
+        }
+
+        let engine = tokio::task::spawn_blocking(LocalVerdictEngine::try_load_default)
+            .await
+            .map_err(|e| anyhow::anyhow!("Task spawn failed: {:?}", e))??;
+
+        let arc_engine = Arc::new(engine);
+        *lock = Some(arc_engine.clone());
+        tracing::info!("✅ [JevCoordinator] 本地神经引擎按需加载成功！");
+        Ok(arc_engine)
+    }
+
+    pub async fn is_engine_loaded(&self) -> bool {
+        self.engine.read().await.is_some()
     }
 
     pub async fn status(&self) -> EngineStatus {

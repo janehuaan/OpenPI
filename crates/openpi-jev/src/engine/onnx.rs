@@ -28,7 +28,7 @@ impl LocalVerdictEngine {
 
         let session = Session::builder()
             .map_err(|e| anyhow::anyhow!("{:?}", e))?
-            .with_intra_threads(4)
+            .with_intra_threads(2)
             .map_err(|e| anyhow::anyhow!("{:?}", e))?
             .commit_from_file(model_path)
             .map_err(|e| anyhow::anyhow!("{:?}", e))?;
@@ -43,11 +43,16 @@ impl LocalVerdictEngine {
         })
     }
 
-    /// Try loading from default ~/.openpi paths
+    /// Try loading from default ~/.openpi paths (prefers INT8 quantized model if available)
     pub fn try_load_default() -> anyhow::Result<Self> {
         let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
         let model_dir = home.join(".openpi/models/verdict");
-        let model_path = model_dir.join("model.onnx");
+        let int8_path = model_dir.join("model_int8.onnx");
+        let model_path = if int8_path.exists() {
+            int8_path
+        } else {
+            model_dir.join("model.onnx")
+        };
         let tokenizer_path = model_dir.join("tokenizer.json");
 
         Self::new(&model_path, &tokenizer_path)

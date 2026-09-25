@@ -84,7 +84,7 @@ pub fn load_agent_and_app_settings() -> (Value, Option<String>, Option<String>) 
 pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
     let m = model_id.to_lowercase();
 
-    // Vision: Gemini, Claude 3+, GPT-4o, GPT-4.5, GPT-5, Mimo, Agnes, Kimi-K2.6+, Qwen-VL, GLM-4V, etc.
+    // Vision: Gemini, Claude 3+, GPT-4o, GPT-4.5, GPT-5, Mimo, Agnes, Kimi-K2.6+, Qwen 3.8+, Qwen 3.7 (flash/plus), Qwen-VL, GLM-4V, etc.
     let is_vision = m.contains("gemini")
         || m.contains("claude")
         || m.contains("gpt-4o")
@@ -97,7 +97,11 @@ pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
         || m.contains("image")
         || m.contains("kimi-k2.6")
         || m.contains("kimi-k2.7")
-        || m.contains("kimi-k3");
+        || m.contains("kimi-k3")
+        || m.contains("qwen3.8")
+        || m.contains("qwen-3.8")
+        || m.contains("qwen3.7-flash")
+        || m.contains("qwen3.7-plus");
 
     // Reasoning: thinking, reason, r1, o1, o3, o4, high, claude 3.7 / 4+, kimi-k2.7+, qwen3.7+, qwen3.8+, glm-5+
     let is_reasoning = m.contains("thinking")
@@ -119,13 +123,21 @@ pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
         || m.contains("glm-5");
 
     // Context Window:
-    // 1M: Gemini, GPT-5, MiniMax, Mimo, Agnes
-    // 256K: Kimi, Sensenova
+    // 1M: Gemini, GPT-5, MiniMax, Mimo, Agnes, Qwen 3.7+, Qwen 3.8+
+    // 256K: Kimi, Sensenova, other Qwen 3
     // 200K: Claude
-    // 128K: DeepSeek, Qwen, GLM, Seed, GPT-4o
-    let ctx = if m.contains("gemini") || m.contains("gpt-5") || m.contains("minimax") || m.contains("mimo") || m.contains("agnes") {
+    // 128K~131K: DeepSeek, older Qwen, GLM, Seed, GPT-4o
+    let ctx = if m.contains("gemini")
+        || m.contains("gpt-5")
+        || m.contains("minimax")
+        || m.contains("mimo")
+        || m.contains("agnes")
+        || m.contains("qwen3.7")
+        || m.contains("qwen3.8")
+        || m.contains("qwen-3.7")
+        || m.contains("qwen-3.8") {
         1000000
-    } else if m.contains("kimi") || m.contains("sensenova") {
+    } else if m.contains("kimi") || m.contains("sensenova") || m.contains("qwen3") || m.contains("qwen-3") {
         262144
     } else if m.contains("claude") {
         200000
