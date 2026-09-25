@@ -16,6 +16,71 @@ static AUTOPILOT_TASKS: LazyLock<Mutex<HashMap<String, Value>>> = LazyLock::new(
 
 use crate::daemon_client::{agent_dir, default_workspace, find_session_file, openpi_dir, DaemonClient};
 
+pub fn load_agent_and_app_settings() -> (Value, Option<String>, Option<String>) {
+    let mut def_model = None;
+    let mut def_provider = None;
+    let mut merged = json!({
+        "theme": "light",
+        "themeFlavor": "light-nord",
+        "fontSize": 14,
+        "autoScroll": true,
+        "autoApprove": false,
+        "soundEnabled": true,
+        "autoCompact": true,
+        "autoMemory": true,
+        "reserveTokens": 16384,
+        "desktopNotifications": true,
+        "notificationThresholdSec": 5,
+        "defaultMode": "code",
+    });
+
+    // 1. Read settings.json (core / agent config)
+    let s_path = agent_dir().join("settings.json");
+    if s_path.exists() {
+        if let Ok(c) = fs::read_to_string(&s_path) {
+            if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                if let Some(m) = val.get("defaultModel").and_then(|v| v.as_str()) {
+                    def_model = Some(m.to_string());
+                }
+                if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
+                    def_provider = Some(p.to_string());
+                }
+                if let Some(obj) = val.as_object() {
+                    if let Some(tgt) = merged.as_object_mut() {
+                        for (k, v) in obj {
+                            tgt.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Read app_settings.json (desktop app overrides)
+    let app_s_path = agent_dir().join("app_settings.json");
+    if app_s_path.exists() {
+        if let Ok(c) = fs::read_to_string(&app_s_path) {
+            if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                if let Some(m) = val.get("defaultModel").and_then(|v| v.as_str()) {
+                    def_model = Some(m.to_string());
+                }
+                if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
+                    def_provider = Some(p.to_string());
+                }
+                if let Some(obj) = val.as_object() {
+                    if let Some(tgt) = merged.as_object_mut() {
+                        for (k, v) in obj {
+                            tgt.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (merged, def_model, def_provider)
+}
+
 pub async fn handle_invoke(
     app: AppHandle,
     client: DaemonClient,
@@ -151,8 +216,10 @@ pub async fn handle_invoke(
             let label = args.get("label").and_then(|v| v.as_str()).map(|s| s.to_string());
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let mode_str = args.get("mode").and_then(|v| v.as_str()).unwrap_or("code");
-            let model = args.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
             let in_memory = args.get("inMemory").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let (_settings, def_model, _def_provider) = load_agent_and_app_settings();
+            let model = args.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()).or(def_model);
 
             let res = client.request(ClientRequest::CreateSession {
                 id: Uuid::new_v4().to_string(),
@@ -232,19 +299,9 @@ pub async fn handle_invoke(
                 }
             }
 
-            // Fallback to configured default model from app_settings.json / models.json
+            // Fallback to configured default model from settings.json / app_settings.json / models.json
             if model_val.is_null() || model_val.get("id").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-                let settings_path = agent_dir().join("app_settings.json");
-                let mut def_model_id = None;
-                let mut def_provider = None;
-                if settings_path.exists() {
-                    if let Ok(c) = fs::read_to_string(&settings_path) {
-                        if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                            def_model_id = val.get("defaultModel").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            def_provider = val.get("defaultProvider").and_then(|v| v.as_str()).map(|s| s.to_string());
-                        }
-                    }
-                }
+                let (_settings, mut def_model_id, def_provider) = load_agent_and_app_settings();
 
                 let models_path = agent_dir().join("models.json");
                 let mut resolved_name = def_model_id.clone();
@@ -905,7 +962,7 @@ pub async fn handle_invoke(
         }
 
         "save_model_provider" => {
-            let provider = args.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
             let config = args.get("config").cloned().unwrap_or(json!({}));
             let models_path = agent_dir().join("models.json");
             let mut root = if models_path.exists() {
@@ -926,7 +983,7 @@ pub async fn handle_invoke(
         }
 
         "delete_model_provider" => {
-            let provider = args.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
             let models_path = agent_dir().join("models.json");
             if models_path.exists() {
                 if let Ok(content) = fs::read_to_string(&models_path) {
@@ -943,17 +1000,7 @@ pub async fn handle_invoke(
 
         "get_available_models" | "get_model_catalog" | "get_conversation_models" => {
             let mut list = Vec::new();
-            let mut def_model_id = None;
-            let mut def_provider = None;
-            let settings_path = agent_dir().join("app_settings.json");
-            if settings_path.exists() {
-                if let Ok(c) = fs::read_to_string(&settings_path) {
-                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                        def_model_id = val.get("defaultModel").and_then(|v| v.as_str()).map(|s| s.to_string());
-                        def_provider = val.get("defaultProvider").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    }
-                }
-            }
+            let (_settings, def_model_id, def_provider) = load_agent_and_app_settings();
 
             let models_path = agent_dir().join("models.json");
             if models_path.exists() {
@@ -1130,22 +1177,71 @@ pub async fn handle_invoke(
 
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let mut branch = "main".to_string();
-            let ahead = 0;
-            let behind = 0;
+            let mut ahead = 0;
+            let mut behind = 0;
             let mut files = Vec::new();
 
             for line in stdout.lines() {
                 if line.starts_with("##") {
                     let b_info = line.trim_start_matches('#').trim();
-                    branch = b_info.split("...").next().unwrap_or("main").to_string();
+                    let branch_part = b_info.split_whitespace().next().unwrap_or("main");
+                    branch = branch_part.split("...").next().unwrap_or("main").to_string();
+                    if let Some(pos) = b_info.find('[') {
+                        let bracket = &b_info[pos..];
+                        if let Some(ahead_pos) = bracket.find("ahead ") {
+                            let s = &bracket[ahead_pos + 6..];
+                            let num: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            ahead = num.parse().unwrap_or(0);
+                        }
+                        if let Some(behind_pos) = bracket.find("behind ") {
+                            let s = &bracket[behind_pos + 7..];
+                            let num: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+                            behind = num.parse().unwrap_or(0);
+                        }
+                    }
                 } else if line.len() >= 3 {
-                    let status_code = &line[0..2];
+                    let x = line.chars().next().unwrap_or(' ');
+                    let y = line.chars().nth(1).unwrap_or(' ');
                     let file_path = line[3..].trim();
-                    files.push(json!({
-                        "path": file_path,
-                        "status": status_code.trim(),
-                        "staged": !status_code.starts_with(' ') && !status_code.starts_with('?')
-                    }));
+
+                    if x == '?' && y == '?' {
+                        files.push(json!({
+                            "path": file_path,
+                            "status": "untracked",
+                            "staged": false
+                        }));
+                    } else if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+                        files.push(json!({
+                            "path": file_path,
+                            "status": "conflicted",
+                            "staged": false
+                        }));
+                    } else {
+                        if x != ' ' && x != '?' {
+                            let st = match x {
+                                'A' => "added",
+                                'D' => "deleted",
+                                'R' => "renamed",
+                                _ => "modified",
+                            };
+                            files.push(json!({
+                                "path": file_path,
+                                "status": st,
+                                "staged": true
+                            }));
+                        }
+                        if y != ' ' && y != '?' {
+                            let st = match y {
+                                'D' => "deleted",
+                                _ => "modified",
+                            };
+                            files.push(json!({
+                                "path": file_path,
+                                "status": st,
+                                "staged": false
+                            }));
+                        }
+                    }
                 }
             }
 
@@ -1167,42 +1263,143 @@ pub async fn handle_invoke(
             if staged {
                 cmd.arg("--cached");
             }
-            if let Some(file) = args.get("filePath").and_then(|v| v.as_str()) {
+            let file_opt = args.get("path").or_else(|| args.get("filePath")).and_then(|v| v.as_str());
+            if let Some(file) = file_opt {
                 cmd.arg("--").arg(file);
             }
-            let out = cmd.current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!(String::from_utf8_lossy(&out.stdout).to_string()))
+            let out = cmd.current_dir(cwd).output();
+            let (mut diff_str, err_msg) = match out {
+                Ok(o) => {
+                    let s = String::from_utf8_lossy(&o.stdout).to_string();
+                    let e = if o.status.success() { None } else { Some(String::from_utf8_lossy(&o.stderr).to_string()) };
+                    (s, e)
+                }
+                Err(e) => (String::new(), Some(e.to_string())),
+            };
+
+            // If empty and unstaged and a specific file was requested, check for untracked file
+            if diff_str.trim().is_empty() && !staged {
+                if let Some(f) = file_opt {
+                    let full_path = Path::new(cwd).join(f);
+                    if full_path.exists() && full_path.is_file() {
+                        if let Ok(no_index) = Command::new("git")
+                            .args(["diff", "--no-index", "/dev/null", f])
+                            .current_dir(cwd)
+                            .output()
+                        {
+                            let s = String::from_utf8_lossy(&no_index.stdout).to_string();
+                            if !s.is_empty() {
+                                diff_str = s;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(json!({
+                "diff": diff_str,
+                "error": err_msg
+            }))
         }
 
         "git_stage" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            match Command::new("git").args(["add", file]).current_dir(cwd).output() {
-                Ok(out) => Ok(json!({ "ok": out.status.success(), "success": out.status.success() })),
+            let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut paths: Vec<String> = Vec::new();
+            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
+                for p in arr {
+                    if let Some(s) = p.as_str() {
+                        paths.push(s.to_string());
+                    }
+                }
+            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
+                paths.push(p.to_string());
+            }
+
+            let mut cmd = Command::new("git");
+            cmd.arg("add");
+            if all || paths.is_empty() {
+                cmd.arg("-A");
+            } else {
+                for p in &paths {
+                    cmd.arg(p);
+                }
+            }
+            match cmd.current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({ "ok": success, "success": success, "error": if success { Value::Null } else { json!(stderr) } }))
+                }
                 Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
             }
         }
 
         "git_unstage" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            match Command::new("git").args(["restore", "--staged", file]).current_dir(cwd).output() {
-                Ok(out) => Ok(json!({ "ok": out.status.success(), "success": out.status.success() })),
+            let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut paths: Vec<String> = Vec::new();
+            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
+                for p in arr {
+                    if let Some(s) = p.as_str() {
+                        paths.push(s.to_string());
+                    }
+                }
+            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
+                paths.push(p.to_string());
+            }
+
+            let mut cmd = Command::new("git");
+            cmd.args(["restore", "--staged"]);
+            if all || paths.is_empty() {
+                cmd.arg(".");
+            } else {
+                for p in &paths {
+                    cmd.arg(p);
+                }
+            }
+            match cmd.current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({ "ok": success, "success": success, "error": if success { Value::Null } else { json!(stderr) } }))
+                }
                 Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
             }
         }
 
         "git_discard" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let _ = Command::new("git").args(["restore", file]).current_dir(cwd).output();
-            let _ = Command::new("git").args(["clean", "-fd", file]).current_dir(cwd).output();
+            let mut paths: Vec<String> = Vec::new();
+            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
+                for p in arr {
+                    if let Some(s) = p.as_str() {
+                        paths.push(s.to_string());
+                    }
+                }
+            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
+                paths.push(p.to_string());
+            }
+
+            if paths.is_empty() {
+                let _ = Command::new("git").args(["restore", "."]).current_dir(cwd).output();
+                let _ = Command::new("git").args(["clean", "-fd"]).current_dir(cwd).output();
+            } else {
+                for p in &paths {
+                    let _ = Command::new("git").args(["restore", p]).current_dir(cwd).output();
+                    let _ = Command::new("git").args(["clean", "-fd", p]).current_dir(cwd).output();
+                }
+            }
             Ok(json!({ "ok": true, "success": true }))
         }
 
         "git_commit" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let msg = args.get("message").and_then(|v| v.as_str()).unwrap_or("Update");
+            let stage_all = args.get("stageAll").and_then(|v| v.as_bool()).unwrap_or(false);
+            if stage_all {
+                let _ = Command::new("git").args(["add", "-A"]).current_dir(cwd).output();
+            }
             match Command::new("git").args(["commit", "-m", msg]).current_dir(cwd).output() {
                 Ok(out) => {
                     let success = out.status.success();
@@ -1247,7 +1444,14 @@ pub async fn handle_invoke(
         "git_checkout" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let branch = args.get("branch").and_then(|v| v.as_str()).unwrap_or("main");
-            match Command::new("git").args(["checkout", branch]).current_dir(cwd).output() {
+            let create = args.get("create").and_then(|v| v.as_bool()).unwrap_or(false);
+            let mut cmd = Command::new("git");
+            cmd.arg("checkout");
+            if create {
+                cmd.arg("-b");
+            }
+            cmd.arg(branch);
+            match cmd.current_dir(cwd).output() {
                 Ok(out) => {
                     let success = out.status.success();
                     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
@@ -1264,20 +1468,57 @@ pub async fn handle_invoke(
 
         "git_sync" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let _ = Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output();
-            match Command::new("git").args(["push"]).current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({
-                        "ok": success,
-                        "success": success,
-                        "output": stdout,
-                        "error": if success { Value::Null } else { json!(stderr) }
-                    }))
+            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("sync");
+            match action {
+                "pull" => {
+                    match Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output() {
+                        Ok(out) => {
+                            let success = out.status.success();
+                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                            Ok(json!({
+                                "ok": success,
+                                "success": success,
+                                "output": stdout,
+                                "error": if success { Value::Null } else { json!(stderr) }
+                            }))
+                        }
+                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+                    }
                 }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+                "push" => {
+                    match Command::new("git").args(["push"]).current_dir(cwd).output() {
+                        Ok(out) => {
+                            let success = out.status.success();
+                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                            Ok(json!({
+                                "ok": success,
+                                "success": success,
+                                "output": stdout,
+                                "error": if success { Value::Null } else { json!(stderr) }
+                            }))
+                        }
+                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+                    }
+                }
+                _ => {
+                    let _ = Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output();
+                    match Command::new("git").args(["push"]).current_dir(cwd).output() {
+                        Ok(out) => {
+                            let success = out.status.success();
+                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                            Ok(json!({
+                                "ok": success,
+                                "success": success,
+                                "output": stdout,
+                                "error": if success { Value::Null } else { json!(stderr) }
+                            }))
+                        }
+                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+                    }
+                }
             }
         }
 
@@ -1445,23 +1686,111 @@ pub async fn handle_invoke(
         // ── Extended Git Operations ───────────────────────────────────────
         "apply_diff_hunks" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let patch = args.get("patch").and_then(|v| v.as_str()).unwrap_or("");
-            if patch.is_empty() {
-                return Ok(json!({ "success": false, "error": "Empty patch" }));
-            }
-            let mut cmd = Command::new("git");
-            cmd.args(["apply", "--whitespace=nowarn", "-"]).current_dir(cwd);
-            cmd.stdin(std::process::Stdio::piped());
-            if let Ok(mut child) = cmd.spawn() {
-                if let Some(mut stdin) = child.stdin.take() {
-                    use std::io::Write;
-                    let _ = stdin.write_all(patch.as_bytes());
+            if let Some(patch) = args.get("patch").and_then(|v| v.as_str()) {
+                if !patch.is_empty() {
+                    let mut cmd = Command::new("git");
+                    cmd.args(["apply", "--whitespace=nowarn", "-"]).current_dir(cwd);
+                    cmd.stdin(std::process::Stdio::piped());
+                    if let Ok(mut child) = cmd.spawn() {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            use std::io::Write;
+                            let _ = stdin.write_all(patch.as_bytes());
+                        }
+                        let status = child.wait().map_err(|e| e.to_string())?;
+                        return Ok(json!({ "success": status.success(), "appliedCount": 1 }));
+                    }
                 }
-                let status = child.wait().map_err(|e| e.to_string())?;
-                Ok(json!({ "success": status.success() }))
-            } else {
-                Ok(json!({ "success": false, "error": "Failed to spawn git" }))
             }
+
+            let filename = args.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+            if filename.is_empty() {
+                return Ok(json!({ "success": false, "error": "Missing filename" }));
+            }
+            let file_path = Path::new(cwd).join(filename);
+            if !file_path.exists() {
+                return Ok(json!({ "success": false, "error": format!("File not found: {}", filename) }));
+            }
+
+            let source_content = fs::read_to_string(&file_path).unwrap_or_default();
+            let mut lines: Vec<String> = source_content.split('\n').map(|s| s.to_string()).collect();
+
+            let mut applied_count = 0;
+            if let Some(hunks) = args.get("hunks").and_then(|h| h.as_array()) {
+                let mut sorted_hunks = hunks.clone();
+                sorted_hunks.sort_by(|a, b| {
+                    let a_start = a.get("oldStart").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let b_start = b.get("oldStart").and_then(|v| v.as_i64()).unwrap_or(0);
+                    b_start.cmp(&a_start)
+                });
+
+                for hunk in &sorted_hunks {
+                    let status = hunk.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+                    if status == "rejected" {
+                        continue;
+                    }
+
+                    applied_count += 1;
+                    let mut original_expected: Vec<String> = Vec::new();
+                    let mut replacement_lines: Vec<String> = Vec::new();
+
+                    if let Some(edited) = hunk.get("editedLines").and_then(|e| e.as_array()) {
+                        for l in edited {
+                            if let Some(s) = l.as_str() {
+                                replacement_lines.push(s.to_string());
+                            }
+                        }
+                    } else if let Some(h_lines) = hunk.get("lines").and_then(|l| l.as_array()) {
+                        for line_obj in h_lines {
+                            let l_type = line_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let l_content = line_obj.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            if l_type == "ctx" {
+                                original_expected.push(l_content.clone());
+                                replacement_lines.push(l_content);
+                            } else if l_type == "del" {
+                                original_expected.push(l_content);
+                            } else if l_type == "add" {
+                                replacement_lines.push(l_content);
+                            }
+                        }
+                    }
+
+                    let old_start = hunk.get("oldStart").and_then(|v| v.as_i64()).unwrap_or(1) as usize;
+                    let mut target_idx = if old_start > 0 { old_start - 1 } else { 0 };
+                    if target_idx > lines.len() {
+                        target_idx = lines.len();
+                    }
+
+                    if let Some(expected_first) = original_expected.first() {
+                        if target_idx < lines.len() && &lines[target_idx] != expected_first {
+                            let radius = 15;
+                            let mut best_dist = usize::MAX;
+                            let mut found_idx = None;
+                            for offset in -(radius as isize)..=(radius as isize) {
+                                let test_idx = target_idx as isize + offset;
+                                if test_idx >= 0 && (test_idx as usize) < lines.len() {
+                                    if lines[test_idx as usize] == *expected_first {
+                                        let dist = offset.unsigned_abs();
+                                        if dist < best_dist {
+                                            best_dist = dist;
+                                            found_idx = Some(test_idx as usize);
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(f_idx) = found_idx {
+                                target_idx = f_idx;
+                            }
+                        }
+                    }
+
+                    let delete_count = original_expected.len().min(lines.len().saturating_sub(target_idx));
+                    lines.splice(target_idx..(target_idx + delete_count), replacement_lines);
+                }
+            }
+
+            let new_content = lines.join("\n");
+            let _ = fs::write(&file_path, new_content);
+            Ok(json!({ "success": true, "appliedCount": applied_count }))
         }
 
         "git_init" => {
@@ -1490,7 +1819,26 @@ pub async fn handle_invoke(
         }
 
         "git_resolve_conflict" => {
-            Ok(json!({ "success": true }))
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let strategy = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("ours");
+            if path.is_empty() {
+                return Ok(json!({ "ok": false, "success": false, "error": "Missing path" }));
+            }
+            let flag = if strategy == "theirs" { "--theirs" } else { "--ours" };
+            let out = Command::new("git").args(["checkout", flag, path]).current_dir(cwd).output();
+            match out {
+                Ok(o) => {
+                    if o.status.success() {
+                        let _ = Command::new("git").args(["add", path]).current_dir(cwd).output();
+                        Ok(json!({ "ok": true, "success": true }))
+                    } else {
+                        let stderr = String::from_utf8_lossy(&o.stderr).to_string();
+                        Ok(json!({ "ok": false, "success": false, "error": stderr }))
+                    }
+                }
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         // ── User Profile & App Settings ────────────────────────────────────
@@ -1519,28 +1867,45 @@ pub async fn handle_invoke(
         }
 
         "get_app_settings" => {
-            let settings_path = agent_dir().join("app_settings.json");
-            if settings_path.exists() {
-                if let Ok(c) = fs::read_to_string(&settings_path) {
-                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                        return Ok(val);
-                    }
-                }
-            }
-            Ok(json!({
-                "theme": "dark",
-                "fontSize": 14,
-                "autoScroll": true,
-                "autoApprove": false,
-                "soundEnabled": true
-            }))
+            let (merged, _m, _p) = load_agent_and_app_settings();
+            Ok(merged)
         }
 
         "update_app_settings" => {
+            let (mut merged, _m, _p) = load_agent_and_app_settings();
+            if let Some(obj) = args.as_object() {
+                if let Some(tgt) = merged.as_object_mut() {
+                    for (k, v) in obj {
+                        tgt.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+
             let settings_path = agent_dir().join("app_settings.json");
             let _ = fs::create_dir_all(agent_dir());
-            let _ = fs::write(&settings_path, serde_json::to_string_pretty(&args).unwrap_or_default());
-            Ok(json!(true))
+            let _ = fs::write(&settings_path, serde_json::to_string_pretty(&merged).unwrap_or_default());
+
+            // Also synchronize core agent settings to settings.json
+            let s_path = agent_dir().join("settings.json");
+            let mut core_settings = if s_path.exists() {
+                fs::read_to_string(&s_path)
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+                    .unwrap_or(json!({}))
+            } else {
+                json!({})
+            };
+
+            if let Some(c_obj) = core_settings.as_object_mut() {
+                for sync_key in ["defaultModel", "defaultProvider", "defaultThinkingLevel", "defaultMode", "autoCompact", "autoMemory", "reserveTokens", "desktopNotifications", "notificationThresholdSec"] {
+                    if let Some(val) = merged.get(sync_key) {
+                        c_obj.insert(sync_key.to_string(), val.clone());
+                    }
+                }
+                let _ = fs::write(&s_path, serde_json::to_string_pretty(&core_settings).unwrap_or_default());
+            }
+
+            Ok(merged)
         }
 
         "set_native_theme" => {
@@ -2138,28 +2503,65 @@ pub async fn handle_invoke(
         }
 
         "get_vision_fallback" => {
-            Ok(json!({
+            let s_path = agent_dir().join("settings.json");
+            let mut conf = json!({
                 "enabled": true,
-                "provider": "zhipu",
-                "model": "glm-4v-plus",
+                "provider": "自建",
+                "model": "glm-5.3-flash",
                 "configured": true
-            }))
+            });
+            if s_path.exists() {
+                if let Ok(c) = fs::read_to_string(&s_path) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                        if let Some(vf) = val.get("visionFallback") {
+                            conf = vf.clone();
+                            if let Some(obj) = conf.as_object_mut() {
+                                obj.insert("configured".to_string(), json!(true));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(conf)
         }
 
         "get_vision_fallback_models" => {
             Ok(json!([
+                { "id": "glm-5.3-flash", "name": "GLM-5.3 Flash", "description": "内置自建多模态视觉模型" },
                 { "id": "glm-4v-plus", "name": "GLM-4V Plus", "description": "智谱旗舰视觉模型" },
                 { "id": "glm-4v", "name": "GLM-4V", "description": "智谱多模态视觉模型" }
             ]))
         }
 
         "configure_vision_fallback" => {
-            Ok(json!({
-                "enabled": true,
-                "provider": "zhipu",
-                "model": args.get("model").and_then(|v| v.as_str()).unwrap_or("glm-4v-plus"),
+            let s_path = agent_dir().join("settings.json");
+            let mut core_settings = if s_path.exists() {
+                fs::read_to_string(&s_path)
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+                    .unwrap_or(json!({}))
+            } else {
+                json!({})
+            };
+
+            let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("glm-5.3-flash");
+            let provider = args.get("provider").and_then(|v| v.as_str()).unwrap_or("自建");
+
+            let vf = json!({
+                "enabled": enabled,
+                "provider": provider,
+                "model": model,
                 "configured": true
-            }))
+            });
+
+            if let Some(obj) = core_settings.as_object_mut() {
+                obj.insert("visionFallback".to_string(), vf.clone());
+                let _ = fs::create_dir_all(agent_dir());
+                let _ = fs::write(&s_path, serde_json::to_string_pretty(&core_settings).unwrap_or_default());
+            }
+
+            Ok(vf)
         }
 
         "generate_image" => {
@@ -2269,6 +2671,22 @@ pub async fn handle_invoke(
 
         "runtime_download_apply" | "runtime_install_local" | "runtime_rollback" => {
             Ok(json!({ "success": true, "version": "0.2.3" }))
+        }
+
+        "runtime_select_zip_file" => {
+            #[cfg(target_os = "macos")]
+            {
+                let script = r#"POSIX path of (choose file of type {"zip"} with prompt "选择内核更新包")"#;
+                if let Ok(out) = Command::new("osascript").arg("-e").arg(script).output() {
+                    if out.status.success() {
+                        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        if !path.is_empty() {
+                            return Ok(json!(path));
+                        }
+                    }
+                }
+            }
+            Ok(json!(null))
         }
 
         "open_external" => {

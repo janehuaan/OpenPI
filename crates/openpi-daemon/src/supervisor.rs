@@ -545,6 +545,18 @@ impl Supervisor {
 
         if let Some(m) = &session.info.model {
             cmd.arg("--model").arg(m);
+        } else {
+            let settings_file = openpi_dir().join("agent").join("settings.json");
+            if let Ok(c) = std::fs::read_to_string(&settings_file) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&c) {
+                    if let Some(m) = val.get("defaultModel").and_then(|v| v.as_str()) {
+                        if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
+                            cmd.arg("--provider").arg(p);
+                        }
+                        cmd.arg("--model").arg(m);
+                    }
+                }
+            }
         }
 
         if session.info.mode == SessionMode::Code {
