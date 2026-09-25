@@ -2925,7 +2925,7 @@ export function ReferenceWorkspacePreview({
 							</span>
 						)}
 						<span>
-							会话 ID <strong>{conversation?.state.sessionId.slice(0, 8) ?? "--"}</strong>
+							会话 ID <strong>{conversation?.state?.sessionId ? conversation.state.sessionId.slice(0, 8) : (conversation?.instance?.id ? conversation.instance.id.slice(0, 8) : "--")}</strong>
 						</span>
 						<span>
 							运行状态{" "}
