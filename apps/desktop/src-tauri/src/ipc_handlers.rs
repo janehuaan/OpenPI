@@ -954,7 +954,15 @@ pub async fn handle_invoke(
             if models_path.exists() {
                 if let Ok(content) = fs::read_to_string(&models_path) {
                     if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                        return Ok(json.get("providers").cloned().unwrap_or(json!({})));
+                        if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                            let mut clean_providers = serde_json::Map::new();
+                            for (k, v) in providers {
+                                if !k.trim().is_empty() {
+                                    clean_providers.insert(k.clone(), v.clone());
+                                }
+                            }
+                            return Ok(json!(clean_providers));
+                        }
                     }
                 }
             }
@@ -962,7 +970,10 @@ pub async fn handle_invoke(
         }
 
         "save_model_provider" => {
-            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
+            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("").trim();
+            if provider.is_empty() {
+                return Ok(json!(false));
+            }
             let config = args.get("config").cloned().unwrap_or(json!({}));
             let models_path = agent_dir().join("models.json");
             let mut root = if models_path.exists() {
@@ -983,7 +994,10 @@ pub async fn handle_invoke(
         }
 
         "delete_model_provider" => {
-            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("");
+            let provider = args.get("providerId").or_else(|| args.get("provider")).and_then(|v| v.as_str()).unwrap_or("").trim();
+            if provider.is_empty() {
+                return Ok(json!(false));
+            }
             let models_path = agent_dir().join("models.json");
             if models_path.exists() {
                 if let Ok(content) = fs::read_to_string(&models_path) {
@@ -2165,16 +2179,68 @@ pub async fn handle_invoke(
                     if let Some(data) = val.get("data").and_then(|d| d.as_array()) {
                         for item in data {
                             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                                let id_lower = id.to_lowercase();
+                                let is_vision = id_lower.contains("vision") || id_lower.contains("vl") || id_lower.contains("image") || id_lower.contains("gemini") || id_lower.contains("claude") || id_lower.contains("gpt-4") || id_lower.contains("gpt-5");
+                                let is_reasoning = id_lower.contains("thinking") || id_lower.contains("r1") || id_lower.contains("reasoner");
+                                let mut input = vec!["text".to_string()];
+                                if is_vision {
+                                    input.push("image".to_string());
+                                }
                                 models.push(json!({
                                     "id": id,
                                     "name": id,
-                                    "reasoning": id.contains("thinking") || id.contains("r1"),
+                                    "reasoning": is_reasoning,
+                                    "input": input,
                                     "contextWindow": 1000000,
-                                    "maxTokens": 65536
+                                    "maxTokens": 65536,
+                                    "cost": {
+                                        "input": 0,
+                                        "output": 0,
+                                        "cacheRead": 0,
+                                        "cacheWrite": 0
+                                    }
                                 }));
                             }
                         }
                     }
+
+                    // Save and merge into models.json if providerId is present
+                    if !provider_id.trim().is_empty() {
+                        let models_path = agent_dir().join("models.json");
+                        if let Ok(content) = fs::read_to_string(&models_path) {
+                            if let Ok(mut root) = serde_json::from_str::<Value>(&content) {
+                                if let Some(providers_obj) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
+                                    if let Some(target_p) = providers_obj.get_mut(provider_id).and_then(|pr| pr.as_object_mut()) {
+                                        let existing_models = target_p.get("models").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+                                        let mut merged_list: Vec<Value> = Vec::new();
+                                        let mut seen_ids = std::collections::HashSet::new();
+
+                                        for em in existing_models {
+                                            if let Some(em_id) = em.get("id").and_then(|v| v.as_str()) {
+                                                seen_ids.insert(em_id.to_string());
+                                                merged_list.push(em);
+                                            }
+                                        }
+
+                                        for nm in &models {
+                                            if let Some(nm_id) = nm.get("id").and_then(|v| v.as_str()) {
+                                                if !seen_ids.contains(nm_id) {
+                                                    seen_ids.insert(nm_id.to_string());
+                                                    merged_list.push(nm.clone());
+                                                }
+                                            }
+                                        }
+
+                                        target_p.insert("models".to_string(), json!(merged_list));
+                                        let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
+                                        let count = merged_list.len();
+                                        return Ok(json!({ "success": true, "count": count, "models": merged_list }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let count = models.len();
                     return Ok(json!({ "success": true, "count": count, "models": models }));
                 }
