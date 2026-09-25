@@ -2,7 +2,6 @@ import { type FC, useCallback, useEffect, useState } from "react";
 import { desktopApi } from "../../../../../api";
 import {
 	Bell,
-	Bot,
 	Check,
 	Globe,
 	History,
@@ -13,8 +12,6 @@ import {
 	Save,
 	Sliders,
 	Sun,
-	Terminal,
-	UserRound,
 	Zap,
 } from "../../../../icons";
 import type { AppSettings } from "../../../../../lib/app-types";
@@ -317,66 +314,7 @@ export const GeneralTab: FC<GeneralTabProps> = ({ instanceId, onReload }) => {
 				</div>
 			</section>
 
-			{/* ── 1. Workspace Modes ── */}
-			<section className="settings-section-card">
-				<div className="settings-section-card-header">
-					<div className="settings-section-card-header-left">
-						<div className="settings-section-card-icon">
-							<Bot size={18} />
-						</div>
-						<div className="settings-section-card-title">
-							<h3>默认工作空间模式 (Workspace Mode)</h3>
-							<span>新建会话时默认启用的智能体行为模式与工具配置</span>
-						</div>
-					</div>
-				</div>
 
-				<div className="settings-section-card-body">
-					<div className="workspace-modes-grid">
-						{[
-							{
-								id: "chat",
-								label: "Chat 通用模式",
-								icon: Bot,
-								desc: "通用智能助手，适合常规沟通、日常问答与多工具协同。",
-							},
-							{
-								id: "code",
-								label: "Code 编程模式",
-								icon: Terminal,
-								desc: "专属工程开发模式，开箱配备文件读写、Bash 执行、Grep 等全套编程工具。",
-							},
-							{
-								id: "personal",
-								label: "Personal 个人模式",
-								icon: UserRound,
-								desc: "专属个人私密工作空间，深度融合长期记忆沉淀与个性化沟通风格。",
-							},
-						].map((item) => {
-							const Icon = item.icon;
-							const isActive = defaultMode === item.id;
-							return (
-								<button
-									key={item.id}
-									type="button"
-									className={`workspace-mode-card ${isActive ? "active" : ""}`}
-									onClick={() => {
-										const nextMode = item.id as "chat" | "code" | "personal";
-										setDefaultMode(nextMode);
-										void handleSave({ defaultMode: nextMode });
-									}}
-								>
-									<div className="workspace-mode-card-header">
-										<Icon size={16} style={{ color: isActive ? "var(--accent)" : "var(--text-secondary)" }} />
-										<strong>{item.label}</strong>
-									</div>
-									<p>{item.desc}</p>
-								</button>
-							);
-						})}
-					</div>
-				</div>
-			</section>
 
 			{/* ── 2. Context & Memory ── */}
 			<section className="settings-section-card">
