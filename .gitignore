@@ -19,3 +19,5 @@ spike/agent-dir/models.json
 spike/agent-dir/models-store.json
 .pi/
 target/
+swift/
+release_notes.md

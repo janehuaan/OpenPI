@@ -16,7 +16,6 @@ crates/openpi-memory      向量检索与会话记忆模块 (Rust)
 crates/openpi-state       全局状态管理
 crates/openpi-storage     SQLite 数据库持久化层
 crates/openpi-proto       全局共享的跨进程通信协议类型定义
-swift/                    系统原生的监控与插件扩展（macOS/iOS）
 extensions/               AI 扩展能力集合 (Sentinel等)
 ```
 
@@ -26,7 +25,6 @@ extensions/               AI 扩展能力集合 (Sentinel等)
 - **全异步 Rust 后端**: 采用 Tokio 构建高性能底层 Daemon，负责所有高并发任务及长连接 WebSocket 通信。
 - **内存安全与高效**: 本地记忆、事件总线、文件调度均在 Rust 层实现，无需繁重的 Node.js runtime。
 - **极简前端 UI**: React 19 + Vite 构建的现代化响应式布局，体验流畅。
-- **原生系统级集成**: 包括 Swift 编写的内存监控、系统信息收集组件。
 
 ## 开发
 
