@@ -25,17 +25,17 @@ export function formatConversationToMarkdown(
 		includeToolResults = true,
 	} = options;
 
-	const title = customTitle || instanceTitle(conversation.instance, conversation.state.sessionName);
+	const title = customTitle || instanceTitle(conversation.instance, conversation.state?.sessionName);
 	const lines: string[] = [`# ${title}`, ""];
 
 	if (includeMetadata) {
 		const metaLines: string[] = [];
-		const sessionName = conversation.state.sessionName || conversation.instance.label;
+		const sessionName = conversation.state?.sessionName || conversation.instance.label;
 		if (sessionName) metaLines.push(`> **Session**: ${sessionName}`);
 		if (conversation.instance.id) metaLines.push(`> **Session ID**: \`${conversation.instance.id}\``);
 		if (conversation.instance.mode) metaLines.push(`> **Mode**: ${conversation.instance.mode}`);
 		if (conversation.instance.cwd) metaLines.push(`> **Workspace**: \`${conversation.instance.cwd}\``);
-		if (conversation.state.model) {
+		if (conversation.state?.model) {
 			const { provider, id } = conversation.state.model;
 			const modelLabel = provider ? (id ? `${provider}/${id}` : provider) : (id ?? "");
 			if (modelLabel) metaLines.push(`> **Model**: ${modelLabel}`);
@@ -199,7 +199,7 @@ export function formatMessageToMarkdown(
  * Generates a clean, filesystem-safe filename for exporting a conversation.
  */
 export function generateExportFilename(conversation: ConversationSnapshot): string {
-	const rawTitle = conversation.state.sessionName || conversation.instance.label || "conversation";
+	const rawTitle = conversation.state?.sessionName || conversation.instance.label || "conversation";
 	const sanitized = rawTitle
 		.trim()
 		.toLowerCase()

@@ -541,9 +541,9 @@ export function ReferenceWorkspacePreview({
 			: "新对话";
 	const storedMessages = conversation?.messages ?? [];
 	const messages = optimisticMessage ? [...storedMessages, optimisticMessage] : storedMessages;
-	const isWorking = Boolean(conversation?.state.isStreaming || sending || optimisticMessage || runningTools.length > 0);
+	const isWorking = Boolean(conversation?.state?.isStreaming || sending || optimisticMessage || runningTools.length > 0);
 
-	const currentModelName = conversation?.state.model?.name || conversation?.state.model?.id;
+	const currentModelName = conversation?.state?.model?.name || conversation?.state?.model?.id;
 	const swarmWorkflow = useMemo(() => {
 		return extractSwarmFromMessages(
 			messages,
@@ -783,11 +783,11 @@ export function ReferenceWorkspacePreview({
 		if (conversation?.state?.model?.id) {
 			const byExact = modelOptions.find(
 				(model) =>
-					model.provider.toLowerCase() === (conversation.state.model?.provider || "").toLowerCase() &&
-					model.id === conversation.state.model?.id,
+					model.provider.toLowerCase() === (conversation?.state?.model?.provider || "").toLowerCase() &&
+					model.id === conversation?.state?.model?.id,
 			);
 			if (byExact) return byExact;
-			const byId = modelOptions.find((model) => model.id === conversation.state.model?.id);
+			const byId = modelOptions.find((model) => model.id === conversation?.state?.model?.id);
 			if (byId) return byId;
 		}
 		return defaultOption;
@@ -798,11 +798,11 @@ export function ReferenceWorkspacePreview({
 		currentModel?.supportsImages === false &&
 		visionFallback?.enabled === true &&
 		visionFallback.configured;
-	const supportsThinking = modelSupportsReasoning(currentModel ?? conversation?.state.model);
+	const supportsThinking = modelSupportsReasoning(currentModel ?? conversation?.state?.model);
 	const thinkingLevels = currentModel?.thinkingLevels ?? thinkingLevelsForModel({ reasoning: supportsThinking });
 	const modelGroups = useMemo(() => {
-		const currentProvider = (currentModel?.provider ?? conversation?.state.model?.provider ?? "").toLowerCase();
-		const currentId = currentModel?.id ?? conversation?.state.model?.id ?? "";
+		const currentProvider = (currentModel?.provider ?? conversation?.state?.model?.provider ?? "").toLowerCase();
+		const currentId = currentModel?.id ?? conversation?.state?.model?.id ?? "";
 
 		const groups = new Map<string, ConversationModelOption[]>();
 		for (const model of modelOptions) {
@@ -849,7 +849,7 @@ export function ReferenceWorkspacePreview({
 		});
 
 		return entries;
-	}, [modelOptions, currentModel, conversation?.state.model]);
+	}, [modelOptions, currentModel, conversation?.state?.model]);
 	const IGNORED_EXTENSIONS = useMemo(
 		() =>
 			new Set([
@@ -877,9 +877,9 @@ export function ReferenceWorkspacePreview({
 		typeof entry === "string" && entry.toLowerCase().includes(memoryQuery.trim().toLowerCase()),
 	);
 
-	const modelId = conversation?.state.model?.id || currentModel?.id || "";
-	const rawCtx = currentModel?.contextWindow ?? conversation?.state.model?.contextWindow;
-	const rawMax = currentModel?.maxTokens ?? conversation?.state.model?.maxTokens;
+	const modelId = conversation?.state?.model?.id || currentModel?.id || "";
+	const rawCtx = currentModel?.contextWindow ?? conversation?.state?.model?.contextWindow;
+	const rawMax = currentModel?.maxTokens ?? conversation?.state?.model?.maxTokens;
 
 	const contextUsage = stats?.contextUsage;
 	const contextTokens = contextUsage?.tokens ?? 0;
@@ -2060,7 +2060,7 @@ export function ReferenceWorkspacePreview({
 						</div>
 					</div>
 					<div className="reference-header-actions">
-						{conversation?.state.isStreaming && (
+						{conversation?.state?.isStreaming && (
 							<span className="reference-streaming-badge">
 								<RefreshCw size={12} className="spin" />
 								<span>处理中…</span>
@@ -2602,8 +2602,8 @@ export function ReferenceWorkspacePreview({
 										<span className="reference-model-name">
 											{shortModelName(
 												currentModel?.name ??
-													conversation?.state.model?.name ??
-													conversation?.state.model?.id ??
+													conversation?.state?.model?.name ??
+													conversation?.state?.model?.id ??
 													defaultOption?.name ??
 													"Model",
 											)}
@@ -2629,7 +2629,7 @@ export function ReferenceWorkspacePreview({
 														type="button"
 														key={level}
 														className={
-															(conversation?.state.thinkingLevel ?? getHighestThinkingLevel(currentModel)) === level
+															(conversation?.state?.thinkingLevel ?? getHighestThinkingLevel(currentModel)) === level
 																? "active"
 																: ""
 														}
@@ -2656,8 +2656,8 @@ export function ReferenceWorkspacePreview({
 														{models.map((model) => {
 															const isCurrent =
 																model.provider.toLowerCase() ===
-																	(currentModel?.provider ?? conversation?.state.model?.provider ?? "").toLowerCase() &&
-																model.id === (currentModel?.id ?? conversation?.state.model?.id);
+																	(currentModel?.provider ?? conversation?.state?.model?.provider ?? "").toLowerCase() &&
+																model.id === (currentModel?.id ?? conversation?.state?.model?.id);
 															return (
 																<CommandItem
 																	value={`${model.provider}/${model.id}`}
@@ -2914,7 +2914,7 @@ export function ReferenceWorkspacePreview({
 							</strong>
 						</span>
 						<span>
-							主力模型 <strong>{currentModel?.name ?? conversation?.state.model?.name ?? conversation?.state.model?.id ?? "--"}</strong>
+							主力模型 <strong>{currentModel?.name ?? conversation?.state?.model?.name ?? conversation?.state?.model?.id ?? "--"}</strong>
 						</span>
 						<span>
 							上下文窗口 <strong>{contextWindow > 0 ? fmtTokens(contextWindow) : "--"}</strong>
@@ -2929,8 +2929,8 @@ export function ReferenceWorkspacePreview({
 						</span>
 						<span>
 							运行状态{" "}
-							<strong className={`ref-status-indicator ${conversation?.state.isStreaming ? "working" : "idle"}`}>
-								<span className="ref-status-dot" /> {conversation?.state.isStreaming ? "运行中" : "空闲就绪"}
+							<strong className={`ref-status-indicator ${conversation?.state?.isStreaming ? "working" : "idle"}`}>
+								<span className="ref-status-dot" /> {conversation?.state?.isStreaming ? "运行中" : "空闲就绪"}
 							</strong>
 						</span>
 					</div>

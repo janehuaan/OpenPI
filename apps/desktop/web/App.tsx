@@ -273,7 +273,7 @@ export function App() {
 
 	const activeConversationUiRequest = pendingConversationUiRequests[0];
 	const isStreaming = Boolean(
-		conversation?.state.isStreaming ||
+		conversation?.state?.isStreaming ||
 		optimisticMessage ||
 		(selectedInstanceId && streamingInstances.has(selectedInstanceId)),
 	);
@@ -488,7 +488,7 @@ export function App() {
 	}, [selectedInstanceId, isStreaming]);
 
 	useEffect(() => {
-		const provider = conversation?.state.model?.provider;
+		const provider = conversation?.state?.model?.provider;
 		if (!provider) {
 			setProviderBalance(undefined);
 			return;
@@ -497,7 +497,7 @@ export function App() {
 			.getProviderBalance(provider)
 			.then(setProviderBalance)
 			.catch(() => setProviderBalance(undefined));
-	}, [conversation?.state.model?.provider]);
+	}, [conversation?.state?.model?.provider]);
 
 	// Task list panel: poll while a conversation is selected (todo changes come
 	// from agent tool calls, which emit no dedicated desktop event).
@@ -938,7 +938,7 @@ export function App() {
 							)
 					: false;
 				const streamConnected = streamConnectedInstanceId === instanceId;
-				delay = (pending && !messageAccepted) || (next.state.isStreaming && !streamConnected) ? 250 : 15_000;
+				delay = (pending && !messageAccepted) || (next.state?.isStreaming && !streamConnected) ? 250 : 15_000;
 				if (!disposed) {
 					setConversation((current) => {
 						if (!current || current.instance.id !== next.instance.id) {
@@ -986,8 +986,8 @@ export function App() {
 						// return current to preserve object identity and completely prevent React re-rendering!
 						if (
 							current.messages.length === next.messages.length &&
-							current.state.sessionName === next.state.sessionName &&
-							current.state.isStreaming === next.state.isStreaming &&
+							current.state?.sessionName === next.state?.sessionName &&
+							current.state?.isStreaming === next.state?.isStreaming &&
 							current.instance.status === next.instance.status
 						) {
 							const curLast = current.messages[current.messages.length - 1];
@@ -1001,7 +1001,7 @@ export function App() {
 						}
 						return next;
 					});
-					if (!next.state.isStreaming && !streamingInstances.has(instanceId)) {
+					if (!next.state?.isStreaming && !streamingInstances.has(instanceId)) {
 						clearRunningTools(instanceId);
 						next.messages = next.messages.map((m) => {
 							if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
@@ -1016,7 +1016,7 @@ export function App() {
 					if (messageAccepted) {
 						setOptimisticMessage((current) => (current === pending ? undefined : current));
 					}
-					const sessionName = next.state.sessionName;
+					const sessionName = next.state?.sessionName;
 					if (sessionName) {
 						setConversationTitles((current) => ({ ...current, [next.instance.id]: sessionName }));
 					}
@@ -2067,7 +2067,7 @@ export function App() {
 		if (!instanceId) return;
 		try {
 			const next = await desktopApi.getConversation(instanceId);
-			if (!next.state.isStreaming && !streamingInstances.has(instanceId)) {
+			if (!next.state?.isStreaming && !streamingInstances.has(instanceId)) {
 				next.messages = next.messages.map((m) => {
 					if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
 					return {

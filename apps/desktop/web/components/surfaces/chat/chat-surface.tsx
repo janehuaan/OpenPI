@@ -289,7 +289,7 @@ export function ChatSurface({
 	const speechRestartTimer = useRef<number | undefined>(undefined);
 	const speechErrorHandler = useRef(onError);
 	speechErrorHandler.current = onError;
-	const isStreaming = conversation?.state.isStreaming ?? false;
+	const isStreaming = conversation?.state?.isStreaming ?? false;
 	const isWorking = isStreaming || optimisticMessage !== undefined;
 
 	const workingStartedAtRef = useRef<number>(0);
@@ -372,14 +372,14 @@ export function ChatSurface({
 	const currentModel = modelOptions.find(
 		(model) => model.provider === conversation?.state?.model?.provider && model.id === conversation?.state?.model?.id,
 	);
-	const supportsThinking = modelSupportsReasoning(currentModel ?? conversation?.state.model);
+	const supportsThinking = modelSupportsReasoning(currentModel ?? conversation?.state?.model);
 	const availableThinkingLevels: ThinkingLevel[] =
 		currentModel?.thinkingLevels && currentModel.thinkingLevels.length > 0
 			? currentModel.thinkingLevels
 			: thinkingLevelsForModel({ reasoning: supportsThinking });
 	const modelGroups = useMemo(() => {
-		const currentProvider = (currentModel?.provider ?? conversation?.state.model?.provider ?? "").toLowerCase();
-		const currentId = currentModel?.id ?? conversation?.state.model?.id ?? "";
+		const currentProvider = (currentModel?.provider ?? conversation?.state?.model?.provider ?? "").toLowerCase();
+		const currentId = currentModel?.id ?? conversation?.state?.model?.id ?? "";
 
 		const groups = new Map<string, ConversationModelOption[]>();
 		for (const model of modelOptions) {
@@ -426,7 +426,7 @@ export function ChatSurface({
 		});
 
 		return entries;
-	}, [modelOptions, currentModel, conversation?.state.model]);
+	}, [modelOptions, currentModel, conversation?.state?.model]);
 	const configurationDisabled = !conversation || isWorking || configuring;
 	const supportsComposerImages = composerMode === "image" || composerMode === "chat";
 	const canSubmit =
@@ -1111,7 +1111,7 @@ export function ChatSurface({
 	const fmtCost = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
 	const workspaceLabel = workspace ? workspace.split(/[\\/]/).pop() || workspace : "—";
 	const titleText = conversation
-		? instanceTitle(conversation.instance, conversation.state.sessionName)
+		? instanceTitle(conversation.instance, conversation.state?.sessionName)
 		: selectedInstance
 			? instanceTitle(selectedInstance, selectedInstance.label)
 			: "新对话";
@@ -1711,7 +1711,7 @@ export function ChatSurface({
 										>
 											<span className="model-picker-label">
 												{shortModelName(
-													conversation?.state.model?.name ?? conversation?.state.model?.id ?? "模型",
+													conversation?.state?.model?.name ?? conversation?.state?.model?.id ?? "模型",
 												)}
 												{supportsThinking && conversation?.state?.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
 													<>
@@ -1739,7 +1739,7 @@ export function ChatSurface({
 															type="button"
 															key={level}
 															className={
-																(conversation?.state.thinkingLevel ?? getHighestThinkingLevel(currentModel)) === level ? "active" : ""
+																(conversation?.state?.thinkingLevel ?? getHighestThinkingLevel(currentModel)) === level ? "active" : ""
 															}
 															disabled={configurationDisabled || loadingModels || !currentModel}
 															onClick={() => onThinkingLevelChange(level)}
@@ -1761,8 +1761,8 @@ export function ChatSurface({
 															{models.map((model) => {
 																const selected =
 																	model.provider.toLowerCase() ===
-																		(currentModel?.provider ?? conversation?.state.model?.provider ?? "").toLowerCase() &&
-																	model.id === (currentModel?.id ?? conversation?.state.model?.id);
+																		(currentModel?.provider ?? conversation?.state?.model?.provider ?? "").toLowerCase() &&
+																	model.id === (currentModel?.id ?? conversation?.state?.model?.id);
 																return (
 																	<CommandItem
 																		className={`ui-command-item ${selected ? "model-item-current selected active" : ""}`}
@@ -1901,7 +1901,7 @@ export function ChatSurface({
 					</span>
 					<span title="当前模型">
 						<Cpu size={13} />
-						{conversation?.state.model?.id ?? "—"}
+						{conversation?.state?.model?.id ?? "—"}
 					</span>
 				</div>
 				<div className="statusbar-right">

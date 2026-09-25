@@ -209,7 +209,7 @@ export function ContextPanel({
 
 	// Context window
 	const ctxUsage = stats?.contextUsage;
-	const modelCtxWindow = conversation?.state.model?.contextWindow;
+	const modelCtxWindow = conversation?.state?.model?.contextWindow;
 	const ctxTokens = ctxUsage?.tokens ?? 0;
 	const ctxMax = ctxUsage?.contextWindow ?? modelCtxWindow ?? 0;
 
@@ -306,11 +306,11 @@ export function ContextPanel({
 							</div>
 							<div>
 								<span>主力模型</span>
-								<strong>{conversation?.state.model?.name ?? conversation?.state.model?.id ?? "默认主力模型"}</strong>
+								<strong>{conversation?.state?.model?.name ?? conversation?.state?.model?.id ?? "默认主力模型"}</strong>
 							</div>
 							<div>
 								<span>思考深度</span>
-								<strong>{thinkingLevelLabel(conversation?.state.thinkingLevel)}</strong>
+								<strong>{thinkingLevelLabel(conversation?.state?.thinkingLevel)}</strong>
 							</div>
 						</div>
 					</section>

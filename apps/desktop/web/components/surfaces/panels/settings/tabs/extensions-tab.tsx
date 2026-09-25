@@ -647,7 +647,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 								<button
 									type="button"
 									className="button secondary"
-									disabled={conversation?.state.isStreaming}
+									disabled={Boolean(conversation?.state?.isStreaming)}
 									onClick={onConfigureMcp}
 								>
 									<span>配置服务</span>
