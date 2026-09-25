@@ -215,6 +215,7 @@ pub async fn handle_invoke(
                             } else if entry_type == "model_change" {
                                 model_val = json!({
                                     "id": entry.get("modelId").and_then(|v| v.as_str()),
+                                    "name": entry.get("name").and_then(|v| v.as_str()).or_else(|| entry.get("modelId").and_then(|v| v.as_str())),
                                     "provider": entry.get("provider").and_then(|v| v.as_str()),
                                 });
                             } else if entry_type == "thinking_level_change" {
@@ -229,6 +230,100 @@ pub async fn handle_invoke(
                         }
                     }
                 }
+            }
+
+            // Fallback to configured default model from app_settings.json / models.json
+            if model_val.is_null() || model_val.get("id").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                let settings_path = agent_dir().join("app_settings.json");
+                let mut def_model_id = None;
+                let mut def_provider = None;
+                if settings_path.exists() {
+                    if let Ok(c) = fs::read_to_string(&settings_path) {
+                        if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                            def_model_id = val.get("defaultModel").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            def_provider = val.get("defaultProvider").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        }
+                    }
+                }
+
+                let models_path = agent_dir().join("models.json");
+                let mut resolved_name = def_model_id.clone();
+                let mut resolved_provider = def_provider.clone();
+
+                if models_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&models_path) {
+                        if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                            if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                                if let (Some(ref p_id), Some(ref m_id)) = (&def_provider, &def_model_id) {
+                                    if let Some(p_val) = providers.get(p_id) {
+                                        if let Some(m_arr) = p_val.get("models").and_then(|m| m.as_array()) {
+                                            for mo in m_arr {
+                                                let id_match = mo.get("id").and_then(|v| v.as_str()) == Some(m_id)
+                                                    || mo.as_str() == Some(m_id);
+                                                if id_match {
+                                                    if let Some(n) = mo.get("name").and_then(|v| v.as_str()) {
+                                                        resolved_name = Some(n.to_string());
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    for (p_name, p_val) in providers {
+                                        if let Some(m_arr) = p_val.get("models").and_then(|m| m.as_array()) {
+                                            if let Some(first_m) = m_arr.first() {
+                                                resolved_provider = Some(p_name.clone());
+                                                if let Some(m_obj) = first_m.as_object() {
+                                                    def_model_id = m_obj.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                                    resolved_name = m_obj.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                                } else if let Some(m_str) = first_m.as_str() {
+                                                    def_model_id = Some(m_str.to_string());
+                                                    resolved_name = Some(m_str.to_string());
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let (Some(m), Some(p)) = (def_model_id, resolved_provider) {
+                    model_val = json!({
+                        "id": m,
+                        "name": resolved_name.unwrap_or_else(|| m.clone()),
+                        "provider": p
+                    });
+                }
+            } else if model_val.get("name").is_none() || model_val.get("name").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                let m_id = model_val.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let p_id = model_val.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                let models_path = agent_dir().join("models.json");
+                let mut resolved_name = m_id.to_string();
+                if models_path.exists() {
+                    if let Ok(content) = fs::read_to_string(&models_path) {
+                        if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                            if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                                if let Some(p_val) = providers.get(p_id) {
+                                    if let Some(m_arr) = p_val.get("models").and_then(|m| m.as_array()) {
+                                        for mo in m_arr {
+                                            if mo.get("id").and_then(|v| v.as_str()) == Some(m_id) {
+                                                if let Some(n) = mo.get("name").and_then(|v| v.as_str()) {
+                                                    resolved_name = n.to_string();
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                model_val["name"] = json!(resolved_name);
             }
 
             let mut running = false;
@@ -797,6 +892,18 @@ pub async fn handle_invoke(
 
         "get_available_models" | "get_model_catalog" | "get_conversation_models" => {
             let mut list = Vec::new();
+            let mut def_model_id = None;
+            let mut def_provider = None;
+            let settings_path = agent_dir().join("app_settings.json");
+            if settings_path.exists() {
+                if let Ok(c) = fs::read_to_string(&settings_path) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                        def_model_id = val.get("defaultModel").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        def_provider = val.get("defaultProvider").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    }
+                }
+            }
+
             let models_path = agent_dir().join("models.json");
             if models_path.exists() {
                 if let Ok(content) = fs::read_to_string(&models_path) {
@@ -805,12 +912,37 @@ pub async fn handle_invoke(
                             for (p_name, p_val) in providers {
                                 if let Some(m_arr) = p_val.get("models").and_then(|m| m.as_array()) {
                                     for m in m_arr {
-                                        if let Some(m_id) = m.as_str() {
+                                        if let Some(m_obj) = m.as_object() {
+                                            let m_id = m_obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                            if m_id.is_empty() { continue; }
+                                            let m_name = m_obj.get("name").and_then(|v| v.as_str()).unwrap_or(m_id);
+                                            let reasoning = m_obj.get("reasoning").and_then(|v| v.as_bool()).unwrap_or_else(|| {
+                                                m_id.contains("thinking") || m_id.contains("r1") || m_id.contains("high") || m_id.contains("reason")
+                                            });
+                                            let context_window = m_obj.get("contextWindow").and_then(|v| v.as_u64());
+                                            let max_tokens = m_obj.get("maxTokens").and_then(|v| v.as_u64());
+                                            let supports_images = m_obj.get("input").and_then(|v| v.as_array()).map(|arr| {
+                                                arr.iter().any(|item| item.as_str() == Some("image"))
+                                            }).unwrap_or(false);
+                                            let is_default = def_model_id.as_deref() == Some(m_id) && (def_provider.is_none() || def_provider.as_deref() == Some(p_name));
+                                            list.push(json!({
+                                                "provider": p_name,
+                                                "id": m_id,
+                                                "name": m_name,
+                                                "reasoning": reasoning,
+                                                "contextWindow": context_window,
+                                                "maxTokens": max_tokens,
+                                                "supportsImages": supports_images,
+                                                "isDefault": is_default
+                                            }));
+                                        } else if let Some(m_id) = m.as_str() {
+                                            let is_default = def_model_id.as_deref() == Some(m_id) && (def_provider.is_none() || def_provider.as_deref() == Some(p_name));
                                             list.push(json!({
                                                 "provider": p_name,
                                                 "id": m_id,
                                                 "name": m_id,
-                                                "reasoning": m_id.contains("thinking") || m_id.contains("r1") || m_id.contains("sonnet")
+                                                "reasoning": m_id.contains("thinking") || m_id.contains("r1") || m_id.contains("sonnet") || m_id.contains("high"),
+                                                "isDefault": is_default
                                             }));
                                         }
                                     }
@@ -821,9 +953,9 @@ pub async fn handle_invoke(
                 }
             }
             if list.is_empty() {
-                list.push(json!({ "provider": "anthropic", "id": "claude-3-7-sonnet", "name": "claude-3-7-sonnet", "reasoning": true }));
-                list.push(json!({ "provider": "openai", "id": "gpt-4o", "name": "gpt-4o", "reasoning": false }));
-                list.push(json!({ "provider": "deepseek", "id": "deepseek-reasoner", "name": "deepseek-r1", "reasoning": true }));
+                list.push(json!({ "provider": "anthropic", "id": "claude-3-7-sonnet", "name": "claude-3-7-sonnet", "reasoning": true, "isDefault": true }));
+                list.push(json!({ "provider": "openai", "id": "gpt-4o", "name": "gpt-4o", "reasoning": false, "isDefault": false }));
+                list.push(json!({ "provider": "deepseek", "id": "deepseek-reasoner", "name": "deepseek-r1", "reasoning": true, "isDefault": false }));
             }
             Ok(json!(list))
         }

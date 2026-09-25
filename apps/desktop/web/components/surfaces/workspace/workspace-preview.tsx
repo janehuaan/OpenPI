@@ -774,9 +774,25 @@ export function ReferenceWorkspacePreview({
 		return undefined;
 	}, [feedItems]);
 
-	const currentModel = modelOptions.find(
-		(model) => model.provider === conversation?.state?.model?.provider && model.id === conversation?.state?.model?.id,
+	const defaultOption = useMemo(
+		() => modelOptions.find((m) => (m as { isDefault?: boolean }).isDefault) ?? modelOptions[0],
+		[modelOptions],
 	);
+
+	const currentModel = useMemo(() => {
+		if (conversation?.state?.model?.id) {
+			const byExact = modelOptions.find(
+				(model) =>
+					model.provider.toLowerCase() === (conversation.state.model?.provider || "").toLowerCase() &&
+					model.id === conversation.state.model?.id,
+			);
+			if (byExact) return byExact;
+			const byId = modelOptions.find((model) => model.id === conversation.state.model?.id);
+			if (byId) return byId;
+		}
+		return defaultOption;
+	}, [modelOptions, conversation?.state?.model, defaultOption]);
+
 	const usesVisionFallback =
 		attachments.length > 0 &&
 		currentModel?.supportsImages === false &&
@@ -2585,7 +2601,11 @@ export function ReferenceWorkspacePreview({
 									>
 										<span className="reference-model-name">
 											{shortModelName(
-												conversation?.state.model?.name ?? conversation?.state.model?.id ?? "Model",
+												currentModel?.name ??
+													conversation?.state.model?.name ??
+													conversation?.state.model?.id ??
+													defaultOption?.name ??
+													"Model",
 											)}
 										</span>
 										{supportsThinking && conversation?.state?.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
