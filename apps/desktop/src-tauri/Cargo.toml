@@ -1,6 +1,6 @@
 [package]
 name = "openpi-desktop"
-version = "0.2.3"
+version = "1.0.0"
 description = "OpenPI Desktop application powered by Tauri v2 and native Rust backend"
 authors = ["OpenPI Contributors"]
 edition = "2021"
