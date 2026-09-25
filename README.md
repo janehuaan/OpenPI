@@ -1,78 +1,59 @@
 # openpi-next
 
-OpenPI 重建版 —— 一个只依赖上游 pi 的 npm 包的桌面 AI 助手。
+# OpenPI
+
+OpenPI —— 一个高性能、全栈重构的桌面 AI 助手（Rust + Tauri + React）。
 
 ## 架构
 
+核心架构已从旧版的 Electron + Node.js Daemon 迁移至原生的 **Tauri (Rust)**，大幅降低内存占用，提升运行效率与安全性。
+
 ```
-apps/desktop              Electron 壳(main/preload/renderer)—— 纯 IPC 转发 + 原生能力
-packages/shared           desktop ↔ daemon 的线协议类型(唯一共享层)
-packages/daemon           会话监督 + app 级 API + 定时任务托管 + IPC server
-packages/scheduler        定时任务引擎(cron/DAG/重试)
-extensions/               pi 官方扩展机制实现的能力(memory/session-state/tools)
-spike/                    Phase 0 路线验证
+apps/desktop              Tauri 壳 (WebView + Rust Backend) —— 原生窗口与系统集成
+crates/openpi-daemon      核心守护进程，负责会话监督、进程管理、Socket 通信
+crates/openpi-scheduler   Rust 原生的定时任务引擎 (cron/DAG)
+crates/openpi-memory      向量检索与会话记忆模块 (Rust)
+crates/openpi-state       全局状态管理
+crates/openpi-storage     SQLite 数据库持久化层
+crates/openpi-proto       全局共享的跨进程通信协议类型定义
+swift/                    系统原生的监控与插件扩展（macOS/iOS）
+extensions/               AI 扩展能力集合 (Sentinel等)
 ```
 
-## 状态
+## 核心特性
 
-| 包 | 测试 | 说明 |
-|---|---|---|
-| `packages/shared` | 8 | 线协议 + 帧编解码 |
-| `packages/daemon` | 98 | 会话池、app 级操作、定时任务转发 |
-| `packages/scheduler` | 73 | cron/一次性、DAG 步骤、重试 |
-| `extensions/memory` | 100 | 本地记忆 + 混合检索 |
-| `extensions/session-state` | 79 | 任务状态/检查点/结构化压缩/事件账本 |
-| `extensions/tools` | 85 | 8 个零依赖工具入口 |
-| `apps/desktop` | 98 | 流式归约、扩展提示、markdown、cron、IPC 契约 |
-| **合计** | **541** | |
-
-`npm run check` = typecheck + 全部测试。
-
-- **上游只锁版本,零 patch**:`@earendil-works/pi-{ai,agent-core,coding-agent}@0.84.4` 是 npm 依赖,
-  不再是 fork 内源码。升级只需改版本号。
-- **三进程隔离**:renderer ↔ main ↔ daemon ↔ `pi --mode rpc` 子进程。改 daemon 或扩展不用重装 .app。
-- **每个会话一个 pi 子进程**,载荷 JSONL 帧,扩展经 `PI_CODING_AGENT_DIR` 隔离加载。
-- **一条长连接 + 请求 id 多路复用**,取代旧的"短连接 request-response + 长连接 rpc_stream"两套并存。
+- **轻量级原生体验**: 基于 Tauri 构建，相较于传统 Electron 体积更小，内存开销更低。
+- **全异步 Rust 后端**: 采用 Tokio 构建高性能底层 Daemon，负责所有高并发任务及长连接 WebSocket 通信。
+- **内存安全与高效**: 本地记忆、事件总线、文件调度均在 Rust 层实现，无需繁重的 Node.js runtime。
+- **极简前端 UI**: React 19 + Vite 构建的现代化响应式布局，体验流畅。
+- **原生系统级集成**: 包括 Swift 编写的内存监控、系统信息收集组件。
 
 ## 开发
 
-```bash
-npm install --ignore-scripts          # 首次
-node packages/daemon/src/cli.ts serve # 前台跑 daemon
-node packages/daemon/src/cli.ts health
-node packages/daemon/src/cli.ts create /path --mode code --model agnes-cn/agnes-2.5-flash
-node packages/daemon/src/cli.ts rpc <sessionId> '{"type":"get_state","id":"1"}'
-node packages/daemon/src/cli.ts watch <sessionId>
-node packages/daemon/src/cli.ts shutdown
-```
-
-## 约定的环境变量
-
-| 变量 | 作用 |
-|---|---|
-| `PI_CODING_AGENT_DIR` | 传给每个 pi 子进程,指向 `~/.openpi/agent`。**必须隔离**,否则加载用户全局扩展 |
-| `OPENPI_DIR` | daemon 数据目录(默认 `~/.openpi`) |
-| `OPENPI_SOCKET` | socket 路径(默认 `~/.openpi/daemon.sock`) |
-| `OPENPI_PI_RPC_ENTRY` | 覆盖 pi RPC entry 路径(测试/开发用) |
-
-## 凭证(决策 B)
-
-首次启动 daemon 自动从用户已有的 `~/.pi/agent/` 导入 `models.json`/`auth.json`/`models-store.json`,
-写入 `~/.openpi/agent/`。导入是一次性的(写 `.bootstrapped` 标记),之后两边互不影响;
-`import-credentials` 命令可强制重导。
-
-## 打包
+环境要求：
+- Node.js 20+
+- Rust 1.80+ (cargo)
+- macOS (Xcode Command Line Tools)
 
 ```bash
-npm run pack:mac -w @openpi/desktop      # dmg + dir,arm64 与 x64
-npm run install:local -w @openpi/desktop # 打包并装进 /Applications
+# 1. 安装前端依赖
+yarn install
+
+# 2. 本地开发 (自动启动 Vite 前端与 Cargo Tauri 后端)
+cd apps/desktop
+yarn dev
+
+# 3. 构建前端产物
+yarn build:web
 ```
 
-`runtime/` 里是 daemon 与各扩展的 esbuild 产物 + 锁版本 pi 的 `dist/` + jiti,
-共 20 MB;打出的 .app 285 MB(其中 264 MB 是 Electron 本体)。旧版对应数字是
-190 MB / 734 MB。细节见 `apps/desktop/README.md`。
+## 打包 (Release)
 
-## 供应链纪律
+使用提供的脚本构建生产版本的 `.app`：
 
-照抄上游(根 `.npmrc` 的 `save-exact=true`、`min-release-age=2`):
-直接依赖必须精确版本,锁文件是唯一真源。
+```bash
+# 构建并打包生成 macOS 应用程序 (OpenPI.app)
+./scripts/package-tauri-app.sh
+```
+
+构建完成的产物会位于 `dist/OpenPI.app`。

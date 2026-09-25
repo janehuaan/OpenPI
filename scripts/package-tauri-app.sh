@@ -10,7 +10,7 @@ npm run build:web -w @openpi/desktop
 echo "🔨 2. Building Rust Release Binaries (openpi-daemon & openpi-desktop)..."
 cargo build --release -p openpi-daemon -p openpi-desktop
 
-APP_DIR="$DIR/dist/OpenPI-Tauri.app"
+APP_DIR="$DIR/dist/OpenPI.app"
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
@@ -52,5 +52,5 @@ cat << 'PLIST' > "$APP_DIR/Contents/Info.plist"
 </plist>
 PLIST
 
-echo "🎉 OpenPI-Tauri.app packaging complete!"
+echo "🎉 OpenPI.app packaging complete!"
 du -sh "$APP_DIR"
