@@ -182,7 +182,7 @@ export const GeneralTab: FC<GeneralTabProps> = ({ instanceId, onReload }) => {
 							<div style={{ fontSize: "12px", fontWeight: 650, color: "var(--text-secondary)", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
 								<Moon size={14} style={{ color: "var(--accent)" }} />
 								<span>深色调色盘 (Dark Flavors)</span>
-								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· 4 款极客护眼与实体配色</span>
+								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· {THEME_PRESETS.filter((p) => p.mode === "dark").length} 款精调质感与实体配色</span>
 							</div>
 							<div className="theme-flavors-grid">
 								{THEME_PRESETS.filter((p) => p.mode === "dark").map((preset) => {
@@ -249,7 +249,7 @@ export const GeneralTab: FC<GeneralTabProps> = ({ instanceId, onReload }) => {
 							<div style={{ fontSize: "12px", fontWeight: 650, color: "var(--text-secondary)", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
 								<Sun size={14} style={{ color: "var(--warn)" }} />
 								<span>浅色调色盘 (Light Flavors)</span>
-								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· 3 款日间素雅与纸本舒适</span>
+								<span style={{ fontSize: "11px", color: "var(--text-tertiary)", fontWeight: 400 }}>· {THEME_PRESETS.filter((p) => p.mode === "light").length} 款日间素雅与纸本舒适</span>
 							</div>
 							<div className="theme-flavors-grid">
 								{THEME_PRESETS.filter((p) => p.mode === "light").map((preset) => {
