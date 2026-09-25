@@ -81,96 +81,79 @@ pub fn load_agent_and_app_settings() -> (Value, Option<String>, Option<String>) 
     (merged, def_model, def_provider)
 }
 
+pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
+    let m = model_id.to_lowercase();
+
+    // Vision: Gemini, Claude 3+, GPT-4o, GPT-4.5, GPT-5, Mimo, Agnes, Kimi-K2.6+, Qwen-VL, GLM-4V, etc.
+    let is_vision = m.contains("gemini")
+        || m.contains("claude")
+        || m.contains("gpt-4o")
+        || m.contains("gpt-4.5")
+        || m.contains("gpt-5")
+        || m.contains("mimo")
+        || m.contains("agnes")
+        || m.contains("vision")
+        || m.contains("vl")
+        || m.contains("image")
+        || m.contains("kimi-k2.6")
+        || m.contains("kimi-k2.7")
+        || m.contains("kimi-k3");
+
+    // Reasoning: thinking, reason, r1, o1, o3, o4, high, claude 3.7 / 4+, kimi-k2.7+, qwen3.7+, qwen3.8+, glm-5+
+    let is_reasoning = m.contains("thinking")
+        || m.contains("reason")
+        || m.contains("r1")
+        || m.contains("o1")
+        || m.contains("o3")
+        || m.contains("o4")
+        || m.contains("high")
+        || m.contains("claude-3-7")
+        || m.contains("claude-sonnet-4")
+        || m.contains("claude-opus-4")
+        || m.contains("claude-opus-5")
+        || m.contains("claude-fable")
+        || m.contains("kimi-k2.7")
+        || m.contains("kimi-k3")
+        || m.contains("qwen3.7")
+        || m.contains("qwen3.8")
+        || m.contains("glm-5");
+
+    // Context Window:
+    // 1M: Gemini, GPT-5, MiniMax, Mimo, Agnes
+    // 256K: Kimi, Sensenova
+    // 200K: Claude
+    // 128K: DeepSeek, Qwen, GLM, Seed, GPT-4o
+    let ctx = if m.contains("gemini") || m.contains("gpt-5") || m.contains("minimax") || m.contains("mimo") || m.contains("agnes") {
+        1000000
+    } else if m.contains("kimi") || m.contains("sensenova") {
+        262144
+    } else if m.contains("claude") {
+        200000
+    } else if m.contains("deepseek") || m.contains("qwen") || m.contains("glm") || m.contains("seed") {
+        131072
+    } else {
+        128000
+    };
+
+    let max_tok = if ctx >= 1000000 { 65536 } else if ctx >= 200000 { 16384 } else { 8192 };
+
+    (is_vision, is_reasoning, ctx, max_tok)
+}
+
 async fn execute_model_capability_probe(
     base_url: &str,
     api_key: &str,
     model_id: &str,
 ) -> (bool, u64, bool, bool, u64, u64, Option<String>) {
-    let mid_lower = model_id.to_lowercase();
-    let name_has_vision = mid_lower.contains("vision") || mid_lower.contains("vl") || mid_lower.contains("image")
-        || mid_lower.contains("gemini") || mid_lower.contains("claude") || mid_lower.contains("gpt-4") || mid_lower.contains("gpt-5")
-        || mid_lower.contains("mimo") || mid_lower.contains("agnes");
-    let name_has_reasoning = mid_lower.contains("thinking") || mid_lower.contains("r1") || mid_lower.contains("reason")
-        || mid_lower.contains("o1") || mid_lower.contains("o3") || mid_lower.contains("high");
-
-    let ctx = if mid_lower.contains("gemini") || mid_lower.contains("mimo") || mid_lower.contains("agnes") {
-        1000000
-    } else if mid_lower.contains("kimi") || mid_lower.contains("sensenova") {
-        262144
-    } else if mid_lower.contains("claude") {
-        200000
-    } else if mid_lower.contains("deepseek") || mid_lower.contains("qwen") || mid_lower.contains("glm") || mid_lower.contains("minimax") || mid_lower.contains("seed") {
-        131072
-    } else {
-        128000
-    };
-    let max_tok = if ctx >= 1000000 { 65536 } else if ctx >= 200000 { 16384 } else { 8192 };
+    let (is_vision, mut is_reasoning, ctx, max_tok) = infer_model_specs(model_id);
 
     if base_url.trim().is_empty() {
-        return (false, 0, name_has_vision, name_has_reasoning, ctx, max_tok, Some("服务商未配置 Base URL".to_string()));
+        return (false, 0, is_vision, is_reasoning, ctx, max_tok, Some("服务商未配置 Base URL".to_string()));
     }
 
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
-    // Test 1: Vision probe with minimal 1x1 png image
-    let payload_vis = serde_json::json!({
-        "model": model_id,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    { "type": "text", "text": "1+1=?" },
-                    { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" } }
-                ]
-            }
-        ],
-        "max_tokens": 10
-    });
-
-    let mut cmd1 = Command::new("curl");
-    cmd1.arg("-s")
-        .arg("-m")
-        .arg("8")
-        .arg("-w")
-        .arg("\n%{http_code}\n%{time_total}")
-        .arg("-H")
-        .arg("Content-Type: application/json");
-    if !api_key.is_empty() {
-        cmd1.arg("-H").arg(format!("Authorization: Bearer {}", api_key));
-    }
-    cmd1.arg("-d").arg(serde_json::to_string(&payload_vis).unwrap_or_default());
-    cmd1.arg(&endpoint);
-
-    if let Ok(out) = cmd1.output() {
-        let full_str = String::from_utf8_lossy(&out.stdout).to_string();
-        let lines: Vec<&str> = full_str.trim_end().rsplitn(3, '\n').collect();
-        let (status, time_sec, body) = if lines.len() >= 2 {
-            let time = lines[0].parse::<f64>().unwrap_or(0.0);
-            let st = lines[1].parse::<u16>().unwrap_or(0);
-            let b = if lines.len() >= 3 { lines[2] } else { "" };
-            (st, time, b)
-        } else {
-            (0, 0.0, "")
-        };
-
-        if status >= 200 && status < 300 {
-            let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
-            let mut is_reasoning = name_has_reasoning;
-            if let Ok(v) = serde_json::from_str::<Value>(body) {
-                if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
-                    if let Some(msg) = choices.first().and_then(|c| c.get("message")) {
-                        if let Some(rc) = msg.get("reasoning_content").and_then(|r| r.as_str()) {
-                            if !rc.is_empty() { is_reasoning = true; }
-                        }
-                    }
-                }
-            }
-            return (true, latency_ms, true, is_reasoning, ctx, max_tok, None);
-        }
-    }
-
-    // Test 2: Pure text probe
-    let payload_txt = serde_json::json!({
+    let payload = serde_json::json!({
         "model": model_id,
         "messages": [
             { "role": "user", "content": "1+1=?" }
@@ -178,21 +161,21 @@ async fn execute_model_capability_probe(
         "max_tokens": 10
     });
 
-    let mut cmd2 = Command::new("curl");
-    cmd2.arg("-s")
+    let mut cmd = Command::new("curl");
+    cmd.arg("-s")
         .arg("-m")
-        .arg("8")
+        .arg("10")
         .arg("-w")
         .arg("\n%{http_code}\n%{time_total}")
         .arg("-H")
         .arg("Content-Type: application/json");
     if !api_key.is_empty() {
-        cmd2.arg("-H").arg(format!("Authorization: Bearer {}", api_key));
+        cmd.arg("-H").arg(format!("Authorization: Bearer {}", api_key));
     }
-    cmd2.arg("-d").arg(serde_json::to_string(&payload_txt).unwrap_or_default());
-    cmd2.arg(&endpoint);
+    cmd.arg("-d").arg(serde_json::to_string(&payload).unwrap_or_default());
+    cmd.arg(&endpoint);
 
-    if let Ok(out) = cmd2.output() {
+    if let Ok(out) = cmd.output() {
         let full_str = String::from_utf8_lossy(&out.stdout).to_string();
         let lines: Vec<&str> = full_str.trim_end().rsplitn(3, '\n').collect();
         let (status, time_sec, body) = if lines.len() >= 2 {
@@ -205,8 +188,8 @@ async fn execute_model_capability_probe(
         };
 
         let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
+
         if status >= 200 && status < 300 {
-            let mut is_reasoning = name_has_reasoning;
             if let Ok(v) = serde_json::from_str::<Value>(body) {
                 if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                     if let Some(msg) = choices.first().and_then(|c| c.get("message")) {
@@ -215,8 +198,15 @@ async fn execute_model_capability_probe(
                         }
                     }
                 }
+                if let Some(usage) = v.get("usage") {
+                    if let Some(details) = usage.get("completion_tokens_details") {
+                        if let Some(rt) = details.get("reasoning_tokens").and_then(|n| n.as_u64()) {
+                            if rt > 0 { is_reasoning = true; }
+                        }
+                    }
+                }
             }
-            return (true, latency_ms, false, is_reasoning, ctx, max_tok, None);
+            return (true, latency_ms, is_vision, is_reasoning, ctx, max_tok, None);
         } else {
             let err_msg = if let Ok(v) = serde_json::from_str::<Value>(body) {
                 v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).unwrap_or("API 请求失败").to_string()
@@ -229,11 +219,11 @@ async fn execute_model_capability_probe(
             } else {
                 format!("HTTP {}", status)
             };
-            return (false, latency_ms, name_has_vision, name_has_reasoning, ctx, max_tok, Some(err_msg));
+            return (false, latency_ms, is_vision, is_reasoning, ctx, max_tok, Some(err_msg));
         }
     }
 
-    (false, 0, name_has_vision, name_has_reasoning, ctx, max_tok, Some("无法执行请求".to_string()))
+    (false, 0, is_vision, is_reasoning, ctx, max_tok, Some("无法执行请求".to_string()))
 }
 
 pub async fn handle_invoke(
@@ -1183,14 +1173,13 @@ pub async fn handle_invoke(
                                             let m_id = m_obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
                                             if m_id.is_empty() { continue; }
                                             let m_name = m_obj.get("name").and_then(|v| v.as_str()).unwrap_or(m_id);
-                                            let reasoning = m_obj.get("reasoning").and_then(|v| v.as_bool()).unwrap_or_else(|| {
-                                                m_id.contains("thinking") || m_id.contains("r1") || m_id.contains("high") || m_id.contains("reason")
-                                            });
-                                            let context_window = m_obj.get("contextWindow").and_then(|v| v.as_u64());
-                                            let max_tokens = m_obj.get("maxTokens").and_then(|v| v.as_u64());
+                                            let (inf_vis, inf_rea, inf_ctx, inf_max) = infer_model_specs(m_id);
+                                            let reasoning = m_obj.get("reasoning").and_then(|v| v.as_bool()).unwrap_or(inf_rea);
+                                            let context_window = m_obj.get("contextWindow").and_then(|v| v.as_u64()).or(Some(inf_ctx));
+                                            let max_tokens = m_obj.get("maxTokens").and_then(|v| v.as_u64()).or(Some(inf_max));
                                             let supports_images = m_obj.get("input").and_then(|v| v.as_array()).map(|arr| {
                                                 arr.iter().any(|item| item.as_str() == Some("image"))
-                                            }).unwrap_or(false);
+                                            }).unwrap_or(inf_vis);
                                             let is_default = def_model_id.as_deref() == Some(m_id) && (def_provider.is_none() || def_provider.as_deref() == Some(p_name));
                                             list.push(json!({
                                                 "provider": p_name,
@@ -1203,12 +1192,16 @@ pub async fn handle_invoke(
                                                 "isDefault": is_default
                                             }));
                                         } else if let Some(m_id) = m.as_str() {
+                                            let (inf_vis, inf_rea, inf_ctx, inf_max) = infer_model_specs(m_id);
                                             let is_default = def_model_id.as_deref() == Some(m_id) && (def_provider.is_none() || def_provider.as_deref() == Some(p_name));
                                             list.push(json!({
                                                 "provider": p_name,
                                                 "id": m_id,
                                                 "name": m_id,
-                                                "reasoning": m_id.contains("thinking") || m_id.contains("r1") || m_id.contains("sonnet") || m_id.contains("high"),
+                                                "reasoning": inf_rea,
+                                                "contextWindow": inf_ctx,
+                                                "maxTokens": inf_max,
+                                                "supportsImages": inf_vis,
                                                 "isDefault": is_default
                                             }));
                                         }
@@ -2483,9 +2476,7 @@ pub async fn handle_invoke(
                     if let Some(data) = val.get("data").and_then(|d| d.as_array()) {
                         for item in data {
                             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
-                                let id_lower = id.to_lowercase();
-                                let is_vision = id_lower.contains("vision") || id_lower.contains("vl") || id_lower.contains("image") || id_lower.contains("gemini") || id_lower.contains("claude") || id_lower.contains("gpt-4") || id_lower.contains("gpt-5");
-                                let is_reasoning = id_lower.contains("thinking") || id_lower.contains("r1") || id_lower.contains("reasoner");
+                                let (is_vision, is_reasoning, ctx, max_tok) = infer_model_specs(id);
                                 let mut input = vec!["text".to_string()];
                                 if is_vision {
                                     input.push("image".to_string());
@@ -2495,8 +2486,8 @@ pub async fn handle_invoke(
                                     "name": id,
                                     "reasoning": is_reasoning,
                                     "input": input,
-                                    "contextWindow": 1000000,
-                                    "maxTokens": 65536,
+                                    "contextWindow": ctx,
+                                    "maxTokens": max_tok,
                                     "cost": {
                                         "input": 0,
                                         "output": 0,

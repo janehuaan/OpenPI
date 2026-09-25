@@ -1,6 +1,6 @@
 /**
  * OpenPI Desktop Theme Manager
- * Supports System / Dark / Light modes and 7 curated theme flavors.
+ * Supports System / Dark / Light modes and 8 curated high-craft theme flavors.
  */
 
 import { useEffect, useState } from "react";
@@ -9,12 +9,13 @@ import { desktopApi } from "../api";
 export type ThemeMode = "system" | "dark" | "light";
 
 export type ThemeFlavor =
+	| "dark-warm"
 	| "dark-default"
 	| "dark-oled"
 	| "dark-tokyo"
 	| "dark-cyberpunk"
-	| "light-default"
 	| "light-warm"
+	| "light-default"
 	| "light-nord";
 
 export interface ThemePreset {
@@ -34,53 +35,66 @@ export interface ThemePreset {
 export const THEME_PRESETS: ThemePreset[] = [
 	// ── Dark Themes ──
 	{
-		id: "dark-default",
-		name: "黑曜流体 (Liquid Glass)",
-		desc: "流体毛玻璃折射质感，高沉浸通透美学",
-		tag: "流体毛玻璃",
+		id: "dark-warm",
+		name: "暖墨暗夜 (Claude Espresso)",
+		desc: "温润深烘暖墨底色，陶土暖橘点缀，夜间极度护眼",
+		tag: "Claude 同款 · 纸本暗调",
 		mode: "dark",
 		swatches: {
-			bg: "#0c0e14",
-			elevated: "#181d28",
-			accent: "#3b82f6",
-			text: "#f0f6fc",
+			bg: "#181715",
+			elevated: "#24221f",
+			accent: "#cc785c",
+			text: "#ebe6dc",
+		},
+	},
+	{
+		id: "dark-default",
+		name: "微光钛灰 (Linear Titanium)",
+		desc: "深邃微冷石墨底色，发丝内光与克制靛紫，工业级精工美学",
+		tag: "微光精工 · Linear",
+		mode: "dark",
+		swatches: {
+			bg: "#0d0e12",
+			elevated: "#161820",
+			accent: "#5e6ad2",
+			text: "#f0f2f7",
 		},
 	},
 	{
 		id: "dark-oled",
-		name: "极客纯黑 (OLED 实体)",
-		desc: "纯黑实体无毛玻璃，极省 GPU，超高对比度",
-		tag: "0 GPU · 极速纯黑",
+		name: "黑曜极简 (Geist Obsidian)",
+		desc: "Vercel 级纯黑灰阶分层，无彩色干扰，极致克制",
+		tag: "0 GPU · 极客无界",
 		mode: "dark",
 		swatches: {
 			bg: "#000000",
-			elevated: "#111113",
-			accent: "#38bdf8",
-			text: "#ffffff",
+			elevated: "#121214",
+			accent: "#f4f4f5",
+			text: "#f4f4f5",
 		},
 	},
 	{
 		id: "dark-tokyo",
-		name: "东京之夜 (Tokyo 实体)",
-		desc: "经典蓝紫靛青纯色底，无毛玻璃低负载",
-		tag: "0 GPU · 蓝紫纯色",
+		name: "沉静蓝紫 (Tokyo Night)",
+		desc: "沉静蓝紫与深海夜色，低饱和夜间漫游",
+		tag: "0 GPU · 蓝紫夜色",
 		mode: "dark",
 		swatches: {
-			bg: "#1a1b26",
-			elevated: "#24283b",
+			bg: "#16161e",
+			elevated: "#1f2335",
 			accent: "#7aa2f7",
 			text: "#c0caf5",
 		},
 	},
 	{
 		id: "dark-cyberpunk",
-		name: "赛博霓虹 (Cyberpunk 实体)",
-		desc: "电光未来实体高能色彩，低 GPU 消耗",
-		tag: "0 GPU · 赛博高能",
+		name: "机能未来 (Cyberpunk)",
+		desc: "暗夜高能霓虹对撞，硬核科幻机能美学",
+		tag: "0 GPU · 赛博机能",
 		mode: "dark",
 		swatches: {
-			bg: "#0b0c14",
-			elevated: "#171926",
+			bg: "#08090f",
+			elevated: "#131622",
 			accent: "#00f0ff",
 			text: "#eaedf6",
 		},
@@ -88,23 +102,10 @@ export const THEME_PRESETS: ThemePreset[] = [
 
 	// ── Light Themes ──
 	{
-		id: "light-default",
-		name: "极简石板 (Liquid Glass)",
-		desc: "现代高透流体纸白，白天通透办公",
-		tag: "流体高透",
-		mode: "light",
-		swatches: {
-			bg: "#ffffff",
-			elevated: "#f8fafc",
-			accent: "#2563eb",
-			text: "#0f172a",
-		},
-	},
-	{
 		id: "light-warm",
-		name: "暖沙纸本 (Warm 实体)",
-		desc: "温润护眼米白纯色，无毛玻璃久视舒适",
-		tag: "0 GPU · 暖沙纸本",
+		name: "暖沙纸本 (Claude Warm)",
+		desc: "温润护眼米白纸本，无眩光如纸墨相依",
+		tag: "Claude 同款 · 护眼纸本",
 		mode: "light",
 		swatches: {
 			bg: "#f5ede0",
@@ -114,9 +115,22 @@ export const THEME_PRESETS: ThemePreset[] = [
 		},
 	},
 	{
+		id: "light-default",
+		name: "工作室极简 (Studio Minimal)",
+		desc: "北欧冷白画廊质感，纯净高透，纯粹无杂色",
+		tag: "纯净工坊 · Minimal",
+		mode: "light",
+		swatches: {
+			bg: "#f8fafc",
+			elevated: "#ffffff",
+			accent: "#0f172a",
+			text: "#0f172a",
+		},
+	},
+	{
 		id: "light-nord",
-		name: "极光冰蓝 (Nord 实体)",
-		desc: "极地冰蓝清透纯色，无毛玻璃极速流畅",
+		name: "极光冰蓝 (Nord Frost)",
+		desc: "极地冰蓝清透纯色，清爽通透流畅办公",
 		tag: "0 GPU · 极光冷白",
 		mode: "light",
 		swatches: {
@@ -256,7 +270,13 @@ export function setThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
 	let nextFlavor = patch.flavor ?? current.flavor;
 	const preset = THEME_PRESETS.find((p) => p.id === nextFlavor);
 	if (!preset || preset.mode !== effectiveMode) {
-		nextFlavor = defaultFlavorForMode(effectiveMode);
+		if (current.flavor === "light-warm" && effectiveMode === "dark") {
+			nextFlavor = "dark-warm";
+		} else if (current.flavor === "dark-warm" && effectiveMode === "light") {
+			nextFlavor = "light-warm";
+		} else {
+			nextFlavor = defaultFlavorForMode(effectiveMode);
+		}
 	}
 
 	const nextConfig: ThemeConfig = { mode: nextMode, flavor: nextFlavor };

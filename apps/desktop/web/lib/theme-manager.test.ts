@@ -116,8 +116,23 @@ describe("ThemeManager", () => {
 		expect(domAttrs["data-theme"]).toBe("dark");
 	});
 
-	it("defines all 7 presets with required properties", () => {
-		expect(THEME_PRESETS.length).toBe(7);
+	it("smart-pairs Claude warm light and dark themes on mode toggle", () => {
+		setThemeConfig({ mode: "light", flavor: "light-warm" });
+		expect(domAttrs["data-theme-flavor"]).toBe("light-warm");
+
+		// Switch to dark without specifying flavor -> should smartly pair to dark-warm
+		setThemeConfig({ mode: "dark" });
+		expect(domAttrs["data-theme"]).toBe("dark");
+		expect(domAttrs["data-theme-flavor"]).toBe("dark-warm");
+
+		// Switch back to light -> should smartly pair back to light-warm
+		setThemeConfig({ mode: "light" });
+		expect(domAttrs["data-theme"]).toBe("light");
+		expect(domAttrs["data-theme-flavor"]).toBe("light-warm");
+	});
+
+	it("defines all 8 presets with required properties", () => {
+		expect(THEME_PRESETS.length).toBe(8);
 		for (const preset of THEME_PRESETS) {
 			expect(preset.id).toBeDefined();
 			expect(preset.name).toBeDefined();

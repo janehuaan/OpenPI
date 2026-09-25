@@ -4,73 +4,107 @@
    1. Dark Theme Flavors
    ========================================================================== */
 
-/* ── 1.1 Obsidian Dark (Default Dark — Liquid Glass Experience) ── */
+/* ── 1.0 Claude Warm Dark (Espresso Paper — Solid Performance & 0 GPU Blur) ── */
+:root[data-theme-flavor="dark-warm"],
+[data-theme-flavor="dark-warm"] {
+	--bg: #181715;
+	--bg-elevated: #24221f;
+	--bg-muted: #1e1d1a;
+	--sidebar-bg: #181715;
+	--rail-bg: #131211;
+	--border: #33302b;
+	--border-subtle: #262421;
+	--border-strong: #4a453d;
+	--text: #ebe6dc;
+	--text-secondary: #a39c91;
+	--text-tertiary: #706a61;
+	--accent: #cc785c;
+	--accent-hover: #b8674c;
+	--accent-soft: rgba(204, 120, 92, 0.16);
+	--accent-contrast: #ffffff;
+	--focus: #d97757;
+	--danger: #e06c60;
+	--danger-soft: rgba(224, 108, 96, 0.16);
+	--ok: #739f72;
+	--ok-soft: rgba(115, 159, 114, 0.16);
+	--warn: #d4984d;
+	--warn-soft: rgba(212, 152, 77, 0.16);
+	--glass-bg: #22201d;
+	--glass-bg-subtle: #1a1917;
+	--glass-bg-elevated: #282622;
+	--glass-bg-hover: #302d28;
+	--shadow: 0 16px 44px rgba(10, 9, 8, 0.70), 0 2px 10px rgba(10, 9, 8, 0.40);
+	--shadow-soft: 0 4px 16px rgba(10, 9, 8, 0.50);
+	color-scheme: dark;
+}
+
+/* ── 1.1 Linear Titanium (Default Dark — Precision Liquid Glass Experience) ── */
 :root[data-theme="dark"][data-theme-flavor="dark-default"],
 [data-theme="dark"][data-theme-flavor="dark-default"],
 :root[data-theme="dark"]:not([data-theme-flavor]),
 [data-theme="dark"]:not([data-theme-flavor]) {
-	--bg: #0c0e14;
-	--bg-elevated: #161a25;
-	--bg-muted: #10141d;
-	--sidebar-bg: #0c0e14;
-	--rail-bg: #08090f;
-	--border: rgba(255, 255, 255, 0.12);
-	--border-subtle: rgba(255, 255, 255, 0.07);
-	--border-strong: rgba(255, 255, 255, 0.22);
-	--text: #f0f6fc;
-	--text-secondary: #94a3b8;
-	--text-tertiary: #64748b;
-	--accent: #3b82f6;
-	--accent-hover: #2563eb;
-	--accent-soft: rgba(59, 130, 246, 0.18);
+	--bg: #0d0e12;
+	--bg-elevated: #161820;
+	--bg-muted: #111217;
+	--sidebar-bg: #0d0e12;
+	--rail-bg: #090a0d;
+	--border: rgba(255, 255, 255, 0.08);
+	--border-subtle: rgba(255, 255, 255, 0.04);
+	--border-strong: rgba(255, 255, 255, 0.16);
+	--text: #f0f2f7;
+	--text-secondary: #8b92a5;
+	--text-tertiary: #585e70;
+	--accent: #5e6ad2;
+	--accent-hover: #4e5ac0;
+	--accent-soft: rgba(94, 106, 210, 0.16);
 	--accent-contrast: #ffffff;
-	--focus: #7566ea;
-	--danger: #ef4444;
-	--danger-soft: rgba(239, 68, 68, 0.18);
-	--ok: #22c55e;
-	--ok-soft: rgba(34, 197, 94, 0.18);
-	--warn: #f59e0b;
-	--warn-soft: rgba(245, 158, 11, 0.18);
-	--glass-bg: rgba(22, 28, 42, 0.45);
-	--glass-bg-subtle: rgba(22, 28, 42, 0.25);
-	--glass-bg-elevated: rgba(28, 36, 54, 0.55);
-	--glass-bg-hover: rgba(35, 45, 68, 0.65);
-	--shadow: 0 14px 44px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.32);
-	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
+	--focus: #717fe0;
+	--danger: #f87171;
+	--danger-soft: rgba(248, 113, 113, 0.16);
+	--ok: #34d399;
+	--ok-soft: rgba(52, 211, 153, 0.16);
+	--warn: #fbbf24;
+	--warn-soft: rgba(251, 191, 36, 0.16);
+	--glass-bg: rgba(22, 24, 32, 0.55);
+	--glass-bg-subtle: rgba(16, 17, 23, 0.35);
+	--glass-bg-elevated: rgba(26, 28, 38, 0.65);
+	--glass-bg-hover: rgba(36, 39, 52, 0.75);
+	--shadow: 0 14px 44px rgba(0, 0, 0, 0.65), 0 2px 10px rgba(0, 0, 0, 0.35);
+	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.40);
 	color-scheme: dark;
 }
 
-/* ── 1.2 OLED Pure Black (Solid Performance — 0 GPU Blur) ── */
+/* ── 1.2 Geist Obsidian (Solid Performance — 0 GPU Blur) ── */
 :root[data-theme-flavor="dark-oled"],
 [data-theme-flavor="dark-oled"] {
 	--bg: #000000;
-	--bg-elevated: #101014;
-	--bg-muted: #08080b;
+	--bg-elevated: #111113;
+	--bg-muted: #0a0a0c;
 	--sidebar-bg: #000000;
 	--rail-bg: #000000;
-	--border: #1f1f26;
-	--border-subtle: #14141a;
-	--border-strong: #33333e;
-	--text: #ffffff;
-	--text-secondary: #a1a1aa;
-	--text-tertiary: #71717a;
-	--accent: #38bdf8;
-	--accent-hover: #0ea5e9;
-	--accent-soft: rgba(56, 189, 248, 0.16);
+	--border: #232328;
+	--border-subtle: #17171a;
+	--border-strong: #383842;
+	--text: #f4f4f5;
+	--text-secondary: #909099;
+	--text-tertiary: #5c5c64;
+	--accent: #f4f4f5;
+	--accent-hover: #ffffff;
+	--accent-soft: rgba(244, 244, 245, 0.12);
 	--accent-contrast: #000000;
-	--focus: #60a5fa;
-	--danger: #ef4444;
-	--danger-soft: rgba(239, 68, 68, 0.18);
-	--ok: #22c55e;
-	--ok-soft: rgba(34, 197, 94, 0.18);
-	--warn: #f59e0b;
-	--warn-soft: rgba(245, 158, 11, 0.18);
-	--glass-bg: #111115;
-	--glass-bg-subtle: #09090c;
-	--glass-bg-elevated: #16161b;
-	--glass-bg-hover: #1f1f26;
-	--shadow: 0 16px 48px rgba(0, 0, 0, 0.85), 0 2px 10px rgba(0, 0, 0, 0.55);
-	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.60);
+	--focus: #a1a1aa;
+	--danger: #f87171;
+	--danger-soft: rgba(248, 113, 113, 0.16);
+	--ok: #4ade80;
+	--ok-soft: rgba(74, 222, 128, 0.16);
+	--warn: #facc15;
+	--warn-soft: rgba(250, 204, 21, 0.16);
+	--glass-bg: #111114;
+	--glass-bg-subtle: #09090b;
+	--glass-bg-elevated: #161619;
+	--glass-bg-hover: #1f1f23;
+	--shadow: 0 16px 48px rgba(0, 0, 0, 0.90), 0 2px 10px rgba(0, 0, 0, 0.60);
+	--shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.65);
 	color-scheme: dark;
 }
 
@@ -146,25 +180,25 @@
    2. Light Theme Flavors
    ========================================================================== */
 
-/* ── 2.1 Modern Slate (Default Light — Liquid Glass Experience) ── */
+/* ── 2.1 Studio Minimal (Default Light — Nordic Clean Experience) ── */
 :root[data-theme="light"][data-theme-flavor="light-default"],
 [data-theme="light"][data-theme-flavor="light-default"],
 :root[data-theme="light"]:not([data-theme-flavor]),
 [data-theme="light"]:not([data-theme-flavor]) {
-	--bg: #f1f5f9;
+	--bg: #f8fafc;
 	--bg-elevated: #ffffff;
-	--bg-muted: #e2e8f0;
-	--sidebar-bg: #f1f5f9;
-	--rail-bg: #e2e8f0;
-	--border: #cbd5e1;
-	--border-subtle: #e2e8f0;
-	--border-strong: #94a3b8;
+	--bg-muted: #f1f5f9;
+	--sidebar-bg: #f8fafc;
+	--rail-bg: #f1f5f9;
+	--border: #e2e8f0;
+	--border-subtle: #edf2f7;
+	--border-strong: #cbd5e1;
 	--text: #0f172a;
 	--text-secondary: #475569;
 	--text-tertiary: #94a3b8;
-	--accent: #2563eb;
-	--accent-hover: #1d4ed8;
-	--accent-soft: rgba(37, 99, 235, 0.10);
+	--accent: #0f172a;
+	--accent-hover: #020617;
+	--accent-soft: rgba(15, 23, 42, 0.08);
 	--accent-contrast: #ffffff;
 	--focus: #6366f1;
 	--danger: #dc2626;
@@ -174,11 +208,11 @@
 	--warn: #d97706;
 	--warn-soft: rgba(217, 119, 6, 0.10);
 	--glass-bg: #ffffff;
-	--glass-bg-subtle: #f1f5f9;
+	--glass-bg-subtle: #f8fafc;
 	--glass-bg-elevated: #ffffff;
-	--glass-bg-hover: #e2e8f0;
-	--shadow: 0 14px 36px rgba(30, 35, 60, 0.08), 0 2px 8px rgba(30, 35, 60, 0.03);
-	--shadow-soft: 0 2px 8px rgba(30, 35, 60, 0.04);
+	--glass-bg-hover: #f1f5f9;
+	--shadow: 0 14px 36px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(15, 23, 42, 0.02);
+	--shadow-soft: 0 2px 8px rgba(15, 23, 42, 0.03);
 	color-scheme: light;
 }
 
@@ -254,7 +288,8 @@
    3. Solid Performance Backing & 0 GPU Blur Engine
    ========================================================================== */
 
-/* Disable GPU blur for all 5 non-liquid-glass themes */
+/* Disable GPU blur for all 6 non-liquid-glass themes */
+:root[data-theme-flavor="dark-warm"] *,
 :root[data-theme-flavor="dark-oled"] *,
 :root[data-theme-flavor="dark-tokyo"] *,
 :root[data-theme-flavor="dark-cyberpunk"] *,
@@ -265,21 +300,25 @@
 }
 
 /* Ensure 100% solid, non-transparent surfaces so wallpaper vibrancy never bleeds through */
+:root[data-theme-flavor="dark-warm"],
 :root[data-theme-flavor="dark-oled"],
 :root[data-theme-flavor="dark-tokyo"],
 :root[data-theme-flavor="dark-cyberpunk"],
 :root[data-theme-flavor="light-warm"],
 :root[data-theme-flavor="light-nord"],
+:root[data-theme-flavor="dark-warm"] body,
 :root[data-theme-flavor="dark-oled"] body,
 :root[data-theme-flavor="dark-tokyo"] body,
 :root[data-theme-flavor="dark-cyberpunk"] body,
 :root[data-theme-flavor="light-warm"] body,
 :root[data-theme-flavor="light-nord"] body,
+:root[data-theme-flavor="dark-warm"] #root,
 :root[data-theme-flavor="dark-oled"] #root,
 :root[data-theme-flavor="dark-tokyo"] #root,
 :root[data-theme-flavor="dark-cyberpunk"] #root,
 :root[data-theme-flavor="light-warm"] #root,
 :root[data-theme-flavor="light-nord"] #root,
+:root[data-theme-flavor="dark-warm"] .reference-workspace,
 :root[data-theme-flavor="dark-oled"] .reference-workspace,
 :root[data-theme-flavor="dark-tokyo"] .reference-workspace,
 :root[data-theme-flavor="dark-cyberpunk"] .reference-workspace,
