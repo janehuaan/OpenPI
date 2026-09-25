@@ -1101,8 +1101,32 @@ pub async fn handle_invoke(
             let out = Command::new("git")
                 .args(["status", "--porcelain=v1", "-b", "-uall"])
                 .current_dir(cwd)
-                .output()
-                .map_err(|e| e.to_string())?;
+                .output();
+
+            let out = match out {
+                Ok(o) => o,
+                Err(_) => {
+                    return Ok(json!({
+                        "isRepo": false,
+                        "branch": "",
+                        "clean": true,
+                        "ahead": 0,
+                        "behind": 0,
+                        "files": []
+                    }));
+                }
+            };
+
+            if !out.status.success() {
+                return Ok(json!({
+                    "isRepo": false,
+                    "branch": "",
+                    "clean": true,
+                    "ahead": 0,
+                    "behind": 0,
+                    "files": []
+                }));
+            }
 
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let mut branch = "main".to_string();
@@ -1126,6 +1150,7 @@ pub async fn handle_invoke(
             }
 
             Ok(json!({
+                "isRepo": true,
                 "branch": branch,
                 "clean": files.is_empty(),
                 "ahead": ahead,
@@ -1152,15 +1177,19 @@ pub async fn handle_invoke(
         "git_stage" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            Command::new("git").args(["add", file]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!(true))
+            match Command::new("git").args(["add", file]).current_dir(cwd).output() {
+                Ok(out) => Ok(json!({ "ok": out.status.success(), "success": out.status.success() })),
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         "git_unstage" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            Command::new("git").args(["restore", "--staged", file]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!(true))
+            match Command::new("git").args(["restore", "--staged", file]).current_dir(cwd).output() {
+                Ok(out) => Ok(json!({ "ok": out.status.success(), "success": out.status.success() })),
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         "git_discard" => {
@@ -1168,45 +1197,88 @@ pub async fn handle_invoke(
             let file = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let _ = Command::new("git").args(["restore", file]).current_dir(cwd).output();
             let _ = Command::new("git").args(["clean", "-fd", file]).current_dir(cwd).output();
-            Ok(json!(true))
+            Ok(json!({ "ok": true, "success": true }))
         }
 
         "git_commit" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let msg = args.get("message").and_then(|v| v.as_str()).unwrap_or("Update");
-            let out = Command::new("git").args(["commit", "-m", msg]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!({ "success": out.status.success() }))
+            match Command::new("git").args(["commit", "-m", msg]).current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({
+                        "ok": success,
+                        "success": success,
+                        "output": stdout,
+                        "error": if success { Value::Null } else { json!(stderr) }
+                    }))
+                }
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         "git_branches" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let out = Command::new("git").args(["branch", "-a"]).current_dir(cwd).output().map_err(|e| e.to_string())?;
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+            let mut current = "main".to_string();
             let mut branches = Vec::new();
             for line in stdout.lines() {
+                let is_current = line.contains('*');
                 let clean = line.replace('*', "").trim().to_string();
                 if !clean.is_empty() {
+                    if is_current {
+                        current = clean.clone();
+                    }
                     branches.push(json!({
                         "name": clean,
-                        "current": line.contains('*')
+                        "current": is_current
                     }));
                 }
             }
-            Ok(json!(branches))
+            Ok(json!({
+                "current": current,
+                "branches": branches
+            }))
         }
 
         "git_checkout" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let branch = args.get("branch").and_then(|v| v.as_str()).unwrap_or("main");
-            let out = Command::new("git").args(["checkout", branch]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!({ "success": out.status.success() }))
+            match Command::new("git").args(["checkout", branch]).current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({
+                        "ok": success,
+                        "success": success,
+                        "currentBranch": branch,
+                        "error": if success { Value::Null } else { json!(stderr) }
+                    }))
+                }
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         "git_sync" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
             let _ = Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output();
-            let out = Command::new("git").args(["push"]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!({ "success": out.status.success() }))
+            match Command::new("git").args(["push"]).current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({
+                        "ok": success,
+                        "success": success,
+                        "output": stdout,
+                        "error": if success { Value::Null } else { json!(stderr) }
+                    }))
+                }
+                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
+            }
         }
 
         // ── Workspace & Files ──────────────────────────────────────────────
@@ -1394,8 +1466,27 @@ pub async fn handle_invoke(
 
         "git_init" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let out = Command::new("git").arg("init").current_dir(cwd).output().map_err(|e| e.to_string())?;
-            Ok(json!({ "success": out.status.success() }))
+            let _ = std::fs::create_dir_all(cwd);
+            match Command::new("git").arg("init").current_dir(cwd).output() {
+                Ok(out) => {
+                    let success = out.status.success();
+                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                    Ok(json!({
+                        "ok": success,
+                        "success": success,
+                        "output": stdout,
+                        "error": if success { Value::Null } else { json!(stderr) }
+                    }))
+                }
+                Err(e) => {
+                    Ok(json!({
+                        "ok": false,
+                        "success": false,
+                        "error": e.to_string()
+                    }))
+                }
+            }
         }
 
         "git_resolve_conflict" => {
