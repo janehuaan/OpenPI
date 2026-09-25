@@ -98,12 +98,12 @@ import type {
 	ThinkingLevel,
 	VisionFallbackConfig,
 	WorkspaceSummary,
+	AutoPilotTask,
 } from "../../../types";
 import { MiniDiffView } from "../../diff-viewer";
 import { LivePreviewPanel } from "./live-preview-panel";
 import { SwarmCanvas } from "./swarm-canvas";
 import { AutoPilotModal } from "./autopilot-modal";
-import type { AutoPilotTask } from "@openpi/shared";
 import { extractSwarmFromMessages } from "../../../lib/swarm-types";
 import {
 	ArrowDown,

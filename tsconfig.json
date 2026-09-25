@@ -5,17 +5,10 @@
     "types": [
       "node"
     ],
-    "paths": {
-      "@openpi/shared": [
-        "./packages/shared/src/index.ts"
-      ]
-    },
     "baseUrl": "."
   },
   "include": [
-    "packages/*/src/**/*.ts",
-    "packages/*/test/**/*.ts",
-    "extensions/*/src/**/*.ts",
-    "extensions/*/test/**/*.ts"
+    "apps/desktop/web/**/*.ts",
+    "apps/desktop/web/**/*.tsx"
   ]
 }

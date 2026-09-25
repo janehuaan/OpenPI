@@ -12,7 +12,7 @@ import {
 	X,
 } from "../../icons";
 import { desktopApi } from "../../../api";
-import type { SymbolKind } from "@openpi/shared";
+import type { SymbolKind } from "../../../types";
 
 interface CodeSymbolItem {
 	name: string;

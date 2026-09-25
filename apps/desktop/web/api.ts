@@ -1,6 +1,5 @@
 import type { SpeechInputEvent } from "./lib/speech-recognition";
 import type { AppSettings } from "./lib/app-types";
-import type { AutoPilotTask } from "@openpi/shared";
 import type {
 	AgentInstance,
 	AgnesImageRequest,
@@ -9,6 +8,7 @@ import type {
 	AgnesVideoRequest,
 	AgnesVideoResult,
 	ArchivedMemoryEntry,
+	AutoPilotTask,
 	AvailableModel,
 	ConversationCapabilities,
 	ConversationModelOption,

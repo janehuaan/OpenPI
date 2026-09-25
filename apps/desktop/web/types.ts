@@ -598,4 +598,80 @@ export interface PortProcessInfo {
 	port: number;
 }
 
+// ── AutoPilot & Symbol Graph Types ──────────────────────────────────────────
+export type AutoPilotStatus =
+	| "idle"
+	| "creating_worktree"
+	| "planning"
+	| "executing"
+	| "testing"
+	| "diagnosing"
+	| "ready_for_review"
+	| "merged"
+	| "discarded"
+	| "failed";
+
+export type AutoPilotStepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
+
+export interface AutoPilotStep {
+	id: string;
+	name: string;
+	status: AutoPilotStepStatus;
+	detail?: string;
+	startedAt?: string;
+	finishedAt?: string;
+	error?: string;
+}
+
+export interface DiscoveredIssue {
+	dimension: "typecheck" | "test" | "lint" | "build";
+	command: string;
+	exitCode: number;
+	output: string;
+	summary: string;
+}
+
+export interface VerificationPipeline {
+	typecheckCommand?: string;
+	testCommand?: string;
+	lintCommand?: string;
+	buildCommand?: string;
+}
+
+export interface AutoPilotTask {
+	taskId: string;
+	cwd: string;
+	prompt: string;
+	worktreePath: string;
+	branch: string;
+	baseBranch: string;
+	status: AutoPilotStatus;
+	currentIteration: number;
+	maxIterations: number;
+	steps: AutoPilotStep[];
+	testCommand?: string;
+	verificationPipeline?: VerificationPipeline;
+	discoveredIssues?: DiscoveredIssue[];
+	totalIssuesResolved?: number;
+	diff?: string;
+	changedFiles?: string[];
+	sessionId?: string;
+	logs?: string[];
+	createdAt?: string;
+	updatedAt?: string;
+	error?: string;
+	summary?: string;
+}
+
+export type SymbolKind = "function" | "class" | "interface" | "type" | "enum" | "variable" | "struct" | "trait";
+
+export interface CodeSymbol {
+	name: string;
+	kind: SymbolKind;
+	filePath: string;
+	line: number;
+	exportScope?: "export" | "default" | "local";
+	signature?: string;
+}
+
 

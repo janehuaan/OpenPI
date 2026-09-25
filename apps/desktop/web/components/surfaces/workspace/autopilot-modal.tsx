@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AutoPilotStep, AutoPilotTask } from "@openpi/shared";
+import type { AutoPilotStep, AutoPilotTask } from "../../../types";
 import { desktopApi } from "../../../api";
 import {
 	AlertCircle,
