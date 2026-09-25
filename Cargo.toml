@@ -7,6 +7,7 @@ members = [
     "crates/openpi-state",
     "crates/openpi-tools",
     "crates/openpi-daemon",
+    "crates/openpi-jev",
     "apps/desktop/src-tauri",
 ]
 resolver = "2"

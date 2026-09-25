@@ -1,0 +1,21 @@
+[package]
+name = "openpi-jev"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ort = { version = "2.0.0-rc.9", default-features = false, features = ["load-dynamic"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+ndarray = "0.16"
+regex = "1.10"
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+[[bin]]
+name = "jev-bench"
+path = "src/bin/bench.rs"
