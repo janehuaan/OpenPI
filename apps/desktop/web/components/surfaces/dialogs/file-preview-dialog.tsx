@@ -57,14 +57,21 @@ export const FilePreviewDialog: FC<FilePreviewDialogProps> = ({ request, workspa
 			.readWorkspaceFile(workspace, rawPath)
 			.then((res: any) => {
 				if (cancelled) return;
-				if (res && typeof res.text === "string" && res.exists !== false) {
-					setFileText(res.text);
-					setResolvedPath(res.path || rawPath);
+				const text =
+					typeof res?.text === "string"
+						? res.text
+						: typeof res?.content === "string"
+							? res.content
+							: null;
+
+				if (text !== null && res?.exists !== false) {
+					setFileText(text);
+					setResolvedPath(res?.path || rawPath);
 				} else if (res && res.exists === false) {
 					setError(`未找到文件：${res.path || rawPath}`);
 					setResolvedPath(res.path || rawPath);
 				} else {
-					setFileText(res?.text ?? "");
+					setFileText(text ?? "");
 					setResolvedPath(res?.path || rawPath);
 				}
 			})
@@ -93,7 +100,7 @@ export const FilePreviewDialog: FC<FilePreviewDialogProps> = ({ request, workspa
 	}, [loading, lines, lineStart]);
 
 	const filename = useMemo(() => {
-		const p = resolvedPath || rawPath;
+		const p = (resolvedPath || rawPath).replace(/[\\/]+$/, "");
 		return p.split(/[\\/]/).filter(Boolean).at(-1) ?? p;
 	}, [resolvedPath, rawPath]);
 

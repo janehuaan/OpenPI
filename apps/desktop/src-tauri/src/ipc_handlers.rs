@@ -1824,20 +1824,64 @@ pub async fn handle_invoke(
 
         "read_workspace_file" => {
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let target = Path::new(cwd).join(path);
-            if target.exists() {
-                let content = fs::read_to_string(&target).unwrap_or_default();
-                Ok(json!({ "path": path, "content": content }))
+            let raw_path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim();
+            let clean_path = raw_path.trim_end_matches(['/', '\\']);
+
+            let mut resolved: Option<PathBuf> = None;
+
+            // 1. Direct path check (if absolute or starts with Users/ or home/)
+            let direct = PathBuf::from(clean_path);
+            if direct.is_file() {
+                resolved = Some(direct);
+            } else if (clean_path.starts_with("Users/") || clean_path.starts_with("home/")) && Path::new(&format!("/{}", clean_path)).is_file() {
+                resolved = Some(PathBuf::from(format!("/{}", clean_path)));
             } else {
-                Err("File not found".to_string())
+                // 2. Relative to cwd
+                let joined = Path::new(cwd).join(clean_path);
+                if joined.is_file() {
+                    resolved = Some(joined);
+                } else if let Some(stripped) = clean_path.strip_prefix(cwd) {
+                    let s = stripped.trim_start_matches(['/', '\\']);
+                    let re_joined = Path::new(cwd).join(s);
+                    if re_joined.is_file() {
+                        resolved = Some(re_joined);
+                    }
+                }
+            }
+
+            if let Some(target) = resolved {
+                match fs::read_to_string(&target) {
+                    Ok(content) => Ok(json!({
+                        "path": target.to_string_lossy().to_string(),
+                        "text": content,
+                        "content": content,
+                        "exists": true,
+                        "size": content.len()
+                    })),
+                    Err(e) => Err(format!("Failed to read file: {}", e)),
+                }
+            } else {
+                Err(format!("File not found: {}", clean_path))
             }
         }
 
         "open_file_in_editor" => {
-            let file_path = args.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
-            let _ = Command::new("open").arg(file_path).spawn();
-            Ok(json!({ "success": true }))
+            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
+            let file_path = args.get("filePath").and_then(|v| v.as_str()).unwrap_or("").trim();
+            let clean_path = file_path.trim_end_matches(['/', '\\']);
+
+            let target = if Path::new(clean_path).is_file() {
+                PathBuf::from(clean_path)
+            } else if (clean_path.starts_with("Users/") || clean_path.starts_with("home/")) && Path::new(&format!("/{}", clean_path)).is_file() {
+                PathBuf::from(format!("/{}", clean_path))
+            } else if Path::new(cwd).join(clean_path).is_file() {
+                Path::new(cwd).join(clean_path)
+            } else {
+                PathBuf::from(clean_path)
+            };
+
+            let _ = Command::new("open").arg(&target).spawn();
+            Ok(json!({ "success": true, "path": target.to_string_lossy().to_string() }))
         }
 
         // ── System Ops & Telemetry ─────────────────────────────────────────

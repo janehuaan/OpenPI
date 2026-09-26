@@ -65,18 +65,31 @@ export function parseFileLink(href: string): ParsedFileLink | null {
 	if (cleanPath.startsWith("file://")) {
 		isFile = true;
 		try {
-			cleanPath = decodeURIComponent(new URL(cleanPath).pathname);
+			const parsed = new URL(cleanPath);
+			// In browser/Tauri, file://Users/... puts "Users" in host and "/username/..." in pathname
+			if (parsed.host && !/^[a-zA-Z]:/.test(parsed.host)) {
+				cleanPath = decodeURIComponent(`/${parsed.host}${parsed.pathname}`);
+			} else {
+				cleanPath = decodeURIComponent(parsed.pathname);
+			}
 			// On Windows, URL pathname might be "/C:/path", strip leading slash
 			if (/^\/[a-zA-Z]:/.test(cleanPath)) {
 				cleanPath = cleanPath.slice(1);
 			}
 		} catch {
-			cleanPath = cleanPath.replace(/^file:\/\//, "");
+			cleanPath = cleanPath.replace(/^file:\/+/i, "/");
 		}
 	} else {
+		// Clean file: prefix if present
+		cleanPath = cleanPath.replace(/^file:\/+/i, "/");
+		// Check if it starts with Users/ or home/ without leading slash
+		if (/^(Users|home)\//i.test(cleanPath)) {
+			cleanPath = `/${cleanPath}`;
+		}
 		// Check path prefix or known extension
 		const hasPrefix = cleanPath.startsWith("/") || cleanPath.startsWith("./") || cleanPath.startsWith("../");
-		const extMatch = /\.([a-zA-Z0-9]+)$/.exec(cleanPath);
+		const cleanNoSlash = cleanPath.replace(/[\\/]+$/, "");
+		const extMatch = /\.([a-zA-Z0-9]+)$/.exec(cleanNoSlash);
 		const ext = extMatch ? extMatch[1].toLowerCase() : "";
 		const hasKnownExt = KNOWN_FILE_EXTENSIONS.has(ext);
 
@@ -84,6 +97,9 @@ export function parseFileLink(href: string): ParsedFileLink | null {
 			isFile = true;
 		}
 	}
+
+	// Always strip trailing slashes for file links
+	cleanPath = cleanPath.replace(/[\\/]+$/, "");
 
 	if (!isFile || !cleanPath) return null;
 
