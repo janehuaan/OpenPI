@@ -16,13 +16,18 @@ impl LeakHunter {
         let secret_patterns = vec![
             (
                 "OpenAI/Anthropic/Agnes API Key",
-                Regex::new(r"(?i)\b(sk-[a-zA-Z0-9_\-]{24,64})\b").unwrap(),
+                Regex::new(r"(?i)\b(sk-[a-zA-Z0-9_\-]{20,64})\b").unwrap(),
                 "[REDACTED_API_KEY]",
             ),
             (
                 "GitHub Personal Access Token",
-                Regex::new(r"\b(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82})\b").unwrap(),
+                Regex::new(r"\b(ghp_[a-zA-Z0-9]{30,42}|github_pat_[a-zA-Z0-9_]{50,100})\b").unwrap(),
                 "[REDACTED_GITHUB_TOKEN]",
+            ),
+            (
+                "GitLab / HuggingFace Token",
+                Regex::new(r"\b(glpat-[a-zA-Z0-9\-_]{20,40}|hf_[a-zA-Z0-9]{30,50})\b").unwrap(),
+                "[REDACTED_ACCESS_TOKEN]",
             ),
             (
                 "AWS Access Key ID",

@@ -20,6 +20,8 @@ pub fn openpi_dir() -> PathBuf {
     }
 }
 
+const JEV_SENTINEL_JS: &str = include_str!("../assets/sentinel.js");
+
 pub fn instances_path() -> PathBuf {
     openpi_dir().join("instances.json")
 }
@@ -528,6 +530,10 @@ impl Supervisor {
 
         let _ = std::fs::create_dir_all(sessions_dir());
         let _ = std::fs::create_dir_all(openpi_dir().join("agent"));
+        let extensions_dir = openpi_dir().join("agent").join("extensions");
+        let _ = std::fs::create_dir_all(&extensions_dir);
+        let sentinel_path = extensions_dir.join("sentinel.js");
+        let _ = std::fs::write(&sentinel_path, JEV_SENTINEL_JS);
 
         info!(
             "Spawning pi subprocess for session {}: node={:?} entry={:?}",
