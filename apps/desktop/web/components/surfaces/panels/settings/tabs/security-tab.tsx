@@ -133,16 +133,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 							<span>毫秒级前置安全门禁、敏感脱敏、防死循环与输出智能脱水压缩</span>
 						</div>
 					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-						<button
-							type="button"
-							className="settings-card-header-action"
-							title="刷新状态"
-							disabled={loading}
-							onClick={() => void loadData()}
-						>
-							<RefreshCw size={14} className={loading ? "spin" : ""} />
-						</button>
+					<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
 						<span className={`provider-badge ${jevStatus?.ready ? "active" : "standby"}`}>
 							{jevStatus?.status === "Ready"
 								? "⚡ 55ms 极速就绪"
@@ -150,6 +141,16 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 									? "异步预热中"
 									: "规则降级模式"}
 						</span>
+						<button
+							type="button"
+							className="icon-button quiet"
+							title="刷新引擎状态"
+							aria-label="刷新引擎状态"
+							disabled={loading}
+							onClick={() => void loadData()}
+						>
+							<RefreshCw size={13} className={loading ? "spin" : ""} />
+						</button>
 					</div>
 				</div>
 
