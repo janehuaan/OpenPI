@@ -252,11 +252,11 @@ export const desktopApi = {
 	providerLogout: (instanceId: string, provider: string) => call<boolean>("provider_logout", { instanceId, provider }),
 	openExternal: (url: string) => call<boolean>("open_external", { url }),
 	getUserProfile: () =>
-		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; synced?: boolean; updatedAt?: string }>(
+		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string; synced?: boolean; updatedAt?: string }>(
 			"get_user_profile",
 		),
-	saveUserProfile: (profile: { nickname?: string; avatar?: string; avatarEmoji?: string }) =>
-		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; synced?: boolean; updatedAt?: string }>(
+	saveUserProfile: (profile: { nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string }) =>
+		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string; synced?: boolean; updatedAt?: string }>(
 			"save_user_profile",
 			profile,
 		),

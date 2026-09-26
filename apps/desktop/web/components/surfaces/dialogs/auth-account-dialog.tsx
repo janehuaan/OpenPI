@@ -4,11 +4,11 @@ import { desktopApi } from "../../../api";
 import { supabase, type SupabaseUser } from "../../../lib/supabase-client";
 
 interface AuthAccountDialogProps {
-	profile: { nickname?: string; avatarEmoji?: string };
+	profile: { nickname?: string; avatarEmoji?: string; avatarUrl?: string };
 	busy?: boolean;
 	onClose(): void;
-	onSaveLocalProfile(profile: { nickname?: string; avatarEmoji?: string }): Promise<void>;
-	onProfileChanged?(profile: { nickname?: string; avatarEmoji?: string }): void;
+	onSaveLocalProfile(profile: { nickname?: string; avatarEmoji?: string; avatarUrl?: string }): Promise<void>;
+	onProfileChanged?(profile: { nickname?: string; avatarEmoji?: string; avatarUrl?: string }): void;
 }
 
 export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
@@ -32,6 +32,9 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	const [avatarEmoji, setAvatarEmoji] = useState(
 		user?.user_metadata?.avatar_emoji || profile.avatarEmoji || "🚀",
 	);
+	const [avatarUrl, setAvatarUrl] = useState<string | undefined>(
+		user?.user_metadata?.avatar_url || user?.user_metadata?.picture || user?.user_metadata?.avatar || profile.avatarUrl || undefined,
+	);
 
 	// Supabase Project Config
 	const [showConfig, setShowConfig] = useState(!supabase.isConfigured());
@@ -45,6 +48,12 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
 	useEffect(() => {
+		if (profile.avatarUrl && !avatarUrl) {
+			setAvatarUrl(profile.avatarUrl);
+		}
+	}, [profile.avatarUrl]);
+
+	useEffect(() => {
 		const unsub = supabase.onAuthStateChange((nextUser) => {
 			setUser(nextUser);
 			setBusy(false);
@@ -56,6 +65,10 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 				}
 				if (meta?.avatar_emoji) {
 					setAvatarEmoji(meta.avatar_emoji);
+				}
+				const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || undefined;
+				if (nextAvatarUrl) {
+					setAvatarUrl(nextAvatarUrl);
 				}
 			}
 		});
@@ -97,14 +110,18 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 			} else {
 				setSuccessMessage("登录成功！");
 				const meta = res.user?.user_metadata;
+				const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || avatarUrl;
+				if (nextAvatarUrl) setAvatarUrl(nextAvatarUrl);
 				if (meta?.nickname) {
 					void onSaveLocalProfile({
 						nickname: meta.nickname,
 						avatarEmoji: meta.avatar_emoji || avatarEmoji,
+						avatarUrl: nextAvatarUrl,
 					});
 					onProfileChanged?.({
 						nickname: meta.nickname,
 						avatarEmoji: meta.avatar_emoji || avatarEmoji,
+						avatarUrl: nextAvatarUrl,
 					});
 				}
 			}
@@ -191,9 +208,11 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 					meta?.name ||
 					res.user.email?.split("@")[0] ||
 					"用户";
-				const nextAvatar = meta?.avatar_emoji || "🐙";
-				void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
-				onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar });
+				const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || undefined;
+				const nextAvatar = meta?.avatar_emoji || (nextAvatarUrl ? "" : "🐙");
+				if (nextAvatarUrl) setAvatarUrl(nextAvatarUrl);
+				void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
+				onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
 				setManualTokenInput("");
 				setShowManualInput(false);
 			} else {
@@ -274,9 +293,11 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 										meta?.name ||
 										res.user.email?.split("@")[0] ||
 										"用户";
-									const nextAvatar = meta?.avatar_emoji || (provider === "github" ? "🐙" : "🌐");
-									void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
-									onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar });
+									const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || undefined;
+									const nextAvatar = meta?.avatar_emoji || (nextAvatarUrl ? "" : (provider === "github" ? "🐙" : "🌐"));
+									if (nextAvatarUrl) setAvatarUrl(nextAvatarUrl);
+									void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
+									onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
 								}
 								setBusy(false);
 							}
@@ -316,10 +337,12 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 			await onSaveLocalProfile({
 				nickname: cleanNick,
 				avatarEmoji: cleanEmoji,
+				avatarUrl,
 			});
 			onProfileChanged?.({
 				nickname: cleanNick,
 				avatarEmoji: cleanEmoji,
+				avatarUrl,
 			});
 
 			// 2. Best-effort async sync to Supabase
@@ -472,9 +495,22 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 									placeItems: "center",
 									fontSize: "20px",
 									boxShadow: "0 2px 10px var(--accent-soft)",
+									position: "relative",
+									overflow: "hidden",
+									flexShrink: 0,
 								}}
 							>
-								{avatarEmoji || (nickname || "U").slice(0, 1).toUpperCase()}
+								{avatarUrl ? (
+									<img
+										src={avatarUrl}
+										alt={nickname || "Avatar"}
+										style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }}
+										onError={(e) => {
+											(e.currentTarget as HTMLElement).style.display = "none";
+										}}
+									/>
+								) : null}
+								<span>{avatarEmoji || (nickname || "U").slice(0, 1).toUpperCase()}</span>
 							</div>
 							<div style={{ flex: 1, minWidth: 0 }}>
 								<div style={{ fontWeight: 650, fontSize: "14px", color: "var(--text)" }}>

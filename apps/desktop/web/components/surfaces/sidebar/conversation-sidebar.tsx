@@ -79,7 +79,7 @@ export function ConversationSidebar({
 	runs?: TaskRun[];
 	daemonRunning?: boolean;
 	onNavigate?(view: MoreView | "chat"): void;
-	userProfile?: { nickname?: string; avatarEmoji?: string };
+	userProfile?: { nickname?: string; avatarEmoji?: string; avatarUrl?: string };
 	onEditProfile?(): void;
 }) {
 	const spaces = useMemo(() => {
@@ -244,7 +244,16 @@ export function ConversationSidebar({
 					aria-label="编辑档案"
 					onClick={onEditProfile}
 				>
-					{userProfile?.avatarEmoji ?? (userProfile?.nickname ?? "U").slice(0, 1).toUpperCase()}
+					{userProfile?.avatarUrl ? (
+						<img
+							src={userProfile.avatarUrl}
+							alt={userProfile?.nickname ?? "Avatar"}
+							onError={(e) => {
+								(e.currentTarget as HTMLElement).style.display = "none";
+							}}
+						/>
+					) : null}
+					<span>{userProfile?.avatarEmoji ?? (userProfile?.nickname ?? "U").slice(0, 1).toUpperCase()}</span>
 				</button>
 				<div className="account-copy">
 					<strong>{userProfile?.nickname ?? "用户"}</strong>

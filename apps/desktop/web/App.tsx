@@ -223,7 +223,7 @@ export function App() {
 	}>({});
 	const [includeStopped, setIncludeStopped] = useState(true);
 	const [showAllConversations, setShowAllConversations] = useState(false);
-	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
+	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; avatarUrl?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
 	const [accountDialogOpen, setAccountDialogOpen] = useState(false);
 	const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
@@ -353,9 +353,10 @@ export function App() {
 					meta?.name ||
 					res.user.email?.split("@")[0] ||
 					"用户";
-				const nextAvatar = meta?.avatar_emoji || "🐙";
-				void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
-				setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+				const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || undefined;
+				const nextAvatar = meta?.avatar_emoji || (nextAvatarUrl ? "" : "🐙");
+				void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
+				setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
 			}
 		});
 
@@ -371,9 +372,10 @@ export function App() {
 						meta?.name ||
 						res.user.email?.split("@")[0] ||
 						"用户";
-					const nextAvatar = meta?.avatar_emoji || (meta?.avatar_url?.includes("google") ? "🌐" : "🐙");
-					void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
-					setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+					const nextAvatarUrl = meta?.avatar_url || meta?.picture || meta?.avatar || undefined;
+					const nextAvatar = meta?.avatar_emoji || (nextAvatarUrl ? "" : (meta?.avatar_url?.includes("google") ? "🌐" : "🐙"));
+					void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
+					setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar, avatarUrl: nextAvatarUrl });
 				}
 			});
 		};
@@ -410,7 +412,7 @@ export function App() {
 		};
 	}, []);
 
-	async function saveUserProfile(profile: { nickname?: string; avatarEmoji?: string }): Promise<void> {
+	async function saveUserProfile(profile: { nickname?: string; avatarEmoji?: string; avatarUrl?: string }): Promise<void> {
 		setBusy("save-profile");
 		setError(undefined);
 		try {

@@ -327,7 +327,7 @@ export function ReferenceWorkspacePreview({
 	customContent?: ReactNode;
 	onOpenShortcuts?: () => void;
 	onSwitchWorkspace?: (cwd?: string) => void;
-	userProfile?: { nickname?: string; avatarEmoji?: string };
+	userProfile?: { nickname?: string; avatarEmoji?: string; avatarUrl?: string };
 	onOpenAccount?: () => void;
 }) {
 	const { effectiveMode, toggle: toggleTheme } = useTheme();
@@ -1913,7 +1913,18 @@ export function ReferenceWorkspacePreview({
 						onClick={onOpenAccount}
 					>
 						<span className="reference-avatar">
-							{userProfile?.avatarEmoji || (userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email[0].toUpperCase() : "U"))}
+							{(userProfile?.avatarUrl || supabaseUser?.user_metadata?.avatar_url || supabaseUser?.user_metadata?.picture) ? (
+								<img
+									src={userProfile?.avatarUrl || supabaseUser?.user_metadata?.avatar_url || supabaseUser?.user_metadata?.picture}
+									alt={userProfile?.nickname || "Avatar"}
+									onError={(e) => {
+										(e.currentTarget as HTMLElement).style.display = "none";
+									}}
+								/>
+							) : null}
+							<span>
+								{userProfile?.avatarEmoji || (userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email[0].toUpperCase() : "U"))}
+							</span>
 						</span>
 						<strong>{userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email.split("@")[0] : "用户")}</strong>
 						<em>{supabaseUser ? "云端" : "单机"}</em>
