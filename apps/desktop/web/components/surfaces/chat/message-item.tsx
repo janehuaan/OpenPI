@@ -127,7 +127,7 @@ export const MessageItem = memo(function MessageItem({
 							const isAssertionBlocked = detailText.includes("[Assertion Gate]") || detailText.includes("[Jev SafetyGate");
 							const isRollbackTriggered = detailText.includes("[Physical Rollback]");
 							const isJevRedacted = detailText.includes("[REDACTED_") || detailText.includes("[Jev LeakHunter");
-							const isJevLoopBreak = detailText.includes("[Jev LoopBreaker");
+							const isJevLoopBreak = detailText.includes("[Jev LoopBreaker") || detailText.includes("死循环") || detailText.includes("熔断");
 							const isJevPatched = detailText.includes("[Jev 优化]") || detailText.includes("Auto-patched");
 							const isCallSubagent = call.name === "subagent";
 

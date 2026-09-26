@@ -710,19 +710,15 @@ impl Supervisor {
                                 }
 
                                 // Loop Breaker & Stop Decider hooks
-                                if is_error {
-                                    if let Some(loop_res) = jev_clone.record_command_result(&cmd, false, &res_str).await {
-                                        if loop_res.should_break {
-                                            tracing::warn!("🛑 [Jev LoopBreaker] Hard circuit breaker tripped! Count: {}", loop_res.loop_count);
-                                            event["jev_loop_breaker"] = serde_json::json!({
-                                                "should_break": true,
-                                                "loop_count": loop_res.loop_count,
-                                                "corrective_hint": loop_res.corrective_hint,
-                                            });
-                                        }
+                                if let Some(loop_res) = jev_clone.record_command_result(&cmd, !is_error, &res_str).await {
+                                    if loop_res.should_break {
+                                        tracing::warn!("🛑 [Jev LoopBreaker] Hard circuit breaker tripped! Count: {}", loop_res.loop_count);
+                                        event["jev_loop_breaker"] = serde_json::json!({
+                                            "should_break": true,
+                                            "loop_count": loop_res.loop_count,
+                                            "corrective_hint": loop_res.corrective_hint,
+                                        });
                                     }
-                                } else {
-                                    jev_clone.record_command_result(&cmd, true, &res_str).await;
                                 }
                             }
                         }

@@ -42,6 +42,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 		autoPatchedCommands: number;
 		secretsRedacted: number;
 		estimatedTokensSaved: number;
+		loopBreaks: number;
 		recentBlocks: Array<{
 			timestamp: number;
 			command: string;
@@ -54,6 +55,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 		autoPatchedCommands: 0,
 		secretsRedacted: 0,
 		estimatedTokensSaved: 0,
+		loopBreaks: 0,
 		recentBlocks: [],
 	});
 
@@ -179,6 +181,11 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>凭证敏感脱敏</span>
 							<strong style={{ fontSize: "18px", color: "var(--accent)" }}>{telemetry.secretsRedacted}</strong>
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "4px" }}>处</span>
+						</div>
+						<div style={{ padding: "10px", background: "var(--bg-subtle, rgba(0,0,0,0.03))", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+							<span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>死循环熔断</span>
+							<strong style={{ fontSize: "18px", color: "var(--color-danger, #ef4444)" }}>{telemetry.loopBreaks}</strong>
+							<span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "4px" }}>次</span>
 						</div>
 						<div style={{ padding: "10px", background: "var(--bg-subtle, rgba(0,0,0,0.03))", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>节约 Token 估算</span>

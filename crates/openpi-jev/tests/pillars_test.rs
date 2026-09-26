@@ -95,6 +95,16 @@ async fn test_pillar4_loop_breaker() {
     coordinator.record_command_result("cargo build", true, "Finished").await;
     let a3 = coordinator.record_command_result(cmd, false, err).await.unwrap();
     assert!(!a3.should_break);
+
+    // Repetitive read queries (e.g. grep) that succeed also trigger circuit breaker if repeated
+    let grep_cmd = "grep -rn \"defrost\" src/";
+    let grep_res = "src/view.tsx:10: defrost";
+    coordinator.record_command_result("ls -la", true, "src").await; // reset with another command
+    let g1 = coordinator.record_command_result(grep_cmd, true, grep_res).await.unwrap();
+    assert!(!g1.should_break);
+    let g2 = coordinator.record_command_result(grep_cmd, true, grep_res).await.unwrap();
+    assert!(g2.should_break);
+    assert!(g2.corrective_hint.unwrap().contains("grep"));
 }
 
 #[test]

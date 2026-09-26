@@ -139,12 +139,7 @@ impl JevCoordinator {
     // Pillar 4: Loop Breaker
     pub async fn record_command_result(&self, cmd: &str, is_success: bool, output: &str) -> Option<LoopAnalysis> {
         let mut breaker = self.loop_breaker.write().await;
-        if is_success {
-            breaker.record_success();
-            None
-        } else {
-            Some(breaker.record_failure(cmd, output))
-        }
+        Some(breaker.record_execution(cmd, output, !is_success))
     }
 
     // Pillar 6: Stop Decider

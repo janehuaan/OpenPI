@@ -24,7 +24,9 @@ let totalConfirmedCount = 0;
 let totalModifiedCount = 0;
 let totalLeaksRedacted = 0;
 let totalTokensSaved = 0;
+let totalLoopBreaks = 0;
 const blockedLog = [];
+const commandHistory = [];
 
 // Fallback high-risk patterns if daemon socket is momentarily unavailable
 const LOCAL_HIGH_RISK_PATTERNS = [
@@ -172,6 +174,69 @@ export default function sentinelExtension(pi) {
       if (!cmd) {
         return void 0;
       }
+
+      // ── Jev Pillar 4: LoopBreaker Pre-Flight Circuit Breaker ──
+      // Normalize command (strip trailing echoes, delimiters, and spaces)
+      const normCmd = cmd.replace(/;\s*echo\s*.*$/i, "").replace(/[;\s]+$/, "").trim();
+
+      // Check consecutive repetition
+      let repeatCount = 0;
+      for (let i = commandHistory.length - 1; i >= 0; i--) {
+        if (commandHistory[i].normCmd === normCmd) {
+          repeatCount++;
+        } else {
+          break;
+        }
+      }
+
+      // If already executed twice (this is the 3rd attempt): HARD FUSE BREAK!
+      if (repeatCount >= 2) {
+        totalBlockedCount += 1;
+        totalLoopBreaks += 1;
+        const entry = {
+          timestamp: Date.now(),
+          tool: event.toolName,
+          command: cmd,
+          reason: `[Jev LoopBreaker] 连续重复执行相同指令 ${repeatCount + 1} 次且无新进展`,
+          risk: 0.95
+        };
+        blockedLog.push(entry);
+        if (blockedLog.length > 50) blockedLog.shift();
+
+        console.warn(`🛑 [Jev LoopBreaker] Circuit breaker tripped for repetitive command (${repeatCount + 1}x): \`${cmd}\``);
+
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify(`🛑 [Jev 熔断] 检测到指令连续重复陷入死循环，已强制阻断`, "warning");
+        }
+
+        return {
+          block: true,
+          reason: `🛑 [Jev LoopBreaker 死循环强制熔断]\n系统检测到当前任务已连续 ${repeatCount + 1} 次重复执行完全相同的检索/执行指令：\n\n\`${cmd}\`\n\n为避免智能体陷入死循环打转并浪费 Token 与时间，系统底层已物理阻断该指令继续调用！\n\n💡 核心建议与排查引导：\n1. 目标信息可能不存在，或者在第 1 次执行时已经返回了全部输出。\n2. 请立即停止重复执行相同的 grep / find / cat 指令！\n3. 请仔细阅读并分析前几次调用中已经获取到的终端输出内容。\n4. 若需进一步定位，请换用不同的关键词、正则表达式，或切换到其他代码文件进行核对。`
+        };
+      }
+
+      // Check Ping-Pong oscillation (A -> B -> A -> B -> A)
+      if (commandHistory.length >= 4) {
+        const n = commandHistory.length;
+        const h = commandHistory;
+        if (h[n - 1].normCmd === h[n - 3].normCmd && h[n - 2].normCmd === h[n - 4].normCmd && normCmd === h[n - 2].normCmd) {
+          totalBlockedCount += 1;
+          totalLoopBreaks += 1;
+          return {
+            block: true,
+            reason: `🛑 [Jev LoopBreaker 震荡死循环熔断]\n检测到智能体在两条交替指令之间陷入反复震荡死循环（Ping-Pong Loop）：\n\n1) \`${h[n - 1].normCmd}\`\n2) \`${h[n - 2].normCmd}\`\n\n系统底层已强制阻断后续震荡，请立即停止机械重试并切换排查思路！`
+          };
+        }
+      }
+
+      // Record this execution into history
+      commandHistory.push({
+        tool: event.toolName,
+        cmd,
+        normCmd,
+        timestamp: Date.now()
+      });
+      if (commandHistory.length > 40) commandHistory.shift();
 
       const verdict = await JevClient.checkCommand(cmd);
 
@@ -335,7 +400,8 @@ export default function sentinelExtension(pi) {
                   userConfirmedCommands: totalConfirmedCount,
                   autoPatchedCommands: totalModifiedCount,
                   secretsRedacted: totalLeaksRedacted,
-                  estimatedTokensSaved: totalTokensSaved
+                  estimatedTokensSaved: totalTokensSaved,
+                  loopBreaks: totalLoopBreaks
                 },
                 recentBlocks: blockedLog.slice(-5)
               },
