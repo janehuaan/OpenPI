@@ -30,9 +30,18 @@ export interface SupabaseConfig {
 const STORAGE_KEY_CONFIG = "openpi:supabase_config";
 const STORAGE_KEY_SESSION = "openpi:supabase_session";
 
-// Optional built-in or environment defaults
-const DEFAULT_URL = (typeof process !== "undefined" && process.env?.VITE_SUPABASE_URL) || "";
-const DEFAULT_ANON_KEY = (typeof process !== "undefined" && process.env?.VITE_SUPABASE_ANON_KEY) || "";
+// Built-in Supabase project configuration (can be overridden by user in settings/localStorage)
+const DEFAULT_URL =
+	(typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_URL) ||
+	(typeof import.meta !== "undefined" && (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_URL) ||
+	(typeof process !== "undefined" && process.env?.VITE_SUPABASE_URL) ||
+	"https://ibohdnslftdpvixwaxkd.supabase.co";
+
+const DEFAULT_ANON_KEY =
+	(typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
+	(typeof import.meta !== "undefined" && (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) ||
+	(typeof process !== "undefined" && process.env?.VITE_SUPABASE_ANON_KEY) ||
+	"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlib2hkbnNsZnRkcHZpeHdheGtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAxMTM4NDEsImV4cCI6MjA3NTY4OTg0MX0.j9xB-rosYv4Fyorb4iyPTMvMczcDdWfK3cKUr36ymoI";
 
 export class SupabaseClient {
 	private config: SupabaseConfig;

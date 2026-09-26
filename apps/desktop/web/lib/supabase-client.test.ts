@@ -27,8 +27,9 @@ describe("SupabaseClient", () => {
 		client = new SupabaseClient();
 	});
 
-	it("initializes as unconfigured when no settings in localStorage", () => {
-		expect(client.isConfigured()).toBe(false);
+	it("initializes with default project when no settings in localStorage", () => {
+		expect(client.isConfigured()).toBe(true);
+		expect(client.getConfig().url).toBe("https://ibohdnslftdpvixwaxkd.supabase.co");
 		expect(client.getUser()).toBeNull();
 		expect(client.getSession()).toBeNull();
 	});
