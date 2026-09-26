@@ -47,13 +47,15 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	useEffect(() => {
 		const unsub = supabase.onAuthStateChange((nextUser) => {
 			setUser(nextUser);
+			setBusy(false);
 			if (nextUser) {
 				setActiveTab("profile");
-				if (nextUser.user_metadata?.nickname) {
-					setNickname(nextUser.user_metadata.nickname);
+				const meta = nextUser.user_metadata;
+				if (meta?.nickname || meta?.user_name || meta?.full_name || meta?.name) {
+					setNickname(meta.nickname || meta.user_name || meta.full_name || meta.name);
 				}
-				if (nextUser.user_metadata?.avatar_emoji) {
-					setAvatarEmoji(nextUser.user_metadata.avatar_emoji);
+				if (meta?.avatar_emoji) {
+					setAvatarEmoji(meta.avatar_emoji);
 				}
 			}
 		});
@@ -247,6 +249,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 				} else if (typeof window !== "undefined") {
 					window.location.href = oauthUrl;
 				}
+				setBusy(false);
 			} else {
 				const checkTimer = setInterval(async () => {
 					try {
