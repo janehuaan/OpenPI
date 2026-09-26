@@ -855,13 +855,13 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 																alignItems: "center",
 																gap: "6px",
 																borderRadius: "999px",
-																borderColor: "rgba(56, 189, 248, 0.4)",
+																borderColor: "var(--border)",
 															}}
 															disabled={probingProviderId === pId}
 															onClick={() => void handleBatchProbe(pId)}
 															title="自动化探测所有模型的真实上下文、最大输出限制、思考推理与多模态能力"
 														>
-															<Activity size={13} className={probingProviderId === pId ? "spin" : ""} style={{ color: "#38bdf8" }} />
+															<Activity size={13} className={probingProviderId === pId ? "spin" : ""} style={{ color: "var(--accent)" }} />
 															<span>{probingProviderId === pId ? "正在测定能力..." : "自动测定能力"}</span>
 														</button>
 
@@ -917,7 +917,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 																			fontSize: "12px",
 																			border: "none",
 																			background: "transparent",
-																			color: "#38bdf8",
+																			color: "var(--accent)",
 																			fontWeight: 600,
 																			cursor: "pointer",
 																			textAlign: "left",
@@ -1168,7 +1168,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 																					void handleProbeSingleModel(pId, m.id);
 																				}}
 																			>
-																				<Activity size={12} className={probingModelId === m.id ? "spin" : ""} style={{ color: "#38bdf8" }} />
+																				<Activity size={12} className={probingModelId === m.id ? "spin" : ""} style={{ color: "var(--accent)" }} />
 																			</button>
 																			<button
 																				type="button"
@@ -1557,7 +1557,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 										}
 									}}
 								>
-									<Activity size={12} className={probingModelId === newModelId ? "spin" : ""} style={{ color: "#38bdf8" }} />
+									<Activity size={12} className={probingModelId === newModelId ? "spin" : ""} style={{ color: "var(--accent)" }} />
 									<span>{probingModelId === newModelId ? "正在测定..." : "🧪 实时探针测定"}</span>
 								</button>
 							</div>

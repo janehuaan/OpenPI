@@ -188,7 +188,7 @@ export const AboutTab: FC<AboutTabProps> = ({ capabilities }) => {
 			<section className="settings-section-card">
 				<div className="settings-section-card-header">
 					<div className="settings-section-card-header-left">
-						<div className="settings-section-card-icon" style={{ color: "var(--accent, #6366f1)" }}>
+						<div className="settings-section-card-icon" style={{ color: "var(--accent)" }}>
 							<Cpu size={18} />
 						</div>
 						<div className="settings-section-card-title">

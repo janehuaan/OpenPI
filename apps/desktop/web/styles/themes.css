@@ -1218,6 +1218,156 @@ html, body, #root {
 	color: var(--text-tertiary) !important;
 }
 
+/* ── 4.17.1 Adaptive Primary & Action Buttons ── */
+.button.primary {
+	background: var(--accent) !important;
+	color: var(--accent-contrast, #ffffff) !important;
+	border: 1px solid transparent !important;
+	box-shadow: 0 2px 10px var(--accent-soft, rgba(0, 0, 0, 0.12)) !important;
+}
+
+.button.primary:hover:not(:disabled) {
+	background: var(--accent-hover, var(--accent)) !important;
+	box-shadow: 0 4px 16px var(--accent-soft, rgba(0, 0, 0, 0.22)) !important;
+}
+
+.button.primary:active:not(:disabled) {
+	transform: scale(0.97) !important;
+	box-shadow: 0 1px 4px var(--accent-soft, rgba(0, 0, 0, 0.15)) !important;
+}
+
+.button:disabled,
+.button.primary:disabled {
+	opacity: 0.55 !important;
+	cursor: not-allowed !important;
+	transform: none !important;
+	box-shadow: none !important;
+}
+
+/* ── 4.17.2 Settings Models, Providers & Extensions Elements ── */
+.hero-active-model-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow) !important;
+}
+
+.hero-active-model-card::before {
+	background: linear-gradient(
+		90deg,
+		transparent 0%,
+		var(--border) 25%,
+		var(--accent) 55%,
+		color-mix(in srgb, var(--accent) 50%, transparent) 80%,
+		transparent 100%
+	) !important;
+}
+
+.hero-model-avatar {
+	background: var(--accent) !important;
+	color: var(--accent-contrast, #ffffff) !important;
+	box-shadow: 0 4px 16px var(--accent-soft) !important;
+}
+
+.hero-model-tag {
+	color: var(--accent) !important;
+}
+
+.hero-select {
+	background: var(--bg) !important;
+	border: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.settings-section-card-icon {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: 0 2px 8px var(--accent-soft) !important;
+}
+
+.provider-item-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow-soft) !important;
+}
+
+.provider-item-card:hover {
+	border-color: var(--accent) !important;
+}
+
+.provider-item-avatar {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: 0 2px 8px var(--accent-soft) !important;
+}
+
+.model-badge-card {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+}
+
+.model-badge-card:hover {
+	border-color: var(--accent) !important;
+	background: var(--bg-elevated) !important;
+	box-shadow: 0 4px 14px var(--accent-soft) !important;
+}
+
+.model-badge-card.is-default {
+	border-color: var(--accent) !important;
+	background: var(--accent-soft) !important;
+	box-shadow: 0 0 0 1px var(--accent), 0 4px 16px var(--accent-soft) !important;
+}
+
+.btn-set-default.current {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border-color: var(--accent) !important;
+}
+
+.model-pool-search-input {
+	background: var(--bg) !important;
+	border: 1px solid var(--border) !important;
+}
+
+.model-pool-search-input:focus-within {
+	border-color: var(--accent) !important;
+	box-shadow: 0 0 0 2px var(--accent-soft) !important;
+}
+
+.segmented-pill-group {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+}
+
+.segmented-pill-btn {
+	color: var(--text-secondary) !important;
+}
+
+.segmented-pill-btn:hover {
+	color: var(--text) !important;
+	background: var(--bg-elevated) !important;
+}
+
+.segmented-pill-btn.active {
+	background: var(--bg-elevated) !important;
+	color: var(--accent) !important;
+	font-weight: 650 !important;
+	box-shadow: 0 2px 8px var(--accent-soft) !important;
+}
+
+.modern-switch input:checked + .modern-slider {
+	background-color: var(--accent) !important;
+	border-color: var(--accent) !important;
+	box-shadow: 0 2px 10px var(--accent-soft) !important;
+}
+
+.workspace-mode-card.active {
+	border-color: var(--accent) !important;
+	background: var(--accent-soft) !important;
+	box-shadow: 0 0 0 1.5px var(--accent), 0 6px 20px -4px var(--accent-soft) !important;
+}
+
 /* ── 4.18 Modals, Popovers, Dropdowns & Menus ── */
 .dialog,
 .ui-popover-content,

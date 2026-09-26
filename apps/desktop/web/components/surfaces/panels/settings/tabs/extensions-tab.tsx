@@ -355,7 +355,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 									marginBottom: "14px",
 									borderRadius: "10px",
 									background: "var(--bg-muted)",
-									border: "1px solid var(--accent, #38bdf8)",
+									border: "1px solid var(--accent)",
 									display: "flex",
 									flexDirection: "column",
 									gap: "10px",
@@ -363,7 +363,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 							>
 								<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
 									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-										<FolderPlus size={16} style={{ color: "var(--accent, #38bdf8)" }} />
+										<FolderPlus size={16} style={{ color: "var(--accent)" }} />
 										<strong style={{ fontSize: "13px" }}>添加自定义外部开源仓库源</strong>
 									</div>
 									<span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>支持 GitHub 仓库、组织或镜像地址</span>
@@ -512,7 +512,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 										<div>
 											<div className="model-badge-card-top" style={{ marginBottom: "6px" }}>
 												<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-													<Github size={17} style={{ color: "var(--accent, #38bdf8)" }} />
+													<Github size={17} style={{ color: "var(--accent)" }} />
 													<span className="model-badge-card-name" style={{ fontSize: "14px" }}>
 														{repo.name}
 													</span>
@@ -542,7 +542,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 												style={{
 													fontFamily: "var(--font-mono, monospace)",
 													fontSize: "11px",
-													color: "var(--accent, #38bdf8)",
+													color: "var(--accent)",
 													marginBottom: "8px",
 												}}
 											>
@@ -987,10 +987,10 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 								}}
 							>
 								<div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-									<Github size={16} style={{ color: "var(--accent, #38bdf8)" }} />
+									<Github size={16} style={{ color: "var(--accent)" }} />
 									<div style={{ fontSize: "13px" }}>
 										<span>正在展示开源仓库 </span>
-										<strong style={{ color: "var(--accent, #38bdf8)" }}>{selectedRepoFilter.name}</strong>
+										<strong style={{ color: "var(--accent)" }}>{selectedRepoFilter.name}</strong>
 										<span style={{ color: "var(--text-tertiary)", marginLeft: "6px" }}>({selectedRepoFilter.fullName})</span>
 										<span style={{ marginLeft: "8px", color: "var(--text-secondary)" }}>
 											收录项目 ({filteredPackages.length} 项)
@@ -1149,7 +1149,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 														style={{
 															background: "none",
 															border: "none",
-															color: "var(--accent, #38bdf8)",
+															color: "var(--accent)",
 															cursor: "pointer",
 															display: "inline-flex",
 															alignItems: "center",
@@ -1298,7 +1298,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 										height: "34px",
 										borderRadius: "8px",
 										background: "rgba(56, 189, 248, 0.15)",
-										color: "var(--accent, #38bdf8)",
+										color: "var(--accent)",
 										display: "flex",
 										alignItems: "center",
 										justifyContent: "center",
@@ -1338,7 +1338,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 													style={{
 														background: "none",
 														border: "none",
-														color: "var(--accent, #38bdf8)",
+														color: "var(--accent)",
 														cursor: "pointer",
 														padding: 0,
 														fontSize: "12px",
@@ -1409,7 +1409,7 @@ export const ExtensionsTab: FC<ExtensionsTabProps> = ({
 										SKILL.md 规则定义内容
 									</div>
 									<span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-										唤醒指令: <code style={{ fontFamily: "var(--font-mono)", color: "var(--accent, #38bdf8)" }}>/skill:{previewSkill.id.replace(/^skill-/, "")}</code>
+										唤醒指令: <code style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>/skill:{previewSkill.id.replace(/^skill-/, "")}</code>
 									</span>
 								</div>
 
