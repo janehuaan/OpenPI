@@ -4,6 +4,7 @@ import { SettingsSidebar, type SettingsTabId } from "./settings-sidebar";
 import { GeneralTab } from "./tabs/general-tab";
 import { ModelsTab } from "./tabs/models-tab";
 import { ExtensionsTab } from "./tabs/extensions-tab";
+import { SecurityTab } from "./tabs/security-tab";
 import { AboutTab } from "./tabs/about-tab";
 import { desktopApi } from "../../../../api";
 import type { MarketplacePackage } from "../../../../marketplace";
@@ -152,6 +153,7 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 							onRemoveSkill={onRemoveSkill}
 						/>
 					)}
+					{tab === "security" && <SecurityTab instanceId={instanceId} onReload={onReload} />}
 					{tab === "about" && <AboutTab capabilities={capabilities} />}
 				</main>
 			</div>

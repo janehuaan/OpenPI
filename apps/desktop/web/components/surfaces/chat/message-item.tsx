@@ -122,11 +122,13 @@ export const MessageItem = memo(function MessageItem({
 					<div className="message-body">
 						{calls.map((call, index) => {
 							const detailText = call.detail || "";
-							const foldedMatch = detailText.match(/~([0-9]+)\s+tokens\s+saved/);
-							const isAssertionBlocked = detailText.includes("[Assertion Gate]") || detailText.includes("[Jev SafetyGate]");
+							const foldedMatch = detailText.match(/(?:~([0-9]+)\s+tokens\s+saved|节省约\s*([0-9]+)\s*Tokens?)/i);
+							const tokensSaved = foldedMatch ? (foldedMatch[1] || foldedMatch[2]) : null;
+							const isAssertionBlocked = detailText.includes("[Assertion Gate]") || detailText.includes("[Jev SafetyGate");
 							const isRollbackTriggered = detailText.includes("[Physical Rollback]");
-							const isJevRedacted = detailText.includes("[REDACTED_");
-							const isJevLoopBreak = detailText.includes("[Jev LoopBreaker]");
+							const isJevRedacted = detailText.includes("[REDACTED_") || detailText.includes("[Jev LeakHunter");
+							const isJevLoopBreak = detailText.includes("[Jev LoopBreaker");
+							const isJevPatched = detailText.includes("[Jev 优化]") || detailText.includes("Auto-patched");
 							const isCallSubagent = call.name === "subagent";
 
 							return (
@@ -135,19 +137,24 @@ export const MessageItem = memo(function MessageItem({
 										<span className="flex items-center gap-1.5 flex-wrap">
 											{isCallSubagent ? <Bot size={14} className="text-sky-400" /> : <Wrench size={14} />}
 											{call.name}
-											{foldedMatch && (
-												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="输出已脱水提纯，防止上下文溢出">
-													⚡ 省 {foldedMatch[1]} Tokens
+											{tokensSaved && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" title="Jev 智能脱水压缩，大幅节省上下文窗口">
+													⚡ 省 {tokensSaved} Tokens
 												</span>
 											)}
 											{isJevRedacted && (
-												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="Jev 猎手已自动脱敏代码与凭证泄露">
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/20" title="Jev 凭证猎手已自动脱敏代码与凭证泄露">
 													🔒 凭证脱敏
 												</span>
 											)}
 											{isAssertionBlocked && (
-												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20" title="Jev 门禁捕获高危指令并拦截">
-													🛡️ 门禁拦截
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/20" title="Jev SafetyGate 已物理拦截高危破坏性操作">
+													🛑 门禁拦截
+												</span>
+											)}
+											{isJevPatched && (
+												<span className="inline-flex items-center px-1.5 py-0.2 text-[10px] font-medium rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20" title="Jev SafetyGate 自动补全安全参数以防挂起">
+													💡 自动防挂起
 												</span>
 											)}
 											{isJevLoopBreak && (

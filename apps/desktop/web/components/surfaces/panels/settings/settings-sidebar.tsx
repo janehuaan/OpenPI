@@ -3,10 +3,11 @@ import {
 	Cable,
 	Cpu,
 	Info,
+	Shield,
 	Sliders,
 } from "../../../icons";
 
-export type SettingsTabId = "general" | "models" | "extensions" | "about";
+export type SettingsTabId = "general" | "models" | "extensions" | "security" | "about";
 
 interface SettingsSidebarProps {
 	activeTab: SettingsTabId;
@@ -57,6 +58,17 @@ export const SettingsSidebar: FC<SettingsSidebarProps> = ({
 				<Cable size={16} />
 				<span>扩展与 MCP</span>
 				{mcpCount > 0 && <span className="settings-nav-item-badge">{mcpCount}</span>}
+			</button>
+
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeTab === "security"}
+				className={`settings-nav-item ${activeTab === "security" ? "active" : ""}`}
+				onClick={() => onSelectTab("security")}
+			>
+				<Shield size={16} />
+				<span>Jev 安全防御</span>
 			</button>
 
 			<div className="settings-nav-divider" />
