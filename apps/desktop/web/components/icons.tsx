@@ -392,6 +392,11 @@ export const Github = (props: IconProps) => (
 		<path d={"M9 18c-4.51 2-5-2-7-2"} />
 	</Icon>
 );
+export const Google = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M21.35 11.1H12v3.8h5.36c-.46 2.27-2.44 3.8-5.36 3.8a6.3 6.3 0 1 1 0-12.6c1.6 0 3.05.6 4.17 1.6l2.85-2.85A10.28 10.28 0 0 0 12 1.5a10.5 10.5 0 1 0 0 21c5.8 0 10-4.14 10-10.15 0-.48-.05-.86-.15-1.25z"} fill={"currentColor"} stroke={"none"} />
+	</Icon>
+);
 export const History = (props: IconProps) => (
 	<Icon {...props}>
 		<path d={"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"} />

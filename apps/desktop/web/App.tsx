@@ -54,6 +54,7 @@ import { draftStore } from "./lib/draft-store";
 import { exportAndDownloadConversation } from "./lib/export-markdown";
 import { useGlobalKeybindings } from "./lib/keybindings";
 import { initTheme, toggleThemeMode } from "./lib/theme-manager";
+import { supabase } from "./lib/supabase-client";
 
 const SELECTED_INSTANCE_KEY = "openpi-selected-instance";
 const SNAPSHOT_CACHE_KEY = "openpi-snapshot-cache";
@@ -341,14 +342,31 @@ export function App() {
 	);
 
 	useEffect(() => {
-		if (!desktopApi.isNative) return;
+		// Check for OAuth callback from URL hash
+		void supabase.handleOAuthCallbackFromHash().then((res) => {
+			if (res?.user) {
+				const meta = res.user.user_metadata;
+				const nextNick =
+					meta?.nickname ||
+					meta?.user_name ||
+					meta?.full_name ||
+					meta?.name ||
+					res.user.email?.split("@")[0] ||
+					"用户";
+				const nextAvatar = meta?.avatar_emoji || "🚀";
+				void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+			}
+		});
+
 		let disposed = false;
-		void desktopApi
-			.getUserProfile()
-			.then((profile) => {
-				if (!disposed) setUserProfile(profile ?? {});
-			})
-			.catch(() => {});
+		if (desktopApi.isNative) {
+			void desktopApi
+				.getUserProfile()
+				.then((profile) => {
+					if (!disposed) setUserProfile(profile ?? {});
+				})
+				.catch(() => {});
+		}
 		return () => {
 			disposed = true;
 		};

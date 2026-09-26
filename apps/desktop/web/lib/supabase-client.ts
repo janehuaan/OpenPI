@@ -270,6 +270,72 @@ export class SupabaseClient {
 	}
 
 	/**
+	 * Get the OAuth authorize URL for GitHub or Google.
+	 */
+	public getOAuthUrl(provider: "github" | "google", redirectTo?: string): string {
+		const redirect =
+			redirectTo ||
+			(typeof window !== "undefined"
+				? window.location.origin.includes("tauri") || window.location.protocol === "file:"
+					? "http://127.0.0.1:5179/"
+					: window.location.origin
+				: "");
+		const url = new URL(`${this.config.url}/auth/v1/authorize`);
+		url.searchParams.set("provider", provider);
+		if (redirect) {
+			url.searchParams.set("redirect_to", redirect);
+		}
+		return url.toString();
+	}
+
+	/**
+	 * Parse and set session from URL hash after OAuth redirection.
+	 */
+	public async handleOAuthCallbackFromHash(
+		hash?: string,
+	): Promise<{ user?: SupabaseUser; session?: SupabaseSession; error?: string } | null> {
+		const h = hash || (typeof window !== "undefined" ? window.location.hash : "");
+		if (!h || !h.includes("access_token=")) return null;
+
+		try {
+			const params = new URLSearchParams(h.startsWith("#") ? h.slice(1) : h);
+			const accessToken = params.get("access_token");
+			const refreshToken = params.get("refresh_token") || "";
+			const expiresIn = Number(params.get("expires_in") || "3600");
+
+			if (!accessToken) return null;
+
+			// Fetch user info with the accessToken
+			const userRes = await fetch(`${this.config.url}/auth/v1/user`, {
+				headers: this.getHeaders(accessToken),
+			});
+
+			if (!userRes.ok) {
+				return { error: "无法验证 OAuth 用户身份信息" };
+			}
+
+			const user: SupabaseUser = await userRes.json();
+			const session: SupabaseSession = {
+				access_token: accessToken,
+				refresh_token: refreshToken,
+				expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+				user,
+			};
+
+			this.persistSession(session);
+
+			// Clean up the hash in the browser URL so it doesn't expose tokens
+			if (typeof window !== "undefined" && window.history?.replaceState) {
+				window.history.replaceState(null, "", window.location.pathname + window.location.search);
+			}
+
+			return { user, session };
+		} catch (err: any) {
+			return { error: `OAuth 认证失败: ${err?.message || String(err)}` };
+		}
+	}
+
+	/**
 	 * Sign out current session.
 	 */
 	public async signOut(): Promise<void> {

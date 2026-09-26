@@ -2453,29 +2453,48 @@
 	letter-spacing: 0.02em;
 }
 .reference-account-user-trigger {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	background: transparent;
-	border: none;
-	padding: 3px 6px;
-	border-radius: 8px;
-	cursor: pointer;
-	text-align: left;
-	transition: background 0.15s ease, transform 0.1s ease;
-	min-width: 0;
-	max-width: 145px;
+	display: inline-flex !important;
+	flex-direction: row !important;
+	align-items: center !important;
+	gap: 8px !important;
+	background: transparent !important;
+	border: none !important;
+	padding: 4px 6px !important;
+	border-radius: 8px !important;
+	cursor: pointer !important;
+	text-align: left !important;
+	transition: background 0.15s ease, transform 0.1s ease !important;
+	min-width: 0 !important;
+	max-width: 155px !important;
+	width: auto !important;
+	height: 34px !important;
+	flex-shrink: 1 !important;
 }
 .reference-account-user-trigger:hover {
-	background: var(--bg-muted, rgba(0, 0, 0, 0.05));
+	background: var(--bg-muted, rgba(0, 0, 0, 0.05)) !important;
 }
 .reference-account-user-trigger:active {
-	transform: scale(0.97);
+	transform: scale(0.97) !important;
+}
+.reference-account-user-trigger .reference-avatar {
+	width: 26px !important;
+	height: 26px !important;
+	min-width: 26px !important;
+	flex-shrink: 0 !important;
+	font-size: 13px !important;
 }
 .reference-account-user-trigger strong {
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+	font-size: 12.5px !important;
+	font-weight: 600 !important;
+	color: var(--text, #0f172a) !important;
+	white-space: nowrap !important;
+	overflow: hidden !important;
+	text-overflow: ellipsis !important;
+	max-width: 75px !important;
+	display: inline-block !important;
+}
+.reference-account-user-trigger em {
+	flex-shrink: 0 !important;
 }
 .reference-account-actions {
 	margin-left: auto;
@@ -2483,7 +2502,7 @@
 	align-items: center;
 	gap: 4px;
 }
-.reference-account button,
+.reference-account-actions button,
 .reference-account-btn {
 	width: 28px;
 	height: 28px;
@@ -2496,7 +2515,7 @@
 	place-items: center;
 	transition: all 140ms ease;
 }
-.reference-account button:hover,
+.reference-account-actions button:hover,
 .reference-account-btn:hover {
 	background: rgba(255, 255, 255, 0.06);
 	backdrop-filter: blur(12px);
@@ -4307,7 +4326,7 @@
 	}
 	.reference-brand button,
 	.reference-label button,
-	.reference-account button,
+	.reference-account-actions button,
 	.reference-context > header button {
 		color: #9aa7bd;
 	}

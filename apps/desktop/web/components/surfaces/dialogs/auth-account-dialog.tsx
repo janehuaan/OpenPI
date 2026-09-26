@@ -1,5 +1,6 @@
 import { useState, useEffect, type FC } from "react";
-import { X, Shield, LogIn, LogOut, Check, AlertCircle, Wrench, UserRound, UploadCloud } from "../../icons";
+import { X, Shield, LogIn, LogOut, Check, AlertCircle, Wrench, UserRound, UploadCloud, Github, Google } from "../../icons";
+import { desktopApi } from "../../../api";
 import { supabase, type SupabaseUser } from "../../../lib/supabase-client";
 
 interface AuthAccountDialogProps {
@@ -151,6 +152,77 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 				});
 			}
 		} finally {
+			setBusy(false);
+		}
+	};
+
+	const handleOAuthLogin = async (provider: "github" | "google") => {
+		if (!supabase.isConfigured()) {
+			setShowConfig(true);
+			setErrorMessage("请先配置 Supabase Project URL 与 Anon Key");
+			return;
+		}
+		setBusy(true);
+		setErrorMessage(null);
+		setSuccessMessage(null);
+		try {
+			const oauthUrl = supabase.getOAuthUrl(provider);
+			const width = 640;
+			const height = 750;
+			const left = Math.max(0, ((typeof window !== "undefined" ? window.screen?.width : 1200) || 1200) - width) / 2;
+			const top = Math.max(0, ((typeof window !== "undefined" ? window.screen?.height : 800) || 800) - height) / 2;
+			const popup = typeof window !== "undefined"
+				? window.open(
+						oauthUrl,
+						`supabase_oauth_${provider}`,
+						`width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no`,
+				  )
+				: null;
+
+			if (!popup || popup.closed) {
+				if (desktopApi.openExternal) {
+					await desktopApi.openExternal(oauthUrl);
+				} else if (typeof window !== "undefined") {
+					window.location.href = oauthUrl;
+				}
+			} else {
+				const checkTimer = setInterval(async () => {
+					try {
+						if (!popup || popup.closed) {
+							clearInterval(checkTimer);
+							setBusy(false);
+							return;
+						}
+						if (popup.location && popup.location.hash) {
+							const hash = popup.location.hash;
+							if (hash.includes("access_token=")) {
+								clearInterval(checkTimer);
+								popup.close();
+								const res = await supabase.handleOAuthCallbackFromHash(hash);
+								if (res?.user) {
+									setSuccessMessage(`${provider === "github" ? "GitHub" : "Google"} 登录成功！`);
+									const meta = res.user.user_metadata;
+									const nextNick =
+										meta?.nickname ||
+										meta?.user_name ||
+										meta?.full_name ||
+										meta?.name ||
+										res.user.email?.split("@")[0] ||
+										"用户";
+									const nextAvatar = meta?.avatar_emoji || (provider === "github" ? "🐙" : "🌐");
+									void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+									onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar });
+								}
+								setBusy(false);
+							}
+						}
+					} catch (_crossOriginError) {
+						// Wait until redirect completes back to the origin
+					}
+				}, 600);
+			}
+		} catch (err: any) {
+			setErrorMessage(`发起 ${provider === "github" ? "GitHub" : "Google"} 登录失败: ${err?.message || String(err)}`);
 			setBusy(false);
 		}
 	};
@@ -459,6 +531,70 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 									</button>
 								</div>
 							</form>
+						)}
+
+						{/* Third-party OAuth Buttons */}
+						{(activeTab === "signin" || activeTab === "signup") && (
+							<div style={{ marginBottom: "14px" }}>
+								<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+									<button
+										type="button"
+										className="button secondary"
+										style={{
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											gap: "7px",
+											padding: "8px 10px",
+											fontSize: "12.5px",
+											fontWeight: 600,
+											borderRadius: "8px",
+											border: "1px solid var(--border)",
+										}}
+										onClick={() => handleOAuthLogin("github")}
+										disabled={isBusy}
+										title="使用 GitHub 授权登录"
+									>
+										<Github size={16} />
+										<span>GitHub 登录</span>
+									</button>
+									<button
+										type="button"
+										className="button secondary"
+										style={{
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											gap: "7px",
+											padding: "8px 10px",
+											fontSize: "12.5px",
+											fontWeight: 600,
+											borderRadius: "8px",
+											border: "1px solid var(--border)",
+										}}
+										onClick={() => handleOAuthLogin("google")}
+										disabled={isBusy}
+										title="使用 Google 授权登录"
+									>
+										<Google size={16} />
+										<span>Google 登录</span>
+									</button>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "8px",
+										color: "var(--text-tertiary)",
+										fontSize: "11px",
+										margin: "8px 0 12px",
+									}}
+								>
+									<div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+									<span>或者使用邮箱密码</span>
+									<div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+								</div>
+							</div>
 						)}
 
 						{/* Sub-form: Sign In */}

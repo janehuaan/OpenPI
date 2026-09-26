@@ -121,4 +121,34 @@ describe("SupabaseClient", () => {
 		expect(client.getUser()).toBeNull();
 		expect(client.getSession()).toBeNull();
 	});
+
+	it("generates correct OAuth URLs for GitHub and Google", () => {
+		const githubUrl = client.getOAuthUrl("github", "http://localhost:5179/");
+		expect(githubUrl).toContain("provider=github");
+		expect(githubUrl).toContain("redirect_to=http%3A%2F%2Flocalhost%3A5179%2F");
+
+		const googleUrl = client.getOAuthUrl("google", "http://localhost:5179/");
+		expect(googleUrl).toContain("provider=google");
+		expect(googleUrl).toContain("redirect_to=http%3A%2F%2Flocalhost%3A5179%2F");
+	});
+
+	it("handles OAuth callback from URL hash properly", async () => {
+		const mockUser = {
+			id: "usr_oauth",
+			email: "oauth@example.com",
+			user_metadata: { user_name: "github_dev", avatar_emoji: "🐙" },
+		};
+
+		globalThis.fetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: async () => mockUser,
+		} as any);
+
+		const fakeHash = "#access_token=oauth_token_123&refresh_token=oauth_refresh_456&expires_in=3600&token_type=bearer";
+		const res = await client.handleOAuthCallbackFromHash(fakeHash);
+
+		expect(res?.user?.id).toBe("usr_oauth");
+		expect(client.getUser()?.email).toBe("oauth@example.com");
+		expect(client.getSession()?.access_token).toBe("oauth_token_123");
+	});
 });
