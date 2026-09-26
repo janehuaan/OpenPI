@@ -238,6 +238,150 @@ async fn execute_model_capability_probe(
     (false, 0, is_vision, is_reasoning, ctx, max_tok, Some("无法执行请求".to_string()))
 }
 
+fn memory_request_op(channel: &str, args: &Value) -> Value {
+    let mut op = args.clone();
+    let name = if channel == "write_memory_entry" { "write_memory" } else { "delete_memory" };
+    if let Some(obj) = op.as_object_mut() {
+        obj.insert("name".to_string(), json!(name));
+        if let Some(memory_type) = obj.remove("memoryType") {
+            obj.insert("type".to_string(), memory_type);
+        }
+    }
+    op
+}
+
+fn run_log_text(response: &Value) -> Result<&str, String> {
+    response.get("text").and_then(Value::as_str)
+        .ok_or_else(|| "Invalid run log response from daemon".to_string())
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[test]
+    fn memory_requests_use_daemon_type_without_losing_fields() {
+        for (channel, name) in [("write_memory_entry", "write_memory"), ("delete_memory_entry", "delete_memory")] {
+            let op = memory_request_op(channel, &json!({
+                "cwd": "/workspace", "scope": "global", "memoryType": "architecture",
+                "key": "backend", "value": "rust", "body": "notes"
+            }));
+            assert_eq!(op["name"], name);
+            assert_eq!(op["type"], "architecture");
+            assert!(op.get("memoryType").is_none());
+            assert_eq!(op["key"], "backend");
+            assert_eq!(op["scope"], "global");
+        }
+    }
+
+    #[test]
+    fn run_log_returns_text_and_rejects_invalid_response() {
+        assert_eq!(run_log_text(&json!({"text": "output", "truncated": false})).unwrap(), "output");
+        assert!(run_log_text(&json!({"truncated": false})).is_err());
+    }
+
+    #[test]
+    fn package_entries_are_mapped_to_capabilities() {
+        let entries = vec![json!({"kind": "package", "source": "npm:example", "resolved": "example"}),
+            json!({"kind": "extension", "source": "ext.js"})];
+        let caps = conversation_capabilities(Some(&entries));
+        assert_eq!(caps["packages"], json!([{"source": "npm:example", "scope": "user", "filtered": false}]));
+        assert!(caps["skills"].is_array());
+        assert!(caps["tools"].is_array());
+    }
+}
+
+fn conversation_capabilities(package_entries: Option<&[Value]>) -> Value {
+    let configured_packages;
+    let packages = if let Some(entries) = package_entries {
+        entries.iter().filter(|entry| entry.get("kind").and_then(Value::as_str) == Some("package"))
+            .filter_map(|entry| entry.get("source").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+    } else {
+        configured_packages = fs::read_to_string(agent_dir().join("settings.json"))
+            .ok()
+            .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+            .and_then(|settings| settings.get("packages").and_then(Value::as_array).cloned())
+            .unwrap_or_default();
+        configured_packages.iter().filter_map(Value::as_str).collect::<Vec<_>>()
+    };
+    let packages = packages.into_iter()
+        .map(|source| json!({"source": source, "scope": "user", "filtered": false}))
+        .collect::<Vec<_>>();
+    let mut skills = Vec::new();
+    let skills_dir = agent_dir().join("skills");
+    if skills_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&skills_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let skill_file = path.join("SKILL.md");
+                    if skill_file.exists() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        let mut desc = "扩展技能".to_string();
+                        if let Ok(content) = fs::read_to_string(&skill_file) {
+                            for line in content.lines().take(20) {
+                                if line.starts_with("description:") {
+                                    desc = line.trim_start_matches("description:").trim().trim_matches('"').trim_matches('\'').to_string();
+                                    break;
+                                }
+                            }
+                        }
+                        skills.push(json!({
+                            "name": name,
+                            "description": desc,
+                            "filePath": skill_file.to_string_lossy(),
+                            "disableModelInvocation": false,
+                            "sourceInfo": {
+                                "path": skill_file.to_string_lossy(),
+                                "source": name,
+                                "scope": "user",
+                                "origin": "top-level"
+                            }
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    let tools = json!([
+        { "name": "read", "description": "读取文件内容", "active": true },
+        { "name": "bash", "description": "执行终端命令", "active": true },
+        { "name": "edit", "description": "修改文件", "active": true },
+        { "name": "write", "description": "写入文件", "active": true },
+        { "name": "grep", "description": "正则搜索文件内容", "active": true },
+        { "name": "find", "description": "匹配查找文件名", "active": true },
+        { "name": "ls", "description": "列出目录内容", "active": true },
+        { "name": "subagent", "description": "调度独立子代理执行隔离任务", "active": true },
+        { "name": "mcp", "description": "Model Context Protocol 网关代理", "active": true },
+        { "name": "task", "description": "任务追踪管理", "active": true },
+        { "name": "memory", "description": "长期记忆管理", "active": true },
+        { "name": "web_search", "description": "全网知识检索", "active": true },
+        { "name": "web_fetch", "description": "网页内容解析", "active": true },
+        { "name": "code_search", "description": "代码检索与符号查找", "active": true },
+        { "name": "browser", "description": "无头浏览器 CDP 网页交互", "active": true },
+        { "name": "github", "description": "GitHub 审查与 PR 协同", "active": true }
+    ]);
+
+    json!({
+        "skills": skills,
+        "tools": tools,
+        "extensions": [],
+        "packages": packages,
+        "diagnostics": [],
+        "mcp": {
+            "configured": true,
+            "loaded": true,
+            "packageSources": [],
+            "extensionPaths": [],
+            "commands": [],
+            "tools": [],
+            "servers": []
+        }
+    })
+}
+
 pub async fn handle_invoke(
     app: AppHandle,
     client: DaemonClient,
@@ -818,119 +962,51 @@ pub async fn handle_invoke(
         }
 
         "get_conversation_capabilities" | "reload_conversation_capabilities" => {
-            let mut skills = Vec::new();
-            let skills_dir = agent_dir().join("skills");
-            if skills_dir.exists() {
-                if let Ok(entries) = fs::read_dir(&skills_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            let skill_file = path.join("SKILL.md");
-                            if skill_file.exists() {
-                                let name = entry.file_name().to_string_lossy().to_string();
-                                let mut desc = "扩展技能".to_string();
-                                if let Ok(content) = fs::read_to_string(&skill_file) {
-                                    for line in content.lines().take(20) {
-                                        if line.starts_with("description:") {
-                                            desc = line.trim_start_matches("description:").trim().trim_matches('"').trim_matches('\'').to_string();
-                                            break;
-                                        }
-                                    }
-                                }
-                                skills.push(json!({
-                                    "name": name,
-                                    "description": desc,
-                                    "filePath": skill_file.to_string_lossy(),
-                                    "disableModelInvocation": false,
-                                    "sourceInfo": {
-                                        "path": skill_file.to_string_lossy(),
-                                        "source": name,
-                                        "scope": "user",
-                                        "origin": "top-level"
-                                    }
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-
-            let tools = json!([
-                { "name": "read", "description": "读取文件内容", "active": true },
-                { "name": "bash", "description": "执行终端命令", "active": true },
-                { "name": "edit", "description": "修改文件", "active": true },
-                { "name": "write", "description": "写入文件", "active": true },
-                { "name": "grep", "description": "正则搜索文件内容", "active": true },
-                { "name": "find", "description": "匹配查找文件名", "active": true },
-                { "name": "ls", "description": "列出目录内容", "active": true },
-                { "name": "subagent", "description": "调度独立子代理执行隔离任务", "active": true },
-                { "name": "mcp", "description": "Model Context Protocol 网关代理", "active": true },
-                { "name": "task", "description": "任务追踪管理", "active": true },
-                { "name": "memory", "description": "长期记忆管理", "active": true },
-                { "name": "web_search", "description": "全网知识检索", "active": true },
-                { "name": "web_fetch", "description": "网页内容解析", "active": true },
-                { "name": "code_search", "description": "代码检索与符号查找", "active": true },
-                { "name": "browser", "description": "无头浏览器 CDP 网页交互", "active": true },
-                { "name": "github", "description": "GitHub 审查与 PR 协同", "active": true }
-            ]);
-
-            Ok(json!({
-                "skills": skills,
-                "tools": tools,
-                "extensions": [],
-                "packages": [],
-                "diagnostics": [],
-                "mcp": {
-                    "configured": true,
-                    "loaded": true,
-                    "packageSources": [],
-                    "extensionPaths": [],
-                    "commands": [],
-                    "tools": [],
-                    "servers": []
-                }
-            }))
+            Ok(conversation_capabilities(None))
         }
 
         "install_skill" => {
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let id = args.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).ok_or("Missing skill id")?;
             let name = args.get("name").and_then(|v| v.as_str()).unwrap_or(id);
             let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-
-            if !id.is_empty() {
-                let target_dir = agent_dir().join("skills").join(id);
-                let _ = fs::create_dir_all(&target_dir);
-                let skill_file = target_dir.join("SKILL.md");
-                let formatted = if content.trim().starts_with("---") {
-                    content.to_string()
-                } else {
-                    format!("---\nname: {}\ndescription: \"{}\"\n---\n\n{}\n", id, desc.replace('"', "\\\""), if content.is_empty() { format!("# {}\n\n{}", name, desc) } else { content.to_string() })
-                };
-                let _ = fs::write(&skill_file, formatted);
-            }
-            Ok(json!(true))
+            let target_dir = agent_dir().join("skills").join(id);
+            fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+            let skill_file = target_dir.join("SKILL.md");
+            let formatted = if content.trim().starts_with("---") {
+                content.to_string()
+            } else {
+                format!("---\nname: {}\ndescription: \"{}\"\n---\n\n{}\n", id, desc.replace('"', "\\\""), if content.is_empty() { format!("# {}\n\n{}", name, desc) } else { content.to_string() })
+            };
+            fs::write(&skill_file, formatted).map_err(|e| e.to_string())?;
+            Ok(conversation_capabilities(None))
         }
 
         "remove_skill" => {
-            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            if !id.is_empty() {
-                let target_dir = agent_dir().join("skills").join(id);
-                if target_dir.exists() {
-                    let _ = fs::remove_dir_all(&target_dir);
-                }
+            let id = args.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).ok_or("Missing skill id")?;
+            let target_dir = agent_dir().join("skills").join(id);
+            if target_dir.exists() {
+                fs::remove_dir_all(&target_dir).map_err(|e| e.to_string())?;
             }
-            Ok(json!(true))
+            Ok(conversation_capabilities(None))
         }
 
         "install_conversation_package" | "remove_conversation_package" => {
-            let source = args.get("source").and_then(|v| v.as_str()).unwrap_or("");
-            let op_name = if channel == "install_conversation_package" { "install_package" } else { "remove_package" };
-            let _ = client.request(ClientRequest::App {
+            let source = args.get("source").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).ok_or("Missing package source")?;
+            let installing = channel == "install_conversation_package";
+            let op_name = if installing { "install_package" } else { "remove_package" };
+            let result = client.request(ClientRequest::App {
                 id: Uuid::new_v4().to_string(),
                 op: json!({ "name": op_name, "source": source }),
-            }).await;
-            Ok(json!(true))
+            }).await?;
+            let entries = result.get("entries").and_then(Value::as_array)
+                .ok_or("Invalid package response from daemon")?;
+            let configured = entries.iter().any(|entry| entry.get("kind").and_then(Value::as_str) == Some("package")
+                && entry.get("source").and_then(Value::as_str) == Some(source));
+            if configured != installing {
+                return Err(format!("Package {} did not {}", source, if installing { "install" } else { "remove" }));
+            }
+            Ok(conversation_capabilities(Some(entries)))
         }
 
         "get_conversation_stats" => {
@@ -1286,7 +1362,11 @@ pub async fn handle_invoke(
                 id: Uuid::new_v4().to_string(),
                 op,
             }).await?;
-            Ok(res)
+            if channel == "read_run_log" {
+                Ok(json!(run_log_text(&res)?))
+            } else {
+                Ok(res)
+            }
         }
 
         // ── Memory Hub ─────────────────────────────────────────────────────
@@ -1317,22 +1397,27 @@ pub async fn handle_invoke(
         }
 
         "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" => {
-            let mut op = args.clone();
-            let op_name = match channel.as_str() {
-                "write_memory_entry" => "write_memory",
-                "delete_memory_entry" => "delete_memory",
-                other => other,
-            };
-            if let Some(obj) = op.as_object_mut() {
-                obj.insert("name".to_string(), json!(op_name));
+            let op = if channel == "write_memory_entry" || channel == "delete_memory_entry" {
+                memory_request_op(&channel, &args)
             } else {
-                op = json!({ "name": op_name, "args": args });
-            }
+                let mut op = args.clone();
+                if let Some(obj) = op.as_object_mut() {
+                    obj.insert("name".to_string(), json!(channel));
+                } else {
+                    op = json!({ "name": channel, "args": args });
+                }
+                op
+            };
             let res = client.request(ClientRequest::App {
                 id: Uuid::new_v4().to_string(),
                 op,
             }).await?;
-            Ok(res)
+            if channel == "write_memory_entry" || channel == "delete_memory_entry" {
+                res.get("entries").and_then(Value::as_array).ok_or("Invalid memory response from daemon")?;
+                Ok(json!(true))
+            } else {
+                Ok(res)
+            }
         }
 
         // ── Git Surface ────────────────────────────────────────────────────
@@ -3043,7 +3128,7 @@ pub async fn handle_invoke(
         }
 
         "runtime_download_apply" | "runtime_install_local" | "runtime_rollback" => {
-            Ok(json!({ "success": true, "version": "0.2.3" }))
+            Ok(json!({ "success": false, "error": "Tauri runtime updates are not supported" }))
         }
 
         "runtime_select_zip_file" => {

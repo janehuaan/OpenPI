@@ -14,15 +14,11 @@ concurrency:
 
 jobs:
   check-and-test:
-    name: Check & Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Check & Test (macOS)
+    runs-on: macos-15
     defaults:
       run:
         shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout code
@@ -32,13 +28,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
+          cache: yarn
+          cache-dependency-path: yarn.lock
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --frozen-lockfile --non-interactive
 
-      - name: Run TypeScript typecheck
-        run: npm run typecheck
+      - name: Typecheck
+        run: yarn typecheck
 
-      - name: Run test suite
-        run: npm test
+      - name: Test Rust workspace and desktop web app
+        run: yarn test
+
+      - name: Build desktop web app and check Tauri crate
+        run: |
+          yarn build
+          cargo check --locked -p openpi-desktop -p openpi-daemon

@@ -65,7 +65,7 @@ async fn handle_connection(
     let subs_clone = subscribed_sessions.clone();
 
     let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<String>(2048);
-    tokio::spawn(async move {
+    let writer_task = tokio::spawn(async move {
         while let Some(line) = write_rx.recv().await {
             if let Err(e) = writer_half.write_all(line.as_bytes()).await {
                 warn!("Failed to write to client socket: {}", e);
@@ -79,7 +79,7 @@ async fn handle_connection(
     let mut event_rx = supervisor.subscribe_events();
     let write_tx_events = write_tx.clone();
 
-    tokio::spawn(async move {
+    let event_task = tokio::spawn(async move {
         loop {
             match event_rx.recv().await {
                 Ok((session_id, event)) => {
@@ -108,6 +108,7 @@ async fn handle_connection(
         }
     });
 
+    let mut requests = tokio::task::JoinSet::new();
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
             continue;
@@ -121,6 +122,38 @@ async fn handle_connection(
             }
         };
 
+        let supervisor = supervisor.clone();
+        let storage = storage.clone();
+        let scheduler = scheduler.clone();
+        let pi_cli_path = pi_cli_path.clone();
+        let subscribed_sessions = subscribed_sessions.clone();
+        let write_tx = write_tx.clone();
+        requests.spawn(async move {
+            if let Err(e) = handle_request(
+                request, supervisor, storage, scheduler, pi_cli_path,
+                start_time, subscribed_sessions, write_tx,
+            ).await {
+                warn!("Client request error: {}", e);
+            }
+        });
+    }
+
+    requests.abort_all();
+    event_task.abort();
+    writer_task.abort();
+    Ok(())
+}
+
+async fn handle_request(
+    request: ClientRequest,
+    supervisor: Supervisor,
+    storage: Storage,
+    scheduler: Scheduler,
+    pi_cli_path: String,
+    start_time: std::time::Instant,
+    subscribed_sessions: Arc<Mutex<HashSet<String>>>,
+    write_tx: tokio::sync::mpsc::Sender<String>,
+) -> anyhow::Result<()> {
         let response = match request {
             ClientRequest::Health { id } => {
                 let sessions = supervisor.list_sessions().await;
@@ -160,8 +193,7 @@ async fn handle_connection(
                 }
             }
             ClientRequest::Subscribe { id, session_id } => {
-                let mut subs = subscribed_sessions.lock().await;
-                subs.insert(session_id.clone());
+                subscribed_sessions.lock().await.insert(session_id.clone());
                 if let Err(e) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
                     warn!("Failed to ensure process for {}: {}", session_id, e);
                 }
@@ -251,7 +283,5 @@ async fn handle_connection(
         };
 
         let _ = write_tx.send(response.to_json_line()?).await;
-    }
-
     Ok(())
 }

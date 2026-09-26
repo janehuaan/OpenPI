@@ -1,4 +1,4 @@
-name: Release Multi-Platform Desktop
+name: Release macOS Tauri Desktop
 
 on:
   push:
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.1)'
-        required: false
-        default: ''
+        description: 'Existing release tag (e.g. v1.0.0)'
+        required: true
+        type: string
       draft:
         description: 'Publish as draft release'
         required: false
@@ -22,11 +22,11 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-desktop:
-    name: Build (${{ matrix.platform }})
+    name: Build (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -35,87 +35,51 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
-            platform: mac-arm64
-            build_cmd: npx electron-builder --mac --arm64
-          - os: macos-14
-            platform: mac-x64
-            build_cmd: npx electron-builder --mac --x64
-          - os: windows-latest
-            platform: windows-x64
-            build_cmd: npx electron-builder --win --x64
-          - os: windows-latest
-            platform: windows-arm64
-            build_cmd: npx electron-builder --win --arm64
-          - os: ubuntu-latest
-            platform: linux-x64
-            build_cmd: npx electron-builder --linux AppImage deb rpm tar.gz --x64
-          - os: ubuntu-latest
-            platform: linux-arm64
-            build_cmd: npx electron-builder --linux deb rpm tar.gz --arm64
+          - os: macos-15
+            arch: x86_64
+          - os: macos-15-arm64
+            arch: arm64
 
     steps:
-      - name: Checkout code
+      - name: Checkout release tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
+          cache: yarn
+          cache-dependency-path: yarn.lock
 
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
+      - name: Validate tag and runner architecture
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-tools dpkg fakeroot rpm
+          set -euo pipefail
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          test "$RELEASE_TAG" = "v$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+          test "$(git tag --points-at HEAD --list "$RELEASE_TAG")" = "$RELEASE_TAG"
 
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile --non-interactive
 
-      - name: Build web application and runtime
-        run: |
-          npm run build -w @openpi/desktop
-          npm run build:runtime -w @openpi/desktop -- --zip
+      - name: Build and package complete Tauri app
+        run: bash scripts/package-tauri-app.sh
 
-      - name: Disable Spotlight Indexing (macOS)
-        if: runner.os == 'macOS'
-        run: sudo mdutil -a -i off || true
-
-      - name: Package with electron-builder
-        run: ${{ matrix.build_cmd }}
-        working-directory: apps/desktop
-
-      - name: Collect release artifacts
-        run: |
-          mkdir -p dist-artifacts
-          find apps/desktop/release -maxdepth 1 -type f \( \
-            -name "*.dmg" -o \
-            -name "*.dmg.blockmap" -o \
-            -name "*.zip" -o \
-            -name "*.zip.blockmap" -o \
-            -name "*.exe" -o \
-            -name "*.exe.blockmap" -o \
-            -name "*.AppImage" -o \
-            -name "*.deb" -o \
-            -name "*.rpm" -o \
-            -name "*.tar.gz" \
-          \) -exec cp {} dist-artifacts/ \;
-          echo "Collected artifacts:"
-          ls -la dist-artifacts/
-
-      - name: Upload platform artifacts
+      - name: Upload verified app archive
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.platform }}
-          path: dist-artifacts/*
+          name: openpi-macos-${{ matrix.arch }}
+          path: target/release/bundle/OpenPI_*.zip
           if-no-files-found: error
           retention-days: 7
 
   publish-release:
     name: Publish GitHub Release
     needs: build-desktop
-    if: always() && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -124,59 +88,37 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Download all release artifacts
+      - name: Download app archives
         uses: actions/download-artifact@v4
         with:
+          pattern: openpi-macos-*
           path: all-assets
           merge-multiple: true
 
-      - name: Generate SHA256 Checksums
-        run: |
-          cd all-assets
-          sha256sum * > SHA256SUMS 2>/dev/null || true
-          echo "Final release artifacts list:"
-          ls -lh
-
-      - name: Publish or Update Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_INPUT: ${{ github.event.inputs.tag }}
-          IS_DRAFT: ${{ github.event.inputs.draft == 'true' && '--draft' || '' }}
-          IS_PRERELEASE: ${{ github.event.inputs.prerelease == 'true' && '--prerelease' || '' }}
+      - name: Generate SHA256 checksums
         run: |
           set -euo pipefail
-
-          TAG_NAME="${TAG_INPUT}"
-          if [[ -z "${TAG_NAME}" ]]; then
-            if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-              TAG_NAME="${GITHUB_REF#refs/tags/}"
-            else
-              VERSION=$(node -p "require('./apps/desktop/package.json').version")
-              TAG_NAME="v${VERSION}"
-            fi
-          fi
-
-          echo "Target Release Tag: ${TAG_NAME}"
-
           cd all-assets
+          test -f OpenPI_*_x86_64.zip
+          test -f OpenPI_*_arm64.zip
+          sha256sum -- *.zip > SHA256SUMS
+          ls -lh
 
-          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
-            echo "Release ${TAG_NAME} exists. Uploading assets..."
-            gh release upload "${TAG_NAME}" * --clobber
+      - name: Publish or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          IS_DRAFT: ${{ github.event.inputs.draft == 'true' }}
+          IS_PRERELEASE: ${{ github.event.inputs.prerelease == 'true' }}
+        run: |
+          set -euo pipefail
+          cd all-assets
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" --clobber ./*.zip SHA256SUMS
           else
-            echo "Creating new release ${TAG_NAME}..."
-            gh release create "${TAG_NAME}" * \
-              --title "OpenPI ${TAG_NAME}" \
-              --generate-notes \
-              ${IS_DRAFT} ${IS_PRERELEASE}
+            flags=()
+            if [[ "$IS_DRAFT" == true ]]; then flags+=(--draft); fi
+            if [[ "$IS_PRERELEASE" == true ]]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" ./*.zip SHA256SUMS \
+              --verify-tag --title "OpenPI $RELEASE_TAG" --generate-notes "${flags[@]}"
           fi
-
-          echo "GitHub Release published successfully for ${TAG_NAME}!"

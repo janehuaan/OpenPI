@@ -1800,7 +1800,7 @@
 	min-height: 52px;
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: flex-end;
 	padding: 0 14px;
 	border: none;
 	background: transparent;
@@ -1808,27 +1808,15 @@
 	-webkit-backdrop-filter: none;
 	box-shadow: none;
 }
-.reference-brand-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-.reference-brand-mark {
-	width: 20px;
-	height: 20px;
-	display: block;
-	object-fit: contain;
-}
-.reference-brand strong {
-	font-size: 14px;
-	font-weight: 650;
-	letter-spacing: -0.25px;
-	color: var(--text, #0f172a);
+.reference-brand-drag-spacer {
+	flex: 1;
+	height: 100%;
 }
 .reference-brand-actions {
 	display: flex;
 	align-items: center;
 	gap: 4px;
+	flex-shrink: 0;
 }
 .reference-new-chat-top-btn {
 	display: inline-flex;
@@ -1868,7 +1856,7 @@
 	transition: all 140ms ease;
 }
 .reference-toggle-sidebar-btn:hover {
-	background: rgba(0, 0, 0, 0.05);
+	background: var(--bg-muted, rgba(0, 0, 0, 0.05));
 	color: var(--text, #0f172a);
 }
 

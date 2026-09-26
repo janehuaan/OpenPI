@@ -613,7 +613,9 @@ impl Supervisor {
         let stdin = child.stdin.take().expect("child stdin piped");
         let stdout = child.stdout.take().expect("child stdout piped");
 
-        *session.child_stdin.lock().await = Some(stdin);
+        // Each spawn owns its RPC state; old stdout readers must not affect a replacement.
+        session.child_stdin = Arc::new(Mutex::new(Some(stdin)));
+        session.pending = Arc::new(Mutex::new(HashMap::new()));
         session.child = Some(child);
         session.info.running = true;
 
@@ -719,7 +721,10 @@ impl Supervisor {
                             }
                         }
 
-                        let _ = tx.send((sid.clone(), event));
+                        let sessions = sessions_clone.lock().await;
+                        if sessions.get(&sid).is_some_and(|s| Arc::ptr_eq(&s.pending, &pending) && s.child.is_some()) {
+                            let _ = tx.send((sid.clone(), event));
+                        }
                     }
                     Err(e) => {
                         warn!("Failed to parse line from pi session {}: {}", sid, e);
@@ -729,9 +734,12 @@ impl Supervisor {
             info!("Subprocess stdout stream ended for session {}", sid);
 
             // Reaping & cleanup: mark session dead so it can cleanly respawn on demand
-            *child_stdin_clone.lock().await = None;
             let mut sessions = sessions_clone.lock().await;
             if let Some(s) = sessions.get_mut(&sid) {
+                if !Arc::ptr_eq(&s.pending, &pending) || s.child.is_none() {
+                    return;
+                }
+                *child_stdin_clone.lock().await = None;
                 s.info.running = false;
                 if let Some(mut c) = s.child.take() {
                     tokio::spawn(async move {
@@ -748,9 +756,12 @@ impl Supervisor {
         Ok(())
     }
 
-    pub async fn mark_session_dead(&self, session_id: &str) {
+    async fn mark_session_dead(&self, session_id: &str, generation: &Arc<Mutex<Option<ChildStdin>>>) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(session_id) {
+            if !Arc::ptr_eq(&session.child_stdin, generation) {
+                return;
+            }
             session.info.running = false;
             *session.child_stdin.lock().await = None;
             if let Some(mut child) = session.child.take() {
@@ -789,12 +800,12 @@ impl Supervisor {
             line.push('\n');
             if let Err(e) = stdin.write_all(line.as_bytes()).await {
                 drop(stdin_guard);
-                self.mark_session_dead(session_id).await;
+                self.mark_session_dead(session_id, &child_stdin).await;
                 anyhow::bail!("Failed to write to session stdin (process died): {}", e);
             }
             if let Err(e) = stdin.flush().await {
                 drop(stdin_guard);
-                self.mark_session_dead(session_id).await;
+                self.mark_session_dead(session_id, &child_stdin).await;
                 anyhow::bail!("Failed to flush session stdin (process died): {}", e);
             }
             drop(stdin_guard);
@@ -823,12 +834,12 @@ impl Supervisor {
 
         if let Err(e) = stdin.write_all(line.as_bytes()).await {
             drop(stdin_guard);
-            self.mark_session_dead(session_id).await;
+            self.mark_session_dead(session_id, &child_stdin).await;
             anyhow::bail!("Failed to write to session stdin (process died): {}", e);
         }
         if let Err(e) = stdin.flush().await {
             drop(stdin_guard);
-            self.mark_session_dead(session_id).await;
+            self.mark_session_dead(session_id, &child_stdin).await;
             anyhow::bail!("Failed to flush session stdin (process died): {}", e);
         }
         drop(stdin_guard);
@@ -860,4 +871,3 @@ impl Supervisor {
         Ok(())
     }
 }
-

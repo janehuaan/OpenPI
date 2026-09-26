@@ -1577,35 +1577,20 @@ export function ReferenceWorkspacePreview({
 		>
 			<aside className="reference-leftbar">
 				<header className="reference-brand" data-tauri-drag-region>
-					<div className="reference-brand-left">
-						<img className="reference-brand-mark" src="./openpi-mark.svg" alt="" />
-						<strong>OpenPI</strong>
-					</div>
-					<div className="reference-brand-actions">
-						<button
-							type="button"
-							className="reference-new-chat-top-btn"
-							title="新建会话 (⌘N)"
-							aria-label="新建会话"
-							onClick={() => {
-								onNewConversation();
-								draftInput.current?.focus();
-							}}
-						>
-							<Plus size={15} />
-						</button>
-						{onToggleSidebar && (
+					<div className="reference-brand-drag-spacer" data-tauri-drag-region />
+					{onToggleSidebar && (
+						<div className="reference-brand-actions">
 							<button
 								type="button"
 								className="reference-toggle-sidebar-btn"
-								title={sidebarOpen === false ? "展开侧边栏 (⌘B)" : "折叠侧边栏 (⌘B)"}
-								aria-label={sidebarOpen === false ? "展开侧边栏" : "折叠侧边栏"}
+								title={sidebarOpen === false ? "展开侧边栏 (⌘B)" : "收起侧边栏 (⌘B)"}
+								aria-label={sidebarOpen === false ? "展开侧边栏" : "收起侧边栏"}
 								onClick={onToggleSidebar}
 							>
 								{sidebarOpen === false ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
 							</button>
-						)}
-					</div>
+						</div>
+					)}
 				</header>
 				<label className="reference-search">
 					<Search size={14} />
