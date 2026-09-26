@@ -11,6 +11,7 @@ import {
 	DeleteProjectDialog,
 	type DeleteProjectTarget,
 	EditProfileDialog,
+	AuthAccountDialog,
 	IntelligenceSurface,
 	MemorySurface,
 	ProviderAuthDialog,
@@ -223,6 +224,7 @@ export function App() {
 	const [showAllConversations, setShowAllConversations] = useState(false);
 	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
+	const [accountDialogOpen, setAccountDialogOpen] = useState(false);
 	const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 	const [previewFileRequest, setPreviewFileRequest] = useState<FilePreviewRequest | null>(null);
 
@@ -2305,6 +2307,8 @@ export function App() {
 			sending={busy === "send-message"}
 			appMode={appMode}
 			sidebarOpen={sidebarOpen}
+			userProfile={userProfile}
+			onOpenAccount={() => setAccountDialogOpen(true)}
 			onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
 			onCollapseSidebar={() => setSidebarOpen(false)}
 			onSelectConversation={(instanceId) => {
@@ -2475,12 +2479,16 @@ export function App() {
 				/>
 			)}
 
-			{editingProfile && (
-				<EditProfileDialog
+			{(editingProfile || accountDialogOpen) && (
+				<AuthAccountDialog
 					profile={userProfile}
 					busy={busy === "save-profile"}
-					onClose={() => setEditingProfile(false)}
-					onSave={saveUserProfile}
+					onClose={() => {
+						setEditingProfile(false);
+						setAccountDialogOpen(false);
+					}}
+					onSaveLocalProfile={saveUserProfile}
+					onProfileChanged={(updated) => setUserProfile((prev) => ({ ...prev, ...updated }))}
 				/>
 			)}
 

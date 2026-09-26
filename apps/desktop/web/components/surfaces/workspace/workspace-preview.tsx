@@ -25,6 +25,7 @@ import {
 import { isDiffContent } from "../../../lib/diff";
 import { ErrorBoundary } from "../../error-boundary";
 import { draftStore } from "../../../lib/draft-store";
+import { supabase } from "../../../lib/supabase-client";
 import {
 	contentImages,
 	contentText,
@@ -269,6 +270,8 @@ export function ReferenceWorkspacePreview({
 	customContent,
 	onOpenShortcuts,
 	onSwitchWorkspace,
+	userProfile,
+	onOpenAccount,
 }: {
 	projectInstances: AgentInstance[];
 	chatInstances: AgentInstance[];
@@ -324,8 +327,16 @@ export function ReferenceWorkspacePreview({
 	customContent?: ReactNode;
 	onOpenShortcuts?: () => void;
 	onSwitchWorkspace?: (cwd?: string) => void;
+	userProfile?: { nickname?: string; avatarEmoji?: string };
+	onOpenAccount?: () => void;
 }) {
 	const { effectiveMode, toggle: toggleTheme } = useTheme();
+	const [supabaseUser, setSupabaseUser] = useState(() => supabase.getUser());
+
+	useEffect(() => {
+		const unsub = supabase.onAuthStateChange(setSupabaseUser);
+		return () => unsub();
+	}, []);
 	const initialKey = selectedInstanceId ?? "__new_draft__";
 	const [draft, setDraft] = useState(() => draftStore.getDraft(initialKey)?.text ?? "");
 	const [attachments, setAttachments] = useState<ImageAttachment[]>(
@@ -1894,9 +1905,19 @@ export function ReferenceWorkspacePreview({
 					</div>
 				</div>
 				<footer className="reference-account">
-					<span className="reference-avatar">H</span>
-					<strong>Huaan</strong>
-					<em>Pro</em>
+					<button
+						type="button"
+						className="reference-account-user-trigger"
+						title="打开账户中心 (Supabase 登录与个人档案)"
+						aria-label="打开账户中心"
+						onClick={onOpenAccount}
+					>
+						<span className="reference-avatar">
+							{userProfile?.avatarEmoji || (userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email[0].toUpperCase() : "U"))}
+						</span>
+						<strong>{userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email.split("@")[0] : "用户")}</strong>
+						<em>{supabaseUser ? "云端" : "单机"}</em>
+					</button>
 					<div className="reference-account-actions">
 						<button
 							type="button"

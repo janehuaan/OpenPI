@@ -3,6 +3,7 @@
 // Dialogs
 export { ProviderAuthDialog } from "./dialogs/provider-auth-dialog";
 export { EditProfileDialog } from "./dialogs/edit-profile-dialog";
+export { AuthAccountDialog } from "./dialogs/auth-account-dialog";
 export { RenameConversationDialog } from "./dialogs/rename-conversation-dialog";
 export { DeleteConversationDialog } from "./dialogs/delete-conversation-dialog";
 export { DeleteProjectDialog, type DeleteProjectTarget } from "./dialogs/delete-project-dialog";
