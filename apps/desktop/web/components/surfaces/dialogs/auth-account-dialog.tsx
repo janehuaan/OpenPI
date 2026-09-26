@@ -156,6 +156,68 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 		}
 	};
 
+	// Manual token / callback input
+	const [manualTokenInput, setManualTokenInput] = useState("");
+	const [showManualInput, setShowManualInput] = useState(false);
+
+	const handleApplyManualToken = async (rawInput?: string) => {
+		const target = (rawInput ?? manualTokenInput).trim();
+		if (!target) {
+			setErrorMessage("请先输入或粘贴授权回调链接或 Token");
+			return;
+		}
+		let hashFragment = target;
+		if (target.includes("#")) {
+			hashFragment = target.slice(target.indexOf("#"));
+		} else if (target.includes("access_token=")) {
+			hashFragment = "#" + target.slice(target.indexOf("access_token="));
+		}
+		setBusy(true);
+		setErrorMessage(null);
+		setSuccessMessage(null);
+		try {
+			const res = await supabase.handleOAuthCallbackFromHash(hashFragment);
+			if (res?.error) {
+				setErrorMessage(res.error);
+			} else if (res?.user) {
+				setSuccessMessage("授权验证成功，已登入！");
+				const meta = res.user.user_metadata;
+				const nextNick =
+					meta?.nickname ||
+					meta?.user_name ||
+					meta?.full_name ||
+					meta?.name ||
+					res.user.email?.split("@")[0] ||
+					"用户";
+				const nextAvatar = meta?.avatar_emoji || "🐙";
+				void onSaveLocalProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+				onProfileChanged?.({ nickname: nextNick, avatarEmoji: nextAvatar });
+				setManualTokenInput("");
+				setShowManualInput(false);
+			} else {
+				setErrorMessage("未在输入中解析到有效的 access_token 参数");
+			}
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const handleReadClipboard = async () => {
+		try {
+			if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+				const text = await navigator.clipboard.readText();
+				if (text && text.includes("access_token=")) {
+					setManualTokenInput(text);
+					void handleApplyManualToken(text);
+					return;
+				}
+			}
+			setErrorMessage("剪贴板中未找到包含 access_token 的授权链接");
+		} catch {
+			setErrorMessage("无法访问剪贴板，请手动在输入框中粘贴 (⌘V)");
+		}
+	};
+
 	const handleOAuthLogin = async (provider: "github" | "google") => {
 		if (!supabase.isConfigured()) {
 			setShowConfig(true);
@@ -580,6 +642,76 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 										<span>Google 登录</span>
 									</button>
 								</div>
+								{/* Manual Token Paste Helper */}
+								<div style={{ margin: "-4px 0 10px", textAlign: "right" }}>
+									<button
+										type="button"
+										style={{
+											background: "transparent",
+											border: "none",
+											padding: "2px 4px",
+											color: "var(--accent, #38bdf8)",
+											fontSize: "11px",
+											cursor: "pointer",
+											textDecoration: "underline",
+											opacity: 0.85,
+										}}
+										onClick={() => setShowManualInput((prev) => !prev)}
+									>
+										{showManualInput ? "收起手动粘贴" : "浏览器未自动跳转？手动粘贴回调链接"}
+									</button>
+								</div>
+
+								{showManualInput && (
+									<div
+										style={{
+											background: "var(--bg-muted, rgba(255,255,255,0.03))",
+											border: "1px dashed var(--border)",
+											borderRadius: "8px",
+											padding: "10px",
+											marginBottom: "12px",
+										}}
+									>
+										<div style={{ fontSize: "11px", color: "var(--text-secondary)", marginBottom: "6px" }}>
+											复制浏览器地址栏中的完整链接（含 access_token）粘贴到此处：
+										</div>
+										<input
+											type="text"
+											value={manualTokenInput}
+											onChange={(e) => setManualTokenInput(e.target.value)}
+											placeholder="http://127.0.0.1:5179/#access_token=... 或完整 URL"
+											style={{
+												width: "100%",
+												fontSize: "11px",
+												padding: "6px 8px",
+												borderRadius: "6px",
+												marginBottom: "8px",
+												boxSizing: "border-box",
+											}}
+											disabled={isBusy}
+										/>
+										<div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+											<button
+												type="button"
+												className="button secondary"
+												style={{ fontSize: "11px", padding: "4px 8px" }}
+												disabled={isBusy}
+												onClick={handleReadClipboard}
+											>
+												从剪贴板读取
+											</button>
+											<button
+												type="button"
+												className="button primary"
+												style={{ fontSize: "11px", padding: "4px 10px" }}
+												disabled={isBusy || !manualTokenInput.trim()}
+												onClick={() => handleApplyManualToken()}
+											>
+												立即解析并登录
+											</button>
+										</div>
+									</div>
+								)}
 								<div
 									style={{
 										display: "flex",

@@ -353,8 +353,30 @@ export function App() {
 					meta?.name ||
 					res.user.email?.split("@")[0] ||
 					"用户";
-				const nextAvatar = meta?.avatar_emoji || "🚀";
+				const nextAvatar = meta?.avatar_emoji || "🐙";
 				void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+				setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+			}
+		});
+
+		// Listen for native OAuth callback from local listener on http://127.0.0.1:5179
+		const unlistenOAuth = desktopApi.onOAuthCallback?.((payload) => {
+			if (payload?.hash) {
+				void supabase.handleOAuthCallbackFromHash(payload.hash).then((res) => {
+					if (res?.user) {
+						const meta = res.user.user_metadata;
+						const nextNick =
+							meta?.nickname ||
+							meta?.user_name ||
+							meta?.full_name ||
+							meta?.name ||
+							res.user.email?.split("@")[0] ||
+							"用户";
+						const nextAvatar = meta?.avatar_emoji || "🐙";
+						void saveUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+						setUserProfile({ nickname: nextNick, avatarEmoji: nextAvatar });
+					}
+				});
 			}
 		});
 
@@ -369,6 +391,7 @@ export function App() {
 		}
 		return () => {
 			disposed = true;
+			if (typeof unlistenOAuth === "function") unlistenOAuth();
 		};
 	}, []);
 

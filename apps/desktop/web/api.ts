@@ -59,6 +59,7 @@ type OpenPiBridge = {
 	onSendMessage?: (handler: (payload: { text: string; images?: any[] }) => void) => () => void;
 	onAutoPilotEvent?: (handler: (payload: { task: AutoPilotTask }) => void) => () => void;
 	onRuntimeUpdateProgress?: (handler: (progress: RuntimeUpdateProgress) => void) => () => void;
+	onOAuthCallback?: (handler: (payload: { hash: string }) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -403,6 +404,11 @@ export const desktopApi = {
 		const api = bridge();
 		if (!api?.onSendMessage) return () => undefined;
 		return api.onSendMessage(handler);
+	},
+	onOAuthCallback: (handler: (payload: { hash: string }) => void) => {
+		const api = bridge();
+		if (!api?.onOAuthCallback) return () => undefined;
+		return api.onOAuthCallback(handler);
 	},
 
 	// ── Auto-Pilot Autonomous Delivery & Self-Healing Loop ──────────────────────────

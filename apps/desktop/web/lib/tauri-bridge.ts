@@ -123,5 +123,9 @@ if (typeof window !== "undefined") {
 		onRuntimeUpdateProgress: (handler: (progress: any) => void): (() => void) => {
 			return safeListen("openpi:runtime-update-progress", handler);
 		},
+
+		onOAuthCallback: (handler: (payload: { hash: string }) => void): (() => void) => {
+			return safeListen("openpi:oauth-callback", handler);
+		},
 	};
 }

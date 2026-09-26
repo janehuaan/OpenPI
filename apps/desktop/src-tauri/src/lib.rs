@@ -1,5 +1,6 @@
 pub mod daemon_client;
 pub mod ipc_handlers;
+pub mod oauth_listener;
 pub mod tray;
 
 use daemon_client::DaemonClient;
@@ -30,6 +31,9 @@ pub fn run() {
         .manage(daemon_client.clone())
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            // Start native OAuth HTTP callback listener on 127.0.0.1:5179
+            oauth_listener::start_oauth_listener(handle.clone());
 
             // Set up macOS menu bar system tray
             let _ = tray::create_tray(&handle);
