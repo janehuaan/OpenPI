@@ -351,12 +351,14 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 					let res = await supabase.updateUserProfile({
 						nickname: cleanNick,
 						avatar_emoji: cleanEmoji,
+						avatar_url: avatarUrl,
 					});
 					if (res.error && res.error.includes("session")) {
 						await supabase.refreshSession();
 						res = await supabase.updateUserProfile({
 							nickname: cleanNick,
 							avatar_emoji: cleanEmoji,
+							avatar_url: avatarUrl,
 						});
 					}
 					if (res.error) {
