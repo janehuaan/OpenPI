@@ -459,6 +459,20 @@ export const desktopApi = {
 			output,
 			successes,
 		}),
+	jev: {
+		getStatus: () => call<JevStatus>("jev_status"),
+		routePrompt: (prompt: string, hasWorkspace = true) =>
+			call<JevRouteDecision>("jev_route", { prompt, has_workspace: hasWorkspace }),
+		checkCommand: (command: string) => call<JevGateVerdict>("jev_check_command", { command }),
+		processOutput: (output: string) => call<{ compressed: unknown; leak: unknown }>("jev_process_output", { output }),
+		evaluateTask: (goal: string, command: string, output: string, successes = 1) =>
+			call<{ should_stop: boolean; confidence: number; rationale: string }>("jev_evaluate_task", {
+				goal,
+				command,
+				output,
+				successes,
+			}),
+	},
 };
 
 export interface JevStatus {
