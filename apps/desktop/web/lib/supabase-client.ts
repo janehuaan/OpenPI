@@ -176,6 +176,16 @@ export class SupabaseClient {
 		return headers;
 	}
 
+	private async fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 6000): Promise<Response> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), timeoutMs);
+		try {
+			return await fetch(url, { ...options, signal: controller.signal });
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
 	/**
 	 * Sign up a new user with email, password and optional metadata (e.g. nickname, avatar).
 	 */
@@ -189,7 +199,7 @@ export class SupabaseClient {
 		}
 
 		try {
-			const res = await fetch(`${this.config.url}/auth/v1/signup`, {
+			const res = await this.fetchWithTimeout(`${this.config.url}/auth/v1/signup`, {
 				method: "POST",
 				headers: this.getHeaders(),
 				body: JSON.stringify({
@@ -237,7 +247,7 @@ export class SupabaseClient {
 		}
 
 		try {
-			const res = await fetch(`${this.config.url}/auth/v1/token?grant_type=password`, {
+			const res = await this.fetchWithTimeout(`${this.config.url}/auth/v1/token?grant_type=password`, {
 				method: "POST",
 				headers: this.getHeaders(),
 				body: JSON.stringify({
@@ -306,7 +316,7 @@ export class SupabaseClient {
 			if (!accessToken) return null;
 
 			// Fetch user info with the accessToken
-			const userRes = await fetch(`${this.config.url}/auth/v1/user`, {
+			const userRes = await this.fetchWithTimeout(`${this.config.url}/auth/v1/user`, {
 				headers: this.getHeaders(accessToken),
 			});
 
@@ -341,10 +351,14 @@ export class SupabaseClient {
 	public async signOut(): Promise<void> {
 		if (this.currentSession?.access_token && this.isConfigured()) {
 			try {
-				await fetch(`${this.config.url}/auth/v1/logout`, {
-					method: "POST",
-					headers: this.getHeaders(this.currentSession.access_token),
-				});
+				await this.fetchWithTimeout(
+					`${this.config.url}/auth/v1/logout`,
+					{
+						method: "POST",
+						headers: this.getHeaders(this.currentSession.access_token),
+					},
+					3000,
+				);
 			} catch (e) {
 				console.warn("Supabase remote logout error:", e);
 			}
@@ -361,7 +375,7 @@ export class SupabaseClient {
 		}
 
 		try {
-			const res = await fetch(`${this.config.url}/auth/v1/token?grant_type=refresh_token`, {
+			const res = await this.fetchWithTimeout(`${this.config.url}/auth/v1/token?grant_type=refresh_token`, {
 				method: "POST",
 				headers: this.getHeaders(),
 				body: JSON.stringify({
@@ -401,13 +415,17 @@ export class SupabaseClient {
 		}
 
 		try {
-			const res = await fetch(`${this.config.url}/auth/v1/user`, {
-				method: "PUT",
-				headers: this.getHeaders(this.currentSession.access_token),
-				body: JSON.stringify({
-					data: metadata,
-				}),
-			});
+			const res = await this.fetchWithTimeout(
+				`${this.config.url}/auth/v1/user`,
+				{
+					method: "PUT",
+					headers: this.getHeaders(this.currentSession.access_token),
+					body: JSON.stringify({
+						data: metadata,
+					}),
+				},
+				4000,
+			);
 
 			const data = await res.json();
 			if (!res.ok) {

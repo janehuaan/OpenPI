@@ -309,19 +309,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 			const cleanNick = nickname.trim() || "用户";
 			const cleanEmoji = avatarEmoji.trim() || "🚀";
 
-			// Update in Supabase if logged in
-			if (user) {
-				const res = await supabase.updateUserProfile({
-					nickname: cleanNick,
-					avatar_emoji: cleanEmoji,
-				});
-				if (res.error) {
-					setErrorMessage(res.error);
-					return;
-				}
-			}
-
-			// Update local profile
+			// 1. Immediately save to local profile so UI updates instantaneously
 			await onSaveLocalProfile({
 				nickname: cleanNick,
 				avatarEmoji: cleanEmoji,
@@ -331,10 +319,34 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 				avatarEmoji: cleanEmoji,
 			});
 
+			// 2. Best-effort async sync to Supabase
+			if (user) {
+				try {
+					let res = await supabase.updateUserProfile({
+						nickname: cleanNick,
+						avatar_emoji: cleanEmoji,
+					});
+					if (res.error && res.error.includes("session")) {
+						await supabase.refreshSession();
+						res = await supabase.updateUserProfile({
+							nickname: cleanNick,
+							avatar_emoji: cleanEmoji,
+						});
+					}
+					if (res.error) {
+						console.warn("Supabase profile sync note:", res.error);
+					}
+				} catch (syncErr) {
+					console.warn("Supabase sync network error:", syncErr);
+				}
+			}
+
 			setSuccessMessage("个人资料更新成功！");
 			setTimeout(() => {
 				onClose();
-			}, 700);
+			}, 500);
+		} catch (err: any) {
+			setErrorMessage(err?.message || "保存本地资料失败");
 		} finally {
 			setBusy(false);
 		}
