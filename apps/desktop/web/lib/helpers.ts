@@ -1050,11 +1050,243 @@ export function computeTrajectorySummary(
 	return `${prefix}${parts.join(", ")}`;
 }
 
+export interface RunningToolDetail {
+	summary: string;
+	command?: string;
+	cwd?: string;
+	isCommand: boolean;
+	filePath?: string;
+	query?: string;
+	rawArgs?: string;
+}
+
+export function getRunningToolDetail(tool: RunningTool): RunningToolDetail {
+	let args: Record<string, unknown> | null = null;
+	if (tool.args && typeof tool.args === "object") {
+		args = tool.args as Record<string, unknown>;
+	} else if (typeof tool.args === "string") {
+		try {
+			const parsed = JSON.parse(tool.args);
+			if (parsed && typeof parsed === "object") {
+				args = parsed;
+			}
+		} catch {
+			// keep string
+		}
+	}
+
+	const toolName = (tool.toolName || "").toLowerCase();
+	const isCommand =
+		toolName === "bash" ||
+		toolName === "terminal" ||
+		toolName === "run_command" ||
+		toolName === "execute_command" ||
+		toolName === "exec";
+
+	const command = args
+		? (typeof args.command === "string"
+				? args.command
+				: typeof args.cmd === "string"
+				? args.cmd
+				: typeof args.CommandLine === "string"
+				? args.CommandLine
+				: typeof args.commandLine === "string"
+				? args.commandLine
+				: typeof args.script === "string"
+				? args.script
+				: undefined)
+		: typeof tool.args === "string" && isCommand
+		? tool.args
+		: undefined;
+
+	const cwd = args && typeof args.cwd === "string" ? args.cwd : typeof args?.Cwd === "string" ? args.Cwd : undefined;
+	const filePath = args
+		? (typeof args.path === "string"
+				? args.path
+				: typeof args.file === "string"
+				? args.file
+				: typeof args.filePath === "string"
+				? args.filePath
+				: typeof args.targetFile === "string"
+				? args.targetFile
+				: typeof args.TargetFile === "string"
+				? args.TargetFile
+				: typeof args.AbsolutePath === "string"
+				? args.AbsolutePath
+				: undefined)
+		: undefined;
+
+	const query = args
+		? (typeof args.pattern === "string"
+				? args.pattern
+				: typeof args.query === "string"
+				? args.query
+				: typeof args.prompt === "string"
+				? args.prompt
+				: undefined)
+		: undefined;
+
+	let summary = tool.toolName;
+	if (command) {
+		summary = command.trim();
+	} else if (filePath) {
+		summary = cleanPath(filePath);
+	} else if (query) {
+		summary = query.trim();
+	} else if (args && Object.keys(args).length > 0) {
+		const str = JSON.stringify(args);
+		summary = str.length > 80 ? str.slice(0, 77) + "..." : str;
+	}
+
+	return {
+		summary,
+		command: command ? command.trim() : undefined,
+		cwd,
+		isCommand,
+		filePath: filePath ? cleanPath(filePath) : undefined,
+		query: query ? query.trim() : undefined,
+		rawArgs: args ? JSON.stringify(args, null, 2) : typeof tool.args === "string" ? tool.args : undefined,
+	};
+}
+
+export interface CommandDiagnostic {
+	warningLevel: "info" | "warning" | "critical";
+	title: string;
+	detail: string;
+	suggestion?: string;
+	isInteractiveHang?: boolean;
+}
+
+const INTERACTIVE_PATTERNS = [
+	/(?:\[[Yy]\/[Nn]\]|\([yY]\/[nN]\))\s*$/,
+	/(?:password|Password):\s*$/,
+	/(?:sudo|Authentication)\s+.*password:\s*$/i,
+	/Do you want to continue\?\s*$/i,
+	/Press\s+\[?Enter\]?\s+to\s+continue/i,
+	/Select\s+an?\s+option:\s*$/i,
+	/Enter\s+choice:\s*$/i,
+	/\?\s+[A-Z][\w\s]+:\s*$/,
+	/\(default\s+[^)]+\):\s*$/,
+];
+
+const BUILD_PATTERNS = /\b(cargo\s+(build|check|clippy|run)|rustc|mvn|gradle|cmake|make|tsc|vite\s+build|webpack|next\s+build|go\s+build|swift\s+build|bazel\s+build|ninja)\b/i;
+const INSTALL_PATTERNS = /\b(npm\s+(i|install|add)|pnpm\s+(i|install|add)|yarn\s+(add|install)|pip\s+install|cargo\s+fetch|go\s+mod\s+download|git\s+clone|docker\s+pull|curl|wget)\b/i;
+const TEST_PATTERNS = /\b(cargo\s+test|pytest|npm\s+test|vitest|jest|go\s+test|python\s+-m\s+unittest)\b/i;
+const SEARCH_PATTERNS = /\b(find\s+|grep\s+-r|rg\s+|ag\s+|locate\s+|du\s+-)\b/i;
+
+export function analyzeCommandExecutionState(
+	toolName: string,
+	commandText: string,
+	elapsedSeconds: number,
+	liveOutput?: string,
+): CommandDiagnostic {
+	const trimmedOutput = (liveOutput || "").trim();
+	const tail = trimmedOutput.slice(-300);
+
+	// 1. Critical Check: Interactive prompt blocking
+	for (const pattern of INTERACTIVE_PATTERNS) {
+		if (pattern.test(tail)) {
+			return {
+				warningLevel: "critical",
+				title: "终端疑似等待交互输入确认",
+				detail: "控制台末尾输出了交互式询问（如 [y/n] 确认或密码等待）。智能体运行在非交互式管道中，进程将持续挂起阻塞。",
+				suggestion: "请点击右侧“终止执行”，并提醒模型附加非交互免确认参数（例如 -y / --yes / --batch）重新运行。",
+				isInteractiveHang: true,
+			};
+		}
+	}
+
+	// 2. Heavy Compilation / Build
+	if (BUILD_PATTERNS.test(commandText)) {
+		if (elapsedSeconds >= 90) {
+			return {
+				warningLevel: "warning",
+				title: `大型项目编译中 (已耗时 ${elapsedSeconds}s)`,
+				detail: "大型工程冷启动编译或跨模块构建可能需要数分钟。若长时间没有任何新的编译器输出，可检查依赖或随时终止。",
+				suggestion: "若怀疑编译卡死，可点击终止后分模块编译或检查目标缓存。",
+			};
+		}
+		if (elapsedSeconds >= 6) {
+			return {
+				warningLevel: "info",
+				title: "正在编译/构建工程代码",
+				detail: "底层编译器正在解析并编译代码模块。初次全量编译依赖体积较大，耗时通常相对较长，请耐心等待。",
+			};
+		}
+	}
+
+	// 3. Network Dependency Download / Package Install
+	if (INSTALL_PATTERNS.test(commandText)) {
+		if (elapsedSeconds >= 60) {
+			return {
+				warningLevel: "warning",
+				title: `网络依赖下载耗时较长 (已耗时 ${elapsedSeconds}s)`,
+				detail: "依赖下载受当前网络带宽与源延迟影响。若长时间无输出，可能遇到镜像源连接超时。",
+				suggestion: "可检查网络或国内镜像源配置（如 npm registry / crates.io 镜像）。",
+			};
+		}
+		if (elapsedSeconds >= 6) {
+			return {
+				warningLevel: "info",
+				title: "正在拉取外部依赖包",
+				detail: "正在从远程仓库下载依赖并解压，请保持网络连接活跃。",
+			};
+		}
+	}
+
+	// 4. Test Suite Execution
+	if (TEST_PATTERNS.test(commandText)) {
+		if (elapsedSeconds >= 6) {
+			return {
+				warningLevel: "info",
+				title: "正在执行全量测试套件",
+				detail: "正在逐项编译并运行单元测试与集成测试，验证代码修改。用例较多时耗时会有所增加。",
+			};
+		}
+	}
+
+	// 5. Deep Filesystem Search
+	if (SEARCH_PATTERNS.test(commandText)) {
+		if (elapsedSeconds >= 6) {
+			return {
+				warningLevel: "info",
+				title: "正在遍历全盘或目录检索",
+				detail: "正在进行全量文件树遍历或深层正则匹配，检索大型目录树通常耗时较久。",
+			};
+		}
+	}
+
+	// 6. Generic Long-running Command
+	if (elapsedSeconds >= 45) {
+		return {
+			warningLevel: "warning",
+			title: `命令持续运行中 (已耗时 ${elapsedSeconds}s)`,
+			detail: "该命令已运行超过 45 秒。智能体将在后台持续等待返回，您可以随时点击“终止执行”强行中断当前命令。",
+			suggestion: "若命令不需要继续运行，可点击“终止执行”。",
+		};
+	}
+
+	if (elapsedSeconds >= 15) {
+		return {
+			warningLevel: "info",
+			title: `正在执行命令 (已耗时 ${elapsedSeconds}s)`,
+			detail: "后台进程正在执行，输出流已连接并实时更新中...",
+		};
+	}
+
+	return {
+		warningLevel: "info",
+		title: "正在执行命令",
+		detail: "实时标准输出流已建立...",
+	};
+}
+
 export function getRunningToolOutput(tool: RunningTool): string | undefined {
-	if (!tool.partialResult) return undefined;
-	if (typeof tool.partialResult === "string") return tool.partialResult;
-	if (typeof tool.partialResult === "object") {
-		const obj = tool.partialResult as {
+	const raw = tool.partialResult ?? tool.result;
+	if (!raw) return undefined;
+	if (typeof raw === "string") return raw;
+	if (typeof raw === "object") {
+		const obj = raw as {
 			content?: Array<{ type?: string; text?: string }>;
 			text?: string;
 			stdout?: string;

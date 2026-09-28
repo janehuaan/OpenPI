@@ -70,6 +70,7 @@ pub fn resolve_node_executable() -> (PathBuf, bool) {
     let home = std::env::var("HOME").unwrap_or_default();
     let candidates = [
         PathBuf::from(format!("{}/.local/bin/node", home)),
+        PathBuf::from("/opt/local/bin/node"),
         PathBuf::from("/opt/homebrew/bin/node"),
         PathBuf::from("/usr/local/bin/node"),
         PathBuf::from("/usr/bin/node"),
@@ -268,6 +269,16 @@ impl Supervisor {
         let s_clone = supervisor.clone();
         tokio::spawn(async move {
             s_clone.save_records().await;
+        });
+
+        // 自动触发：守护进程启动时在后台静默做梦，初始化自适应探索参数
+        let jev_init = supervisor.jev.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            let dir = sessions_dir();
+            if let Ok(res) = jev_init.trigger_offline_dreaming(&dir).await {
+                tracing::info!("🌌 [Jev Dream-RSI] 启动自适应做梦完成: beta*={:?}", res.get("optimal_beta"));
+            }
         });
 
         supervisor
@@ -561,32 +572,111 @@ impl Supervisor {
                 .arg(&session_file);
         }
 
+        let mut model_arg: Option<String> = None;
+        let mut provider_arg: Option<String> = None;
+
         if let Some(m) = &session.info.model {
             if let Some((prov, mid)) = m.split_once('/') {
-                cmd.arg("--provider").arg(prov);
-                cmd.arg("--model").arg(mid);
+                provider_arg = Some(prov.to_string());
+                model_arg = Some(mid.to_string());
             } else {
-                cmd.arg("--model").arg(m);
+                model_arg = Some(m.to_string());
+                // Look up provider in ~/.openpi/agent/models.json
+                let models_file = openpi_dir().join("agent").join("models.json");
+                if let Ok(c) = std::fs::read_to_string(&models_file) {
+                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                        if let Some(providers) = val.get("providers").and_then(|p| p.as_object()) {
+                            for (prov_name, prov_val) in providers {
+                                if let Some(models) = prov_val.get("models").and_then(|arr| arr.as_array()) {
+                                    if models.iter().any(|item| item.get("id").and_then(|id| id.as_str()) == Some(m)) {
+                                        provider_arg = Some(prov_name.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if provider_arg.is_none() {
+                    let settings_file = openpi_dir().join("agent").join("settings.json");
+                    if let Ok(c) = std::fs::read_to_string(&settings_file) {
+                        if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                            if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
+                                provider_arg = Some(p.to_string());
+                            }
+                        }
+                    }
+                }
             }
         } else {
             let settings_file = openpi_dir().join("agent").join("settings.json");
             if let Ok(c) = std::fs::read_to_string(&settings_file) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&c) {
+                if let Ok(val) = serde_json::from_str::<Value>(&c) {
                     if let Some(m) = val.get("defaultModel").and_then(|v| v.as_str()) {
+                        model_arg = Some(m.to_string());
                         if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
-                            cmd.arg("--provider").arg(p);
+                            provider_arg = Some(p.to_string());
                         }
-                        cmd.arg("--model").arg(m);
                     }
                 }
             }
         }
 
+        if let Some(p) = provider_arg {
+            cmd.arg("--provider").arg(p);
+        }
+        if let Some(m) = model_arg {
+            cmd.arg("--model").arg(m);
+        }
+
         if session.info.mode == SessionMode::Code {
+            let session_title = session.info.name.as_deref().unwrap_or("");
+            let title_lower = session_title.to_lowercase();
+            
+            // 自动推断情境与获取对应的 Contextual Beta*
+            let (ctx_key, ctx_label) = if title_lower.contains("fix") || title_lower.contains("bug") || title_lower.contains("报错") || title_lower.contains("修复") || title_lower.contains("异常") {
+                ("quick_fix", "缺陷自愈（QuickFix）")
+            } else if title_lower.contains("refactor") || title_lower.contains("重构") || title_lower.contains("迁移") || title_lower.contains("rewrite") {
+                ("refactor", "架构重构（Refactor）")
+            } else if title_lower.contains("explore") || title_lower.contains("search") || title_lower.contains("调研") || title_lower.contains("查看") {
+                ("exploration", "环境探索（Exploration）")
+            } else {
+                ("general", "综合稳健（General）")
+            };
+
+            let beta = self.jev.contextual_beta(ctx_key).await;
+            let dynamic_prompt = if ctx_key == "quick_fix" || beta <= 0.3 {
+                format!(
+                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 深度收敛型）】：\n\
+                     系统历史做梦演化显示当前任务倾向于手术刀式精准收敛：\n\
+                     - 优先使用 read 确认行号后，使用 edit 进行极小原子修改，遵循 MDL 极简代码律；\n\
+                     - 每次修改后运行单测快速验证，以最少交互轮次和最小代码变动（Low Churn）完成交付；\n\
+                     - 避免无目的的分支探索或扩散排查，切忌大面积重写无关代码。",
+                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
+                )
+            } else if ctx_key == "refactor" || beta >= 0.7 {
+                format!(
+                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 广度探索型）】：\n\
+                     系统历史做梦演化显示当前任务具有跨文件依赖与架构复杂度：\n\
+                     - 在实施核心修改前，请优先阅读相关类型定义、接口契约与上下文调用链路；\n\
+                     - 分步骤按模块推进，针对潜在边界情况设计防御性改动，变更后务必运行全量编译；\n\
+                     - 避免盲目单点修改引入次生回归缺陷，保持多分支试错与自愈耐心。",
+                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
+                )
+            } else {
+                format!(
+                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 平衡稳健型）】：\n\
+                     系统历史做梦演化显示当前任务处于最优平衡区间：\n\
+                     - 采取“快速定位 -> 局部自愈 -> 针对性验证”的稳健步频；\n\
+                     - 保持代码修改与自愈闭环的高效推进，兼顾修改紧凑度与探索深度。",
+                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
+                )
+            };
+
             cmd.arg("--tools")
                 .arg(CODE_MODE_TOOLS)
                 .arg("--append-system-prompt")
-                .arg(CODE_MODE_UNATTENDED_DIRECTIVE);
+                .arg(dynamic_prompt);
         }
 
         if is_electron {
@@ -594,7 +684,7 @@ impl Supervisor {
         }
 
         let default_path = format!(
-            "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
+            "{}/.local/bin:/opt/local/bin:/opt/local/sbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
             std::env::var("HOME").unwrap_or_default(),
             std::env::var("PATH").unwrap_or_default()
         );
@@ -846,12 +936,31 @@ impl Supervisor {
         }
         drop(stdin_guard);
 
-        match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+        let timeout_duration = if cmd_type == "prompt" {
+            std::time::Duration::from_secs(600) // 10 minutes for autonomous agent prompt execution
+        } else {
+            std::time::Duration::from_secs(60)
+        };
+
+        let rpc_res = match tokio::time::timeout(timeout_duration, rx).await {
             Ok(Ok(Ok(data))) => Ok(data),
             Ok(Ok(Err(err_msg))) => anyhow::bail!(err_msg),
             Ok(Err(_)) => anyhow::bail!("RPC channel dropped"),
             Err(_) => anyhow::bail!("RPC command timed out"),
+        };
+
+        // 自动触发：当用户发起的一轮研发/问答任务圆满完成时，后台静默做梦自我演化！
+        if cmd_type == "prompt" && rpc_res.is_ok() {
+            let jev_bg = self.jev.clone();
+            tokio::spawn(async move {
+                // 等待 1 秒确保会话日志完整刷盘
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let dir = crate::supervisor::sessions_dir();
+                let _ = jev_bg.trigger_offline_dreaming(&dir).await;
+            });
         }
+
+        rpc_res
     }
 
     pub async fn stop_session(&self, session_id: &str) -> anyhow::Result<()> {
@@ -871,5 +980,24 @@ impl Supervisor {
             }
         }
         Ok(())
+    }
+
+    pub async fn shutdown_all(&self) {
+        let mut sessions = self.sessions.lock().await;
+        for (_sid, session) in sessions.iter_mut() {
+            *session.child_stdin.lock().await = None;
+            if let Some(mut child) = session.child.take() {
+                let _ = child.kill().await;
+                tokio::spawn(async move {
+                    let _ = child.wait().await;
+                });
+            }
+            session.info.running = false;
+            let mut p = session.pending.lock().await;
+            for (_, tx) in p.drain() {
+                let _ = tx.send(Err("Daemon shutting down".into()));
+            }
+        }
+        tracing::info!("All managed session subprocesses cleanly terminated.");
     }
 }

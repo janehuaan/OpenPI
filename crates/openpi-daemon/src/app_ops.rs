@@ -506,11 +506,27 @@ pub async fn handle_app_op(
                 openpi_jev::EngineStatus::WarmingUp => "WarmingUp",
                 openpi_jev::EngineStatus::Degraded => "Degraded",
             };
+            let telemetry = jev.get_telemetry();
             Ok(ServerMessage::ok(id, serde_json::json!({
                 "status": status_str,
                 "engine": "ModernBERT-base (FP32)",
                 "ready": status == openpi_jev::EngineStatus::Ready,
+                "telemetry": telemetry,
             })))
+        }
+
+        "jev_record_event" => {
+            let event_type = op.get("event_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let cmd = op.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let reason = op.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+            let risk = op.get("risk").and_then(|v| v.as_f64()).unwrap_or(0.9) as f32;
+            jev.record_external_event(event_type, cmd, reason, risk);
+            Ok(ServerMessage::ok(id, serde_json::json!({ "recorded": true })))
+        }
+
+        "jev_clear_blocks" => {
+            jev.clear_block_records();
+            Ok(ServerMessage::ok(id, serde_json::json!({ "cleared": true })))
         }
 
         "jev_route" => {
@@ -523,6 +539,12 @@ pub async fn handle_app_op(
         "jev_check_command" => {
             let cmd = op.get("command").and_then(|c| c.as_str()).unwrap_or("");
             let verdict = jev.pre_check_command(cmd);
+            Ok(ServerMessage::ok(id, serde_json::to_value(verdict)?))
+        }
+
+        "jev_check_file_path" => {
+            let path = op.get("path").and_then(|c| c.as_str()).unwrap_or("");
+            let verdict = jev.pre_check_file_path(path);
             Ok(ServerMessage::ok(id, serde_json::to_value(verdict)?))
         }
 
@@ -543,6 +565,18 @@ pub async fn handle_app_op(
             let verdict = jev.evaluate_task_completion(goal, cmd, output, successes);
             Ok(ServerMessage::ok(id, serde_json::to_value(verdict)?))
         }
+
+        "jev_trigger_dreaming" => {
+            let sessions_dir = crate::supervisor::sessions_dir();
+            let res = jev.trigger_offline_dreaming(&sessions_dir).await?;
+            Ok(ServerMessage::ok(id, res))
+        }
+
+        "jev_dreamer_status" => {
+            let res = jev.dreamer_status().await;
+            Ok(ServerMessage::ok(id, res))
+        }
+
 
         // Default handler
         _ => Ok(ServerMessage::ok(id, serde_json::json!({ "status": "handled_by_rust_daemon" }))),
@@ -636,7 +670,7 @@ fn install_package_sync(agent_dir: &std::path::Path, source: &str) -> anyhow::Re
     let spec = source.strip_prefix("npm:").unwrap_or(source);
 
     let default_path = format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
+        "{}/.local/bin:/opt/local/bin:/opt/local/sbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
         std::env::var("HOME").unwrap_or_default(),
         std::env::var("PATH").unwrap_or_default()
     );
@@ -669,7 +703,7 @@ fn remove_package_sync(agent_dir: &std::path::Path, source: &str) -> anyhow::Res
 
             let npm_root = agent_dir.join("npm");
             let default_path = format!(
-                "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
+                "{}/.local/bin:/opt/local/bin:/opt/local/sbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
                 std::env::var("HOME").unwrap_or_default(),
                 std::env::var("PATH").unwrap_or_default()
             );

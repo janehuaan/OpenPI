@@ -855,14 +855,15 @@ export function App() {
 						content[idx] = block;
 						last.content = content;
 
-						// Circuit Breaker: detect repetitive degeneration loop (only on final text output)
-						const textToCheck = block.type === "text" ? block.text : "";
+						// Circuit Breaker: detect repetitive degeneration loop (on both text output and thinking reasoning)
+						const textToCheck = block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : "";
 						if (textToCheck && textToCheck.length >= 80) {
 							const loop = detectRepetitionLoop(textToCheck);
 							if (loop.isLoop && loop.repeatedPattern && (loop.count ?? 0) >= 8) {
 								void desktopApi.abortConversation(payload.instanceId, "circuit_breaker");
+								const phase = block.type === "thinking" ? "思考推理过程" : "输出过程";
 								setError(
-									`⚠️ 检测到模型输出陷入重复死循环（“${loop.repeatedPattern}” 连续重复出现），已自动为您熔断截停！已阻止不必要的 Token 消耗。建议切换至 medium 思考档位或选用 Pro 模型。`,
+									`⚠️ 检测到模型在${phase}陷入重复死循环（“${loop.repeatedPattern}” 连续重复出现），已自动为您熔断截停！已阻止不必要的 Token 消耗。建议切换至 medium 思考档位或换用更大参数模型。`,
 								);
 								setStreamingInstances((prev) => {
 									const next = new Set(prev);
@@ -872,6 +873,8 @@ export function App() {
 								clearRunningTools(payload.instanceId);
 								if (block.type === "text") {
 									block.text = `${block.text}\n\n> ⚠️ *[OpenPI 智能熔断]* 检测到模型输出陷入自回归复读死循环，已自动终止生成，保护您的 Token 与上下文。`;
+								} else if (block.type === "thinking") {
+									block.thinking = `${block.thinking}\n\n> ⚠️ *[OpenPI 智能熔断]* 检测到模型在思考过程中陷入死循环，已自动熔断截停。`;
 								}
 								return {
 									...current,

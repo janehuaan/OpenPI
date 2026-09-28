@@ -15,6 +15,7 @@
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import fs from "node:fs";
 
 const SOCKET_PATH = process.env.OPENPI_SOCKET_PATH || path.join(os.homedir(), ".openpi", "openpi.sock");
 
@@ -27,6 +28,8 @@ let totalTokensSaved = 0;
 let totalLoopBreaks = 0;
 const blockedLog = [];
 const commandHistory = [];
+const readProvenanceSet = new Set();
+let dynamicLoopThreshold = 2;
 
 // Fallback high-risk patterns if daemon socket is momentarily unavailable
 const LOCAL_HIGH_RISK_PATTERNS = [
@@ -123,11 +126,35 @@ class JevClient {
     const trimmed = (command || "").trim();
     if (!trimmed) return { action: "allow" };
 
-    if (/\b(apt|apt-get|yum|brew|pacman)\s+install\b/i.test(trimmed) && !trimmed.includes("-y") && !trimmed.includes("--yes")) {
+    if (/\b(apt|apt-get|yum|brew|pacman|dnf|zypper)\s+install\b/i.test(trimmed) && !trimmed.includes("-y") && !trimmed.includes("--yes")) {
       return {
         action: "modify_command",
         safe_command: `${trimmed} -y`,
         reason: "Appended -y flag to prevent hanging on interactive confirmation prompt."
+      };
+    }
+
+    if (/^npm\s+init$/i.test(trimmed)) {
+      return {
+        action: "modify_command",
+        safe_command: "npm init -y",
+        reason: "Appended -y flag to prevent hanging on interactive npm init questionnaire."
+      };
+    }
+
+    if (/^ping\s+([a-zA-Z0-9.-]+)$/i.test(trimmed) && !trimmed.includes("-c")) {
+      return {
+        action: "modify_command",
+        safe_command: `${trimmed} -c 4`,
+        reason: "Appended -c 4 to prevent infinite terminal ping hang."
+      };
+    }
+
+    if (/^git\s+(log|diff|show)\b/i.test(trimmed) && !trimmed.includes("--no-pager") && !trimmed.includes("GIT_PAGER")) {
+      return {
+        action: "modify_command",
+        safe_command: `git --no-pager ${trimmed.slice(4).trim()}`,
+        reason: "Appended --no-pager to prevent git from opening interactive pager (less) and blocking."
       };
     }
 
@@ -149,6 +176,39 @@ class JevClient {
     return { action: "allow" };
   }
 
+  static async checkFilePath(filePath) {
+    const remote = await this.query({ name: "jev_check_file_path", path: filePath });
+    if (remote) {
+      return remote;
+    }
+    const normalized = (filePath || "").trim().replace(/\\/g, "/");
+    if (!normalized) return { action: "allow" };
+    const criticalPrefixes = ["/etc", "/System", "/Library", "/boot", "/dev", "/var/root", "/usr/bin", "/usr/sbin", "/bin", "/sbin", "/private/etc"];
+    for (const prefix of criticalPrefixes) {
+      if (normalized === prefix || normalized.startsWith(`${prefix}/`)) {
+        return { action: "deny", reason: `Direct write to critical OS system path \`${normalized}\` is prohibited.` };
+      }
+    }
+    const sensitivePatterns = ["/.ssh/id_", "/.ssh/authorized_keys", "/.gnupg/", "/.aws/credentials", "/.config/gcloud/", "/.kube/config", "/.docker/config.json"];
+    for (const pat of sensitivePatterns) {
+      if (normalized.includes(pat)) {
+        return { action: "deny", reason: `Direct write to sensitive secret or credential file \`${normalized}\` is denied.` };
+      }
+    }
+    const shellFiles = [".bashrc", ".zshrc", ".bash_profile", ".zprofile", ".profile"];
+    for (const sh of shellFiles) {
+      if (normalized.endsWith(sh)) {
+        return {
+          action: "require_confirmation",
+          prompt: `智能体请求修改系统终端配置文件 \`${normalized}\``,
+          reasons: ["修改 Shell 配置文件将改变终端环境与执行行为。"],
+          risk_score: 0.88
+        };
+      }
+    }
+    return { action: "allow" };
+  }
+
   static async processOutput(output) {
     return await this.query({ name: "jev_process_output", output }, 200);
   }
@@ -165,6 +225,93 @@ export default function sentinelExtension(pi) {
   pi.on("tool_call", async (event, ctx) => {
     try {
       const toolName = (event.toolName || "").toLowerCase();
+
+      // Track Read Provenance (Pillar 2 & Active Provenance Gate)
+      if (toolName === "read") {
+        const readPath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
+        if (readPath) {
+          try {
+            readProvenanceSet.add(path.resolve(readPath));
+          } catch {}
+        }
+        return void 0;
+      }
+
+      // Guard direct file modifications (write / edit) against sensitive paths
+      const isFileWrite = toolName === "write" || toolName === "edit";
+      if (isFileWrite) {
+        const filePath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
+        if (filePath) {
+          // Record written file in provenance set so future edits pass
+          try {
+            readProvenanceSet.add(path.resolve(filePath));
+          } catch {}
+
+          const verdict = await JevClient.checkFilePath(filePath);
+          if (verdict.action === "deny") {
+            totalBlockedCount += 1;
+            const entry = {
+              timestamp: Date.now(),
+              tool: event.toolName,
+              command: `write/edit -> ${filePath}`,
+              reason: verdict.reason,
+              risk: verdict.risk_score || 0.99
+            };
+            blockedLog.push(entry);
+            if (blockedLog.length > 50) blockedLog.shift();
+
+            console.warn(`🛑 [Jev SafetyGate] Physically blocked sensitive file modification: \`${filePath}\`. Reason: ${verdict.reason}`);
+
+            return {
+              block: true,
+              reason: `🛑 [Jev SafetyGate 物理阻断] 该文件修改操作已被系统底层物理拦截！\n\n• 拦截原因: ${verdict.reason}\n• 目标文件: \`${filePath}\`\n\n提示: 严禁直接修改操作系统关键目录或凭证密钥文件。`
+            };
+          }
+
+          if (verdict.action === "require_confirmation") {
+            if (ctx && ctx.hasUI && ctx.ui && typeof ctx.ui.confirm === "function") {
+              const reasonsText = Array.isArray(verdict.reasons) ? verdict.reasons.map((r) => `• ${r}`).join("\n") : (verdict.reason || "");
+              const dialogMessage = `${verdict.prompt || `智能体请求修改敏感文件：\n\`${filePath}\``}\n\n风险原因：\n${reasonsText}\n\n是否允许继续执行？`;
+
+              console.info(`⚠️ [Jev SafetyGate] Triggering confirmation for file: \`${filePath}\``);
+              const confirmed = await ctx.ui.confirm("⚠️ Jev 文件安全确认", dialogMessage);
+
+              if (!confirmed) {
+                totalBlockedCount += 1;
+                console.warn(`🛑 [Jev SafetyGate] User rejected file modification: \`${filePath}\``);
+                void JevClient.query({
+                  name: "jev_record_event",
+                  event_type: "user_rejected",
+                  command: `write/edit -> ${filePath}`,
+                  reason: "用户取消了此文件修改操作",
+                  risk: verdict.risk_score || 0.9
+                });
+                return {
+                  block: true,
+                  reason: `🛑 [Jev SafetyGate] 用户取消了对文件 \`${filePath}\` 的修改操作。`
+                };
+              }
+
+              totalConfirmedCount += 1;
+              void JevClient.query({
+                name: "jev_record_event",
+                event_type: "user_approved",
+                command: `write/edit -> ${filePath}`,
+                reason: "用户批准修改敏感文件",
+                risk: verdict.risk_score || 0.8
+              });
+              return void 0;
+            } else {
+              return {
+                block: true,
+                reason: `🛑 [Jev SafetyGate] 文件修改需要人工确认，但在非交互环境下默认拦截: \`${filePath}\``
+              };
+            }
+          }
+        }
+        return void 0;
+      }
+
       const isShell = toolName === "bash" || toolName === "powershell" || toolName === "terminal" || toolName === "cmd";
       if (!isShell) {
         return void 0;
@@ -173,6 +320,14 @@ export default function sentinelExtension(pi) {
       const cmd = (event.input?.command || event.input?.cmd || "").trim();
       if (!cmd) {
         return void 0;
+      }
+
+      // ── Active Provenance: 自动解析 Bash 中的只读查看命令 (cat, grep, head, tail, view) ──
+      const bashReadMatch = cmd.match(/\b(cat|head|tail|grep|view|less|more)\s+(?:-[a-zA-Z0-9-]+\s+)*["']?([^\s"';|&>]+)["']?/i);
+      if (bashReadMatch && bashReadMatch[2] && !bashReadMatch[2].startsWith("-")) {
+        try {
+          readProvenanceSet.add(path.resolve(bashReadMatch[2]));
+        } catch {}
       }
 
       // ── Jev Pillar 4: LoopBreaker Pre-Flight Circuit Breaker ──
@@ -189,8 +344,8 @@ export default function sentinelExtension(pi) {
         }
       }
 
-      // If already executed twice (this is the 3rd attempt): HARD FUSE BREAK!
-      if (repeatCount >= 2) {
+      // If already executed beyond adaptive threshold: HARD FUSE BREAK!
+      if (repeatCount >= dynamicLoopThreshold) {
         totalBlockedCount += 1;
         totalLoopBreaks += 1;
         const entry = {
@@ -202,6 +357,15 @@ export default function sentinelExtension(pi) {
         };
         blockedLog.push(entry);
         if (blockedLog.length > 50) blockedLog.shift();
+
+        // Notify daemon telemetry
+        void JevClient.query({
+          name: "jev_record_event",
+          event_type: "loop_break",
+          command: cmd,
+          reason: `连续重复执行相同指令 ${repeatCount + 1} 次且无新进展，触发死循环熔断`,
+          risk: 0.95
+        });
 
         console.warn(`🛑 [Jev LoopBreaker] Circuit breaker tripped for repetitive command (${repeatCount + 1}x): \`${cmd}\``);
 
@@ -222,6 +386,13 @@ export default function sentinelExtension(pi) {
         if (h[n - 1].normCmd === h[n - 3].normCmd && h[n - 2].normCmd === h[n - 4].normCmd && normCmd === h[n - 2].normCmd) {
           totalBlockedCount += 1;
           totalLoopBreaks += 1;
+          void JevClient.query({
+            name: "jev_record_event",
+            event_type: "loop_break",
+            command: `${h[n - 1].normCmd} ⟷ ${h[n - 2].normCmd}`,
+            reason: "检测到指令之间交替震荡，触发死循环熔断",
+            risk: 0.95
+          });
           return {
             block: true,
             reason: `🛑 [Jev LoopBreaker 震荡死循环熔断]\n检测到智能体在两条交替指令之间陷入反复震荡死循环（Ping-Pong Loop）：\n\n1) \`${h[n - 1].normCmd}\`\n2) \`${h[n - 2].normCmd}\`\n\n系统底层已强制阻断后续震荡，请立即停止机械重试并切换排查思路！`
@@ -273,6 +444,13 @@ export default function sentinelExtension(pi) {
           if (!confirmed) {
             totalBlockedCount += 1;
             console.warn(`🛑 [Jev SafetyGate] User cancelled command confirmation: \`${cmd}\``);
+            void JevClient.query({
+              name: "jev_record_event",
+              event_type: "user_rejected",
+              command: cmd,
+              reason: "用户在安全确认弹窗中取消了此高危操作",
+              risk: verdict.risk_score || 0.9
+            });
             return {
               block: true,
               reason: `🛑 [Jev SafetyGate] 用户在安全确认弹窗中取消了此操作（命令未执行: \`${cmd}\`）。`
@@ -281,6 +459,13 @@ export default function sentinelExtension(pi) {
 
           totalConfirmedCount += 1;
           console.info(`✅ [Jev SafetyGate] User approved execution of: \`${cmd}\``);
+          void JevClient.query({
+            name: "jev_record_event",
+            event_type: "user_approved",
+            command: cmd,
+            reason: "用户在安全确认弹窗中批准执行",
+            risk: verdict.risk_score || 0.8
+          });
           return void 0;
         } else {
           // In headless mode without UI capability, block dangerous operations by default

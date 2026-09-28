@@ -136,3 +136,121 @@ fn test_pillar6_stop_decider() {
     assert!(verdict.should_stop);
     assert!(verdict.confidence >= 0.9);
 }
+
+#[tokio::test]
+async fn test_telemetry_and_records() {
+    let coordinator = JevCoordinator::new();
+
+    // 1. Pre-check blocked command
+    let _ = coordinator.pre_check_command("rm -rf / --no-preserve-root");
+    let _ = coordinator.pre_check_command("apt install nginx");
+    let _ = coordinator.pre_check_command("git reset --hard HEAD");
+
+    // 2. Loop breaker
+    for _ in 0..4 {
+        let _ = coordinator.record_command_result("npm run build", false, "error TS2322: Type 'string' is not assignable").await;
+    }
+
+    // 3. Leak & compression
+    let sample_leak = "sk-proj-abcdef1234567890abcdef1234567890";
+    let _ = coordinator.process_command_output(sample_leak);
+
+    let telemetry = coordinator.get_telemetry();
+    assert!(telemetry.blocked_commands >= 1);
+    assert!(telemetry.auto_patched_commands >= 1);
+    assert!(telemetry.user_confirmed_commands >= 1);
+    assert!(telemetry.loop_breaks >= 1);
+    assert!(telemetry.secrets_redacted >= 1);
+    assert!(!telemetry.recent_blocks.is_empty());
+
+    // Verify recent block record contents
+    let first = &telemetry.recent_blocks[0];
+    assert!(!first.command.is_empty());
+    assert!(!first.reason.is_empty());
+}
+
+#[test]
+fn test_file_path_protection() {
+    let coordinator = JevCoordinator::new();
+
+    // 1. Prohibited OS path (/etc/passwd) -> Deny
+    let v1 = coordinator.pre_check_file_path("/etc/passwd");
+    assert!(matches!(v1, GateVerdict::Deny { .. }));
+
+    // 2. Sensitive SSH private key -> Deny
+    let v2 = coordinator.pre_check_file_path("/Users/test/.ssh/id_ed25519");
+    assert!(matches!(v2, GateVerdict::Deny { .. }));
+
+    // 3. Sensitive AWS credential -> Deny
+    let v3 = coordinator.pre_check_file_path("/home/user/.aws/credentials");
+    assert!(matches!(v3, GateVerdict::Deny { .. }));
+
+    // 4. Shell startup profile -> RequireConfirmation
+    let v4 = coordinator.pre_check_file_path("/Users/test/.zshrc");
+    assert!(matches!(v4, GateVerdict::RequireConfirmation { .. }));
+
+    // 5. Normal project file -> Allow
+    let v5 = coordinator.pre_check_file_path("src/components/Button.tsx");
+    assert_eq!(v5, GateVerdict::Allow);
+}
+
+#[test]
+fn test_multi_world_branching_and_scoring() {
+    use openpi_jev::dreamer::parser::SessionTreeParser;
+
+    let parser = SessionTreeParser::new();
+
+    // 1. Verify fine-grained scores
+    let test_score = parser.estimate_score("test result: ok. 12 passed; 0 failed", false);
+    assert!(test_score >= 0.95);
+
+    let build_score = parser.estimate_score("Finished `release` profile [optimized] target(s) in 2.1s", false);
+    assert!((build_score - 0.85).abs() < 1e-4);
+
+    let git_score = parser.estimate_score("[main a1b2c3d] fix: resolved compile error\n 1 file changed, 2 insertions(+)", false);
+    assert!((git_score - 0.80).abs() < 1e-4);
+
+    let warning_score = parser.estimate_score("warning: unused variable: `x`\n[main a1b2c3d] committed", false);
+    assert!(warning_score < git_score);
+
+    let repairable_score = parser.estimate_score("error[E0425]: cannot find value `foo` in this scope", true);
+    assert!((repairable_score - 0.20).abs() < 1e-4);
+
+    let hard_score = parser.estimate_score("fatal: not a git repository (or any of the parent directories): .git", true);
+    assert_eq!(hard_score, 0.0);
+
+    // 2. Verify multi-world branching DAG
+    let records = vec![
+        ("cat src/main.rs".into(), "fn main() {}".into(), false), // Step 1: OK (score 0.6) -> baseline
+        ("cargo check".into(), "error[E0425]: cannot find value `foo`".into(), true), // Step 2: Failed attempt 1 (score 0.2)
+        ("cargo check".into(), "error[E0308]: mismatched types".into(), true), // Step 3: Failed attempt 2 -> Sibling branch!
+        ("git commit -m 'fix'".into(), "[main 9876543] fix\n 1 file changed".into(), false), // Step 4: Fixed!
+    ];
+
+    let tree = parser.build_from_records("test_task", &records);
+
+    // Step 1 is child of root
+    let s1 = tree.nodes.get("test_task_step_1").unwrap();
+    assert_eq!(s1.parent_id.as_deref(), Some("test_task"));
+
+    // Step 2 is child of Step 1 on branch 0
+    let s2 = tree.nodes.get("test_task_step_2").unwrap();
+    assert_eq!(s2.parent_id.as_deref(), Some("test_task_step_1"));
+    assert_eq!(s2.branch_id, 0);
+
+    // Step 3 was a retry after Step 2 failed: it branches from Step 1 as a sibling (branch 1)!
+    let s3 = tree.nodes.get("test_task_step_3").unwrap();
+    assert_eq!(s3.parent_id.as_deref(), Some("test_task_step_1"));
+    assert_eq!(s3.branch_id, 1);
+
+    // Step 2, Step 3, and Step 4 are all sibling branches under Step 1 until Step 4 succeeds!
+    let children_of_s1 = tree.get_children("test_task_step_1");
+    assert_eq!(children_of_s1.len(), 3);
+
+    // Step 4 is child of Step 1 on branch 2
+    let s4 = tree.nodes.get("test_task_step_4").unwrap();
+    assert_eq!(s4.parent_id.as_deref(), Some("test_task_step_1"));
+    assert_eq!(s4.branch_id, 2);
+}
+
+

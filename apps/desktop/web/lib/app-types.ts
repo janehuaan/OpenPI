@@ -38,6 +38,14 @@ export interface AppSettings {
 	desktopNotifications?: boolean;
 	notificationThresholdSec?: number;
 	httpProxy?: string;
+	jev?: {
+		defenseMode?: "strict" | "confirm_all" | "token_saver";
+		safetyGate?: boolean;
+		leakHunter?: boolean;
+		tokenCompressor?: boolean;
+		loopBreaker?: boolean;
+		stopDecider?: boolean;
+	};
 }
 
 export interface OptimisticUserMessage {

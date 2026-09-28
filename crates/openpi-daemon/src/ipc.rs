@@ -18,6 +18,9 @@ pub async fn run_ipc_server(
     pi_cli_path: String,
 ) -> anyhow::Result<()> {
     if std::path::Path::new(socket_path).exists() {
+        if tokio::net::UnixStream::connect(socket_path).await.is_ok() {
+            anyhow::bail!("An active OpenPI daemon is already running and listening on {}", socket_path);
+        }
         let _ = std::fs::remove_file(socket_path);
     }
     if let Some(parent) = std::path::Path::new(socket_path).parent() {
@@ -86,7 +89,7 @@ async fn handle_connection(
                     let subs = subs_clone.lock().await;
                     if !subs.is_empty()
                         && !subs.contains(&session_id)
-                        && !subs.iter().any(|s| session_id.contains(s) || s.contains(&session_id))
+                        && !subs.iter().any(|s| session_id.contains(s) || s.contains(&session_id) || s == "*")
                     {
                         continue;
                     }
@@ -277,6 +280,7 @@ async fn handle_request(
                 handle_app_op(&id, &op, &storage, &scheduler, &supervisor.jev).await?
             }
             ClientRequest::Shutdown { id } => {
+                supervisor.shutdown_all().await;
                 let _ = write_tx.send(ServerMessage::ok(id, serde_json::json!({"shutting_down": true})).to_json_line()?).await;
                 std::process::exit(0);
             }

@@ -4,6 +4,7 @@ use regex::Regex;
 pub struct SafetyGate {
     destructive_rules: Vec<(Regex, f32, &'static str)>,
     hang_rules: Vec<(Regex, &'static str, &'static str)>, // (pattern, reason, suggested_modifier)
+    pkg_install_regex: Regex,
 }
 
 impl Default for SafetyGate {
@@ -75,9 +76,12 @@ impl SafetyGate {
             ),
         ];
 
+        let pkg_install_regex = Regex::new(r"(?i)\b(apt|apt-get|yum|brew|pacman|dnf|zypper)\s+install\b").unwrap();
+
         Self {
             destructive_rules,
             hang_rules,
+            pkg_install_regex,
         }
     }
 
@@ -88,13 +92,33 @@ impl SafetyGate {
         }
 
         // 1. Check interactive package manager install without -y
-        if Regex::new(r"(?i)\b(apt|apt-get|yum|brew|pacman)\s+install\b").unwrap().is_match(trimmed)
+        if self.pkg_install_regex.is_match(trimmed)
             && !trimmed.contains("-y")
             && !trimmed.contains("--yes")
         {
             return GateVerdict::ModifyCommand {
                 safe_command: format!("{} -y", trimmed),
                 reason: "Appended -y flag to prevent hanging on interactive confirmation prompt.".into(),
+            };
+        }
+
+        // 1b. Check ping without packet count limit (-c)
+        if Regex::new(r"(?i)^ping\s+([a-zA-Z0-9.-]+)$").unwrap().is_match(trimmed) && !trimmed.contains("-c") {
+            return GateVerdict::ModifyCommand {
+                safe_command: format!("{} -c 4", trimmed),
+                reason: "Appended -c 4 to prevent infinite terminal ping hang.".into(),
+            };
+        }
+
+        // 1c. Check git log/diff/show without --no-pager
+        if Regex::new(r"(?i)^git\s+(log|diff|show)\b").unwrap().is_match(trimmed)
+            && !trimmed.contains("--no-pager")
+            && !trimmed.contains("GIT_PAGER")
+        {
+            let subcmd = trimmed[4..].trim();
+            return GateVerdict::ModifyCommand {
+                safe_command: format!("git --no-pager {}", subcmd),
+                reason: "Appended --no-pager to prevent git from opening interactive pager (less) and blocking.".into(),
             };
         }
 
@@ -115,20 +139,9 @@ impl SafetyGate {
             }
         }
 
-        // 2. Check Hang / Blocking Process Rules
+        // 3. Check Hang / Blocking Process Rules
         for (pat, reason, modifier) in &self.hang_rules {
             if pat.is_match(trimmed) {
-                // If it's a command like apt-get or brew without -y, suggest auto-appending -y
-                if Regex::new(r"(?i)\b(apt|apt-get|yum|brew|pacman)\s+install\b").unwrap().is_match(trimmed)
-                    && !trimmed.contains("-y")
-                    && !trimmed.contains("--yes")
-                {
-                    return GateVerdict::ModifyCommand {
-                        safe_command: format!("{} -y", trimmed),
-                        reason: "Appended -y flag to prevent hanging on interactive confirmation prompt.".into(),
-                    };
-                }
-
                 return GateVerdict::Warn {
                     reasons: vec![format!("{}: Suggested guard: {}", reason, modifier)],
                 };
@@ -137,4 +150,53 @@ impl SafetyGate {
 
         GateVerdict::Allow
     }
+
+    /// Inspect direct file modification paths (for write / edit tools)
+    pub fn inspect_file_path(&self, file_path: &str) -> GateVerdict {
+        let normalized = file_path.trim().replace('\\', "/");
+        if normalized.is_empty() {
+            return GateVerdict::Allow;
+        }
+
+        // Critical System Paths (Physical Hard Block)
+        let critical_system_prefixes = [
+            "/etc", "/System", "/Library", "/boot", "/dev", "/var/root",
+            "/usr/bin", "/usr/sbin", "/bin", "/sbin", "/private/etc",
+        ];
+        for prefix in &critical_system_prefixes {
+            if normalized == *prefix || normalized.starts_with(&format!("{}/", prefix)) {
+                return GateVerdict::Deny {
+                    reason: format!("Direct write/modification to critical OS system path `{}` is prohibited.", normalized),
+                };
+            }
+        }
+
+        // Sensitive credentials and keys (Physical Hard Block or Confirmation)
+        let sensitive_patterns = [
+            "/.ssh/id_", "/.ssh/authorized_keys", "/.gnupg/", "/.aws/credentials",
+            "/.config/gcloud/", "/.kube/config", "/.docker/config.json",
+        ];
+        for pat in &sensitive_patterns {
+            if normalized.contains(pat) {
+                return GateVerdict::Deny {
+                    reason: format!("Direct write/modification to sensitive secret or credential file `{}` is denied.", normalized),
+                };
+            }
+        }
+
+        // User Shell Startup Profiles (Require User Confirmation)
+        let shell_startup_files = [".bashrc", ".zshrc", ".bash_profile", ".zprofile", ".profile"];
+        for sh_file in &shell_startup_files {
+            if normalized.ends_with(sh_file) {
+                return GateVerdict::RequireConfirmation {
+                    prompt: format!("The agent is requesting to modify your shell startup script `{}`", normalized),
+                    reasons: vec!["Modifying shell profiles alters terminal environment and execution behavior.".into()],
+                    risk_score: 0.88,
+                };
+            }
+        }
+
+        GateVerdict::Allow
+    }
 }
+

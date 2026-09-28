@@ -23,3 +23,8 @@ path = "src/bin/bench.rs"
 [[bin]]
 name = "jev-smoke"
 path = "src/bin/smoke.rs"
+
+[[bin]]
+name = "jev-dream"
+path = "src/bin/dream.rs"
+

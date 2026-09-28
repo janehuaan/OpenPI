@@ -88,7 +88,12 @@ export function reduceTurnProgress(
 	}
 	if (type === "message_update" || type === "message_start") {
 		const messageType = event.assistantMessageEvent?.type;
-		if (messageType === "thinking_delta") {
+		if (
+			messageType === "thinking_delta" ||
+			messageType === "thinking_start" ||
+			messageType === "reasoning_delta" ||
+			messageType === "reasoning_start"
+		) {
 			const hasExecutedTools = (current.toolCount ?? 0) > 0;
 			return {
 				...current,

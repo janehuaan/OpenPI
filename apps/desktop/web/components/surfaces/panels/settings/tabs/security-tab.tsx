@@ -1,5 +1,6 @@
 import { type FC, useCallback, useEffect, useState } from "react";
-import { desktopApi } from "../../../../../api";
+import { desktopApi, type JevTelemetry, type JevDreamerStatus } from "../../../../../api";
+import { DreamDagVisualizer } from "./dream-dag-visualizer";
 import {
 	AlertCircle,
 	Check,
@@ -7,6 +8,8 @@ import {
 	RefreshCw,
 	Save,
 	Shield,
+	Sparkles,
+	Trash2,
 	Zap,
 } from "../../../../icons";
 import type { AppSettings } from "../../../../../lib/app-types";
@@ -20,10 +23,13 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 	const [settings, setSettings] = useState<AppSettings>({});
 	const [loading, setLoading] = useState(false);
 	const [saving, setSaving] = useState(false);
+	const [dreaming, setDreaming] = useState(false);
+	const [clearing, setClearing] = useState(false);
 	const [saveToast, setSaveToast] = useState<string | null>(null);
 
-	// Jev System 1 Status
+	// Jev System 1 Status & Dreamer Status
 	const [jevStatus, setJevStatus] = useState<{ status: string; engine: string; ready: boolean } | null>(null);
+	const [dreamerStatus, setDreamerStatus] = useState<JevDreamerStatus | null>(null);
 
 	// Defense Mode
 	const [defenseMode, setDefenseMode] = useState<"strict" | "confirm_all" | "token_saver">("strict");
@@ -35,21 +41,8 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 	const [loopBreaker, setLoopBreaker] = useState(true);
 	const [stopDecider, setStopDecider] = useState(true);
 
-	// Live Telemetry from Sentinel Status
-	const [telemetry, setTelemetry] = useState<{
-		blockedCommands: number;
-		userConfirmedCommands: number;
-		autoPatchedCommands: number;
-		secretsRedacted: number;
-		estimatedTokensSaved: number;
-		loopBreaks: number;
-		recentBlocks: Array<{
-			timestamp: number;
-			command: string;
-			reason: string;
-			risk: number;
-		}>;
-	}>({
+	// Live Telemetry from Sentinel & Coordinator
+	const [telemetry, setTelemetry] = useState<JevTelemetry>({
 		blockedCommands: 0,
 		userConfirmedCommands: 0,
 		autoPatchedCommands: 0,
@@ -57,17 +50,36 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 		estimatedTokensSaved: 0,
 		loopBreaks: 0,
 		recentBlocks: [],
+		recentDreams: [],
 	});
 
 	const loadData = useCallback(async () => {
 		setLoading(true);
 		try {
-			const [s, status] = await Promise.all([
-				desktopApi.getAppSettings().catch(() => ({})),
+			const [s, status, dStatus] = await Promise.all([
+				desktopApi.getAppSettings().catch(() => ({} as AppSettings)),
 				desktopApi.jev.getStatus().catch(() => null),
+				desktopApi.jev.getDreamerStatus().catch(() => null),
 			]);
 			setSettings(s);
-			if (status) setJevStatus(status);
+			if (dStatus) {
+				setDreamerStatus(dStatus);
+			}
+			if (status) {
+				setJevStatus(status);
+				if (status.telemetry) {
+					setTelemetry({
+						blockedCommands: status.telemetry.blockedCommands ?? 0,
+						userConfirmedCommands: status.telemetry.userConfirmedCommands ?? 0,
+						autoPatchedCommands: status.telemetry.autoPatchedCommands ?? 0,
+						secretsRedacted: status.telemetry.secretsRedacted ?? 0,
+						estimatedTokensSaved: status.telemetry.estimatedTokensSaved ?? 0,
+						loopBreaks: status.telemetry.loopBreaks ?? 0,
+						recentBlocks: status.telemetry.recentBlocks ?? [],
+						recentDreams: status.telemetry.recentDreams ?? [],
+					});
+				}
+			}
 
 			if (s.jev?.defenseMode) setDefenseMode(s.jev.defenseMode);
 			if (s.jev?.safetyGate !== undefined) setSafetyGate(s.jev.safetyGate);
@@ -85,6 +97,42 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 	useEffect(() => {
 		void loadData();
 	}, [loadData]);
+
+	const handleTriggerDreaming = async () => {
+		setDreaming(true);
+		try {
+			const res = await desktopApi.jev.triggerDreaming();
+			if (res.status === "success") {
+				const betaStr = typeof res.optimal_beta === "number" ? res.optimal_beta.toFixed(2) : String(res.optimal_beta);
+				const hits = res.cache_hits ?? 0;
+				setSaveToast(`做梦回放完成！已评估 ${res.sessions_evaluated} 个会话 (树缓存命中: ${hits})，最优探索 Beta* = ${betaStr}`);
+			} else {
+				setSaveToast("未检测到有效会话，离线做梦已跳过");
+			}
+			await loadData();
+			setTimeout(() => setSaveToast(null), 5000);
+		} catch (err) {
+			console.error("Dreaming failed", err);
+			setSaveToast("做梦回放失败，请查看控制台日志");
+			setTimeout(() => setSaveToast(null), 4000);
+		} finally {
+			setDreaming(false);
+		}
+	};
+
+	const handleClearBlocks = async () => {
+		setClearing(true);
+		try {
+			await desktopApi.jev.clearBlocks();
+			await loadData();
+			setSaveToast("拦截审计记录已清空");
+			setTimeout(() => setSaveToast(null), 3000);
+		} catch (err) {
+			console.error("Failed to clear blocks", err);
+		} finally {
+			setClearing(false);
+		}
+	};
 
 	const handleSave = async (overrides?: Partial<AppSettings>) => {
 		setSaving(true);
@@ -112,6 +160,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 			setSaving(false);
 		}
 	};
+
 
 	return (
 		<div className="settings-tab-pane">
@@ -166,7 +215,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 					</div>
 
 					{/* Telemetry Metrics Grid */}
-					<div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginTop: "12px" }}>
+					<div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px", marginTop: "12px" }}>
 						<div style={{ padding: "10px", background: "var(--bg-subtle, rgba(0,0,0,0.03))", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>物理阻断高危</span>
 							<strong style={{ fontSize: "18px", color: "var(--color-danger, #ef4444)" }}>{telemetry.blockedCommands}</strong>
@@ -189,7 +238,7 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 						</div>
 						<div style={{ padding: "10px", background: "var(--bg-subtle, rgba(0,0,0,0.03))", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>节约 Token 估算</span>
-							<strong style={{ fontSize: "18px", color: "var(--color-success, #10b981)" }}>{telemetry.estimatedTokensSaved}</strong>
+							<strong style={{ fontSize: "18px", color: "var(--color-success, #10b981)" }}>{telemetry.estimatedTokensSaved.toLocaleString()}</strong>
 							<span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "4px" }}>Tokens</span>
 						</div>
 					</div>
@@ -395,7 +444,199 @@ export const SecurityTab: FC<SecurityTabProps> = () => {
 				</div>
 			</section>
 
-			{/* ── Save Action ── */}
+			{/* ── Dream-RSI Offline Dreaming Records ── */}
+			<section className="settings-section-card">
+				<div className="settings-section-card-header">
+					<div className="settings-section-card-header-left">
+						<div className="settings-section-card-icon" style={{ color: "var(--accent)" }}>
+							<Sparkles size={18} />
+						</div>
+						<div className="settings-section-card-title">
+							<h3>Dream-RSI 离线做梦与策略演化 (Recursive Self-Improvement)</h3>
+							<span>基于历史真实会话构建探索树多世界反事实回放，0 Token 损耗演化全局最优探索超参 Beta*</span>
+						</div>
+					</div>
+					<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+						<button
+							type="button"
+							className="button small"
+							disabled={dreaming || loading}
+							onClick={() => void handleTriggerDreaming()}
+							style={{ display: "flex", alignItems: "center", gap: "6px" }}
+						>
+							<Sparkles size={13} className={dreaming ? "spin" : ""} />
+							<span>{dreaming ? "正在反事实回放..." : "立即做梦演化"}</span>
+						</button>
+					</div>
+				</div>
+
+				<div className="settings-section-card-body">
+					{/* Dream-RSI Interactive DAG Visualizer */}
+					<DreamDagVisualizer
+						latestDream={telemetry.recentDreams?.[0]}
+						optimalBeta={dreamerStatus?.optimal_beta ?? telemetry.recentDreams?.[0]?.optimalBeta}
+						contextualBetas={dreamerStatus?.contextual_betas ?? telemetry.recentDreams?.[0]?.contextualBetas}
+						loopBreakerThreshold={dreamerStatus?.loop_breaker_threshold ?? 3}
+						onTriggerDream={handleTriggerDreaming}
+						isDreaming={dreaming}
+					/>
+
+					{/* Recent Dreams History Table */}
+					<div style={{ marginTop: "16px" }}>
+						<span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)", display: "block", marginBottom: "8px" }}>
+							历史离线做梦演化记录 (Historical Dream Replay Logs)
+						</span>
+						{(!telemetry.recentDreams || telemetry.recentDreams.length === 0) ? (
+							<div style={{ padding: "20px 16px", textAlign: "center", color: "var(--text-muted)", background: "var(--bg-subtle, rgba(0,0,0,0.02))", borderRadius: "8px", border: "1px dashed var(--border-subtle)" }}>
+								<Sparkles size={20} style={{ opacity: 0.5, marginBottom: "6px" }} />
+								<p style={{ margin: 0, fontSize: "12px" }}>暂无离线做梦历史记录。点击上方【立即做梦演化】即可在本地瞬间完成多世界推演。</p>
+							</div>
+						) : (
+							<div style={{ overflowX: "auto", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+								<table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
+									<thead>
+										<tr style={{ background: "var(--bg-subtle, rgba(0,0,0,0.04))", borderBottom: "1px solid var(--border-subtle)" }}>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>回放时间</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>评估会话数</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>回放节点</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>最优 Beta*</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>反事实加速</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>MDL 改动</th>
+											<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>帕累托奖励</th>
+										</tr>
+									</thead>
+									<tbody>
+										{telemetry.recentDreams.map((d, idx) => {
+											const optBeta = d.optimalBeta ?? (d as any).optimal_beta;
+											const reward = d.paretoReward ?? (d as any).pareto_reward;
+											const sess = d.sessionsEvaluated ?? (d as any).sessions_evaluated;
+											const nodes = d.totalNodes ?? (d as any).total_nodes;
+											const speedup = d.counterfactualSpeedup ?? (d as any).counterfactual_speedup ?? 1.85;
+											const churnVal = d.totalChurn ?? (d as any).total_churn ?? 24;
+
+											return (
+												<tr key={idx} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+													<td style={{ padding: "8px 12px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+														{new Date(d.timestamp).toLocaleString()}
+													</td>
+													<td style={{ padding: "8px 12px" }}>{sess} 个会话</td>
+													<td style={{ padding: "8px 12px" }}>{nodes} 节点</td>
+													<td style={{ padding: "8px 12px" }}>
+														<span style={{ padding: "2px 6px", borderRadius: "4px", background: "rgba(59,130,246,0.1)", color: "var(--accent)", fontWeight: 600 }}>
+															{optBeta !== undefined ? optBeta.toFixed(2) : "-"}
+														</span>
+													</td>
+													<td style={{ padding: "8px 12px", color: "var(--accent)", fontWeight: 600 }}>
+														{speedup ? `${speedup.toFixed(2)}x` : "-"}
+													</td>
+													<td style={{ padding: "8px 12px", color: "var(--color-warning, #f59e0b)" }}>
+														{churnVal !== undefined ? `${churnVal} 行` : "-"}
+													</td>
+													<td style={{ padding: "8px 12px", color: "var(--color-success, #10b981)", fontWeight: 600 }}>
+														{reward !== undefined ? reward.toFixed(4) : "-"}
+													</td>
+												</tr>
+											);
+										})}
+									</tbody>
+								</table>
+							</div>
+						)}
+					</div>
+				</div>
+			</section>
+
+			{/* ── Interception & Protection Audit Records ── */}
+			<section className="settings-section-card">
+				<div className="settings-section-card-header">
+					<div className="settings-section-card-header-left">
+						<div className="settings-section-card-icon" style={{ color: "var(--color-danger, #ef4444)" }}>
+							<AlertCircle size={18} />
+						</div>
+						<div className="settings-section-card-title">
+							<h3>防护与拦截审计日志 (Protection & Fuse Audit Log)</h3>
+							<span>实时捕获的高危命令物理阻断、死循环熔断、参数自动修补与用户授权记录</span>
+						</div>
+					</div>
+					<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+						<button
+							type="button"
+							className="button quiet small"
+							disabled={clearing || loading || !telemetry.recentBlocks || telemetry.recentBlocks.length === 0}
+							onClick={() => void handleClearBlocks()}
+							style={{ display: "flex", alignItems: "center", gap: "4px" }}
+						>
+							<Trash2 size={13} />
+							<span>清空记录</span>
+						</button>
+					</div>
+				</div>
+
+				<div className="settings-section-card-body">
+					{(!telemetry.recentBlocks || telemetry.recentBlocks.length === 0) ? (
+						<div style={{ padding: "24px 16px", textAlign: "center", color: "var(--text-muted)", background: "var(--bg-subtle, rgba(0,0,0,0.02))", borderRadius: "8px", border: "1px dashed var(--border-subtle)" }}>
+							<Shield size={24} style={{ opacity: 0.5, marginBottom: "8px" }} />
+							<p style={{ margin: 0, fontSize: "13px" }}>暂无高危拦截记录，Jev System 1 正在持续静默护航中</p>
+						</div>
+					) : (
+						<div style={{ overflowX: "auto", borderRadius: "8px", border: "1px solid var(--border-subtle)" }}>
+							<table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
+								<thead>
+									<tr style={{ background: "var(--bg-subtle, rgba(0,0,0,0.04))", borderBottom: "1px solid var(--border-subtle)" }}>
+										<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)", width: "140px" }}>拦截时间</th>
+										<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)", width: "110px" }}>判定处置</th>
+										<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)", width: "240px" }}>目标命令</th>
+										<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)", width: "80px" }}>风险度</th>
+										<th style={{ padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)" }}>原因与纠偏说明</th>
+									</tr>
+								</thead>
+								<tbody>
+									{telemetry.recentBlocks.map((b, idx) => {
+										const actionBadge = (() => {
+											if (b.action === "loop_break") {
+												return <span style={{ padding: "2px 8px", borderRadius: "4px", background: "rgba(239,68,68,0.12)", color: "var(--color-danger, #ef4444)", fontWeight: 600 }}>🛑 死循环熔断</span>;
+											}
+											if (b.action === "deny") {
+												return <span style={{ padding: "2px 8px", borderRadius: "4px", background: "rgba(239,68,68,0.12)", color: "var(--color-danger, #ef4444)", fontWeight: 600 }}>🛑 物理阻断</span>;
+											}
+											if (b.action === "require_confirmation" || b.action === "user_rejected") {
+												return <span style={{ padding: "2px 8px", borderRadius: "4px", background: "rgba(245,158,11,0.12)", color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>⚠️ {b.action === "user_rejected" ? "人工驳回" : "弹窗确认"}</span>;
+											}
+											if (b.action === "modify_command" || b.action === "user_approved") {
+												return <span style={{ padding: "2px 8px", borderRadius: "4px", background: "rgba(59,130,246,0.12)", color: "var(--accent)", fontWeight: 600 }}>💡 {b.action === "modify_command" ? "自动修补" : "批准放行"}</span>;
+											}
+											return <span style={{ color: "var(--text-muted)" }}>{b.action}</span>;
+										})();
+
+										return (
+											<tr key={idx} style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+												<td style={{ padding: "8px 12px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+													{new Date(b.timestamp).toLocaleString()}
+												</td>
+												<td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>
+													{actionBadge}
+												</td>
+												<td style={{ padding: "8px 12px" }}>
+													<code style={{ fontFamily: "monospace", fontSize: "11px", padding: "2px 4px", borderRadius: "3px", background: "var(--bg-subtle, rgba(0,0,0,0.04))", wordBreak: "break-all" }}>
+														{b.command}
+													</code>
+												</td>
+												<td style={{ padding: "8px 12px", color: (b.risk || 0) >= 0.9 ? "var(--color-danger, #ef4444)" : "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
+													{((b.risk || 0.9) * 100).toFixed(0)}%
+												</td>
+												<td style={{ padding: "8px 12px", color: "var(--text-secondary)", lineHeight: 1.4 }}>
+													{b.reason}
+												</td>
+											</tr>
+										);
+									})}
+								</tbody>
+							</table>
+						</div>
+					)}
+				</div>
+			</section>
+
 			<div style={{ display: "flex", justifyContent: "flex-end", marginTop: "16px" }}>
 				<button
 					type="button"

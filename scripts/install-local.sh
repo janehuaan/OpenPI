@@ -11,7 +11,7 @@ pkill -f "rpc-entry.js" || true
 sleep 1
 
 # Clean stale socket
-rm -f "$HOME/.openpi/daemon.sock"
+rm -f "$HOME/.openpi/daemon.sock" "$HOME/.openpi/openpi.sock"
 
 APP_BUNDLE="$DIR/target/release/bundle/macos/OpenPI.app"
 
@@ -20,10 +20,15 @@ if [ ! -d "$APP_BUNDLE" ]; then
     "$DIR/scripts/package-tauri-app.sh"
 fi
 
-# Ensure openpi-daemon is inside the app bundle
+# Ensure openpi-daemon binary is updated in bundle resources
 if [ -f "$DIR/target/release/openpi-daemon" ]; then
-    echo "🔗 Embedding latest openpi-daemon into bundle..."
-    cp "$DIR/target/release/openpi-daemon" "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
+    echo "🔗 Updating openpi-daemon in bundle..."
+    mkdir -p "$APP_BUNDLE/Contents/Resources/openpi/bin"
+    cp "$DIR/target/release/openpi-daemon" "$APP_BUNDLE/Contents/Resources/openpi/bin/openpi-daemon"
+    chmod +x "$APP_BUNDLE/Contents/Resources/openpi/bin/openpi-daemon"
+    if [ ! -f "$APP_BUNDLE/Contents/MacOS/openpi-daemon" ]; then
+        cp "$DIR/target/release/openpi-daemon" "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
+    fi
 fi
 
 echo "📦 2. Installing native OpenPI.app to /Applications..."

@@ -1,27 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiniDiffView } from "../../diff-viewer";
-import { Bot, ChevronDown, FileText, Search, Terminal, Wrench } from "../../icons.tsx";
+import {
+	AlertCircle,
+	Bot,
+	Check,
+	ChevronDown,
+	Copy,
+	FileText,
+	Info,
+	Search,
+	Square,
+	Terminal,
+	Wrench,
+} from "../../icons.tsx";
 import { isDiffContent } from "../../../lib/diff";
 import {
+	analyzeCommandExecutionState,
 	computeTrajectorySummary,
 	formatDuration,
+	getRunningToolDetail,
 	getRunningToolOutput,
 	type ActionChainItem,
 } from "../../../lib/helpers";
 import type { RunningTool } from "../../../types";
-
-function getRunningToolDetail(tool: RunningTool): string | undefined {
-	if (!tool.args || typeof tool.args !== "object") return undefined;
-	const args = tool.args as Record<string, unknown>;
-	if (typeof args.command === "string") return args.command;
-	if (typeof args.cmd === "string") return args.cmd;
-	if (typeof args.path === "string") return args.path;
-	if (typeof args.file === "string") return args.file;
-	if (typeof args.pattern === "string") return args.pattern;
-	if (typeof args.query === "string") return args.query;
-	if (typeof args.prompt === "string") return args.prompt;
-	return undefined;
-}
 
 export function AgentActionChain({
 	actions,
@@ -38,6 +39,14 @@ export function AgentActionChain({
 	const [isOpen, setIsOpen] = useState(defaultOpen ?? isWorking);
 	const wasWorkingRef = useRef(isWorking);
 	const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
+	const [copiedKey, setCopiedKey] = useState<string | null>(null);
+	const [now, setNow] = useState(() => Date.now());
+
+	useEffect(() => {
+		if (!isWorking && runningTools.length === 0) return;
+		const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+		return () => window.clearInterval(timer);
+	}, [isWorking, runningTools.length]);
 
 	useEffect(() => {
 		if (isWorking && !wasWorkingRef.current) {
@@ -50,6 +59,18 @@ export function AgentActionChain({
 
 	const toggleOutput = (id: string) => {
 		setExpandedOutputs((prev) => ({ ...prev, [id]: !prev[id] }));
+	};
+
+	const copyText = async (key: string, text: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopiedKey(key);
+			setTimeout(() => {
+				setCopiedKey((prev) => (prev === key ? null : prev));
+			}, 1500);
+		} catch {
+			// fallback
+		}
 	};
 
 	const activeTool = runningTools[0];
@@ -101,6 +122,24 @@ export function AgentActionChain({
 						const effectiveOutput = liveOutput || item.output;
 						const isOutputOpen = isCurrentlyRunning || Boolean(expandedOutputs[key]);
 
+						const seconds = matchedTool
+							? Math.max(0, Math.floor((now - matchedTool.startedAt) / 1_000))
+							: item.startedAt
+							? Math.max(0, Math.floor((now - item.startedAt) / 1_000))
+							: undefined;
+
+						const toolDetail = matchedTool ? getRunningToolDetail(matchedTool) : undefined;
+						const commandText = toolDetail?.command || item.target;
+
+						const diagnostic = isCurrentlyRunning
+							? analyzeCommandExecutionState(
+									matchedTool?.toolName || item.name,
+									commandText || "",
+									seconds ?? 0,
+									effectiveOutput,
+							  )
+							: undefined;
+
 						const IconComp =
 							item.actionType === "bash" || item.iconName === "terminal"
 								? Terminal
@@ -124,12 +163,17 @@ export function AgentActionChain({
 								>
 									<span className="trajectory-verb">{item.verb || "Called"}</span>
 									<IconComp size={12} className="trajectory-icon" />
-									<span className="trajectory-target" title={item.target || item.summary || item.name}>
-										{item.target || item.summary || item.name}
+									<span className="trajectory-target" title={commandText || item.summary || item.name}>
+										{commandText || item.summary || item.name}
 									</span>
-									{item.durationMs !== undefined && (
+									{isCurrentlyRunning ? (
+										<span className="trajectory-duration text-sky-500 font-mono">
+											· {seconds !== undefined ? `${seconds}s` : "运行中"}
+										</span>
+									) : item.durationMs !== undefined ? (
 										<span className="trajectory-duration">· {formatDuration(item.durationMs)}</span>
-									)}
+									) : null}
+
 									{isCurrentlyRunning ? (
 										<span className="trajectory-badge running">running</span>
 									) : item.badge ? (
@@ -137,7 +181,29 @@ export function AgentActionChain({
 											{item.badge}
 										</span>
 									) : null}
+
 								</div>
+
+								{/* Running command diagnostics & explanation */}
+								{isCurrentlyRunning && diagnostic && (
+									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+										{diagnostic.warningLevel === "critical" ? (
+											<AlertCircle size={13} />
+										) : diagnostic.warningLevel === "warning" ? (
+											<AlertCircle size={13} />
+										) : (
+											<Info size={13} />
+										)}
+										<div className="diagnostic-content">
+											<div className="diagnostic-title">{diagnostic.title}</div>
+											<div className="diagnostic-detail">{diagnostic.detail}</div>
+											{diagnostic.suggestion && (
+												<div className="diagnostic-suggestion">{diagnostic.suggestion}</div>
+											)}
+										</div>
+									</div>
+								)}
+
 								{isOutputOpen && effectiveOutput && (
 									!isCurrentlyRunning && isDiffContent(effectiveOutput) ? (
 										<MiniDiffView
@@ -145,12 +211,37 @@ export function AgentActionChain({
 											filename={item.target}
 										/>
 									) : (
-										<pre
-											ref={isCurrentlyRunning ? liveOutputRef : undefined}
-											className={`trajectory-output ${isCurrentlyRunning ? "live-output" : ""}`}
-										>
-											{effectiveOutput}
-										</pre>
+										<div>
+											{isCurrentlyRunning && (
+												<div className="tool-live-output-bar px-1">
+													<span>实时输出流</span>
+													<button
+														type="button"
+														className="tool-live-copy-btn"
+														onClick={() => copyText(`out-${key}`, effectiveOutput)}
+														title="复制输出"
+													>
+														{copiedKey === `out-${key}` ? (
+															<>
+																<Check size={9} className="text-emerald-500" />
+																<span>已复制</span>
+															</>
+														) : (
+															<>
+																<Copy size={9} />
+																<span>复制输出</span>
+															</>
+														)}
+													</button>
+												</div>
+											)}
+											<pre
+												ref={isCurrentlyRunning ? liveOutputRef : undefined}
+												className={`trajectory-output ${isCurrentlyRunning ? "live-output" : ""}`}
+											>
+												{effectiveOutput}
+											</pre>
+										</div>
 									)
 								)}
 							</div>
@@ -158,29 +249,84 @@ export function AgentActionChain({
 					})}
 
 					{unmatchedRunningTools.map((tool, toolIdx) => {
+						const key = `${tool.toolCallId || "rt"}-${toolIdx}`;
 						const detail = getRunningToolDetail(tool);
 						const liveOutput = getRunningToolOutput(tool);
-						const isBash = tool.toolName === "bash" || tool.toolName === "terminal";
+						const seconds = Math.max(0, Math.floor((now - tool.startedAt) / 1_000));
+						const isBash = detail.isCommand;
 						const IconComp = isBash
 							? Terminal
 							: tool.toolName === "grep" || tool.toolName === "find"
 							? Search
 							: FileText;
 
+						const diagnostic = analyzeCommandExecutionState(
+							tool.toolName,
+							detail.command || detail.summary,
+							seconds,
+							liveOutput,
+						);
+
 						return (
-							<div className="trajectory-item" key={`${tool.toolCallId || "rt"}-${toolIdx}`}>
+							<div className="trajectory-item" key={key}>
 								<div className="trajectory-item-line">
 									<span className="trajectory-verb">Running</span>
 									<IconComp size={12} className="trajectory-icon" />
-									<span className="trajectory-target" title={detail || tool.toolName}>
-										{detail || tool.toolName}
+									<span className="trajectory-target" title={detail.command || detail.summary}>
+										{detail.command || detail.summary}
+									</span>
+									<span className="trajectory-duration text-sky-500 font-mono">
+										· {seconds}s
 									</span>
 									<span className="trajectory-badge running">running</span>
+
 								</div>
+
+								{/* Running command diagnostic */}
+								<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+									{diagnostic.warningLevel === "critical" ? (
+										<AlertCircle size={13} />
+									) : diagnostic.warningLevel === "warning" ? (
+										<AlertCircle size={13} />
+									) : (
+										<Info size={13} />
+									)}
+									<div className="diagnostic-content">
+										<div className="diagnostic-title">{diagnostic.title}</div>
+										<div className="diagnostic-detail">{diagnostic.detail}</div>
+										{diagnostic.suggestion && (
+											<div className="diagnostic-suggestion">{diagnostic.suggestion}</div>
+										)}
+									</div>
+								</div>
+
 								{liveOutput && (
-									<pre ref={liveOutputRef} className="trajectory-output live-output">
-										{liveOutput}
-									</pre>
+									<div>
+										<div className="tool-live-output-bar px-1">
+											<span>实时输出流</span>
+											<button
+												type="button"
+												className="tool-live-copy-btn"
+												onClick={() => copyText(`out-${key}`, liveOutput)}
+												title="复制输出"
+											>
+												{copiedKey === `out-${key}` ? (
+													<>
+														<Check size={9} className="text-emerald-500" />
+														<span>已复制</span>
+													</>
+												) : (
+													<>
+														<Copy size={9} />
+														<span>复制输出</span>
+													</>
+												)}
+											</button>
+										</div>
+										<pre ref={liveOutputRef} className="trajectory-output live-output">
+											{liveOutput}
+										</pre>
+									</div>
 								)}
 							</div>
 						);

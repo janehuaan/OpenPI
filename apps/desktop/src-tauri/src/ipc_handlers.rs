@@ -1396,7 +1396,7 @@ pub async fn handle_invoke(
             Ok(json!([]))
         }
 
-        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" => {
+        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" | "jev_trigger_dreaming" | "jev_dreamer_status" | "jev_record_event" | "jev_clear_blocks" => {
             let op = if channel == "write_memory_entry" || channel == "delete_memory_entry" {
                 memory_request_op(&channel, &args)
             } else {

@@ -54,6 +54,15 @@ async fn main() -> anyhow::Result<()> {
     let scheduler = Scheduler::new(storage.clone());
     let supervisor = Supervisor::new();
 
+    let supervisor_clone = supervisor.clone();
+    tokio::spawn(async move {
+        if let Ok(()) = tokio::signal::ctrl_c().await {
+            info!("Received termination signal (Ctrl-C), cleanly reaping all managed session subprocesses...");
+            supervisor_clone.shutdown_all().await;
+            std::process::exit(0);
+        }
+    });
+
     run_ipc_server(&socket_path, supervisor, storage, scheduler, pi_cli_path).await?;
 
     Ok(())

@@ -28,6 +28,25 @@ impl LoopBreaker {
         }
     }
 
+    /// 根据 Dream-RSI 的最优探索 Beta* 自适应调节熔断耐受阈值
+    /// - 深度收敛型 (Beta <= 0.3): 严格收紧为 2 次，一旦连续重复立刻熔断
+    /// - 广度探索型 (Beta >= 0.7): 放宽至 4 次，容忍深度试错与自愈
+    /// - 平衡稳健型 (0.3 < Beta < 0.7): 维持标准 3 次阈值
+    pub fn adapt_threshold(&mut self, beta: f64) {
+        let new_threshold = if beta <= 0.3 {
+            2
+        } else if beta >= 0.7 {
+            4
+        } else {
+            3
+        };
+        self.circuit_break_threshold = new_threshold;
+    }
+
+    pub fn current_threshold(&self) -> usize {
+        self.circuit_break_threshold
+    }
+
     pub fn record_execution(&mut self, cmd: &str, output: &str, is_error: bool) -> LoopAnalysis {
         let trimmed_cmd = cmd.trim().to_string();
         let output_summary: String = output

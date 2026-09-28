@@ -127,3 +127,64 @@ pub struct StopVerdict {
     pub confidence: f32,
     pub rationale: String,
 }
+
+// ============================================================================
+// Telemetry & Audit Records
+// ============================================================================
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockRecord {
+    pub timestamp: u64,
+    pub command: String,
+    pub action: String,
+    pub reason: String,
+    pub risk: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamRecord {
+    pub timestamp: u64,
+    #[serde(alias = "sessions_evaluated")]
+    pub sessions_evaluated: usize,
+    #[serde(alias = "total_nodes")]
+    pub total_nodes: usize,
+    #[serde(alias = "optimal_beta")]
+    pub optimal_beta: f64,
+    #[serde(alias = "pareto_reward")]
+    pub pareto_reward: f64,
+    #[serde(alias = "decision_rounds")]
+    pub decision_rounds: usize,
+    #[serde(alias = "parallelism_efficiency")]
+    pub parallelism_efficiency: f64,
+    #[serde(default, alias = "discovery_quality")]
+    pub discovery_quality: f64,
+    #[serde(default, alias = "total_churn")]
+    pub total_churn: usize,
+    #[serde(default, alias = "counterfactual_speedup")]
+    pub counterfactual_speedup: f64,
+    #[serde(default, alias = "contextual_betas")]
+    pub contextual_betas: std::collections::HashMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct JevTelemetry {
+    #[serde(alias = "blocked_commands")]
+    pub blocked_commands: usize,
+    #[serde(alias = "user_confirmed_commands")]
+    pub user_confirmed_commands: usize,
+    #[serde(alias = "auto_patched_commands")]
+    pub auto_patched_commands: usize,
+    #[serde(alias = "secrets_redacted")]
+    pub secrets_redacted: usize,
+    #[serde(alias = "estimated_tokens_saved")]
+    pub estimated_tokens_saved: usize,
+    #[serde(alias = "loop_breaks")]
+    pub loop_breaks: usize,
+    #[serde(default, alias = "recent_blocks")]
+    pub recent_blocks: Vec<BlockRecord>,
+    #[serde(default, alias = "recent_dreams")]
+    pub recent_dreams: Vec<DreamRecord>,
+}
+

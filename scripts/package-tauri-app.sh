@@ -84,6 +84,38 @@ for pkg in sorted(list(visited)):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         subprocess.run(['rsync', '-aL', f'{src}/', f'{dest}/'], check=True)
 
+def patch_node20_compat(base_dir):
+    pm_path = os.path.join(base_dir, '@earendil-works/pi-coding-agent/dist/core/package-manager.js')
+    if os.path.exists(pm_path):
+        with open(pm_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        if 'import { chmodSync, existsSync, globSync,' in content:
+            content = content.replace(
+                'import { chmodSync, existsSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, } from "node:fs";',
+                'import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, } from "node:fs";'
+            )
+            content = content.replace(
+                'import { minimatch } from "minimatch";',
+                'import { minimatch } from "minimatch";\\nconst globSync = (pattern, { cwd = process.cwd() } = {}) => { try { return readdirSync(cwd, { recursive: true }).filter(f => minimatch(String(f), pattern, { dot: true })); } catch { return []; } };'
+            )
+            with open(pm_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+    undici_webidl = os.path.join(base_dir, 'undici/lib/web/webidl/index.js')
+    if os.path.exists(undici_webidl):
+        with open(undici_webidl, 'r', encoding='utf-8') as f:
+            content = f.read()
+        if 'webidl.util.markAsUncloneable = markAsUncloneable\\n' in content:
+            content = content.replace(
+                'webidl.util.markAsUncloneable = markAsUncloneable\\n',
+                'webidl.util.markAsUncloneable = markAsUncloneable ?? (() => {})\\n'
+            )
+            with open(undici_webidl, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+patch_node20_compat('$DIR/node_modules')
+patch_node20_compat(target_nm)
+
 print(f'Successfully copied {len(visited)} essential production runtime packages.')
 "
 

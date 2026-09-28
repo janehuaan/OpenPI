@@ -160,10 +160,24 @@ impl DaemonClient {
 
         for c in &candidates {
             if c.is_file() && c.exists() {
+                let log_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(openpi_dir().join("daemon.log"))
+                    .map(std::process::Stdio::from)
+                    .unwrap_or_else(|_| std::process::Stdio::null());
+
+                let err_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(openpi_dir().join("daemon.err.log"))
+                    .map(std::process::Stdio::from)
+                    .unwrap_or_else(|_| std::process::Stdio::null());
+
                 if let Ok(_child) = tokio::process::Command::new(c)
                     .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
+                    .stdout(log_file)
+                    .stderr(err_file)
                     .spawn()
                 {
                     info!("Spawned daemon process from {:?}", c);

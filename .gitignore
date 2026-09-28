@@ -21,3 +21,6 @@ spike/agent-dir/models-store.json
 target/
 swift/
 release_notes.md
+.cargo/
+*.tar.gz
+*.zip

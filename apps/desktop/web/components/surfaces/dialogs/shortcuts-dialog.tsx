@@ -20,9 +20,8 @@ const SHORTCUT_SECTIONS: ShortcutSection[] = [
 	{
 		title: "核心交互与执行",
 		items: [
-			{ keys: ["Enter"], description: "发送消息" },
-			{ keys: ["⇧", "Enter"], description: "输入框内换行" },
-			{ keys: ["⌘", "Enter"], description: "实时干预 Agent" },
+			{ keys: ["⌘", "Enter"], description: "发送消息 / 实时干预" },
+			{ keys: ["Enter"], description: "输入框内换行" },
 			{ keys: ["⇧", "⌘", "Enter"], description: "排队到下一轮任务" },
 			{ keys: ["⌘", "."], description: "强制中断当前任务生成" },
 			{ keys: ["Tab"], description: "采纳复盘建议 / 补全命令" },

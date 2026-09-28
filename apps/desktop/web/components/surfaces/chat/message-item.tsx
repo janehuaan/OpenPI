@@ -93,22 +93,15 @@ export const MessageItem = memo(function MessageItem({
 	hideAssistantTools?: boolean;
 	onRemember?(text: string): void;
 }) {
-	const text = contentText(message.content);
+	const rawText = contentText(message.content);
+	const text = rawText.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").trim();
 	const images = contentImages(message.content);
 	const calls = hideAssistantTools ? [] : toolCalls(message);
 	const blockCounts = message.role !== "user" ? messageBlockCounts(message.content) : undefined;
 	// Live tool-call status arrives via tool_execution_* stream events.
 	const liveTools = (message.toolCalls ?? []).filter((tc) => tc.status === "running");
 	// Reasoning/thinking blocks extracted from content (collapsible display).
-	const reasoning = Array.isArray(message.content)
-		? message.content
-				.filter(
-					(block): block is { type: "thinking"; thinking: string } =>
-						isRecord(block) && block.type === "thinking" && typeof block.thinking === "string",
-				)
-				.map((block) => block.thinking)
-				.join("\n\n")
-		: "";
+	const reasoning = messageReasoning(message);
 	// toolResult must use the same avatar+stack grid as assistant messages,
 	// otherwise summary rows are wider and misaligned with assistant text.
 	if (message.role === "toolResult") {
@@ -282,22 +275,44 @@ export const MessageItem = memo(function MessageItem({
 				<div className="message-body">
 					{liveTools.length > 0 && (
 						<div className="tool-live-list">
-							{liveTools.map((tc, tcIndex) => (
-								<div className="tool-live" key={`${tc.id || "live"}-${tcIndex}`}>
-									<div className="tool-live-header">
-										<Wrench size={13} className="tool-live-icon" />
-										<span className="tool-live-name">{tc.name}</span>
-										<span className="tool-live-status">运行中</span>
+							{liveTools.map((tc, tcIndex) => {
+								const isBash = tc.name === "bash" || tc.name === "terminal" || tc.name === "exec";
+								const IconComp = isBash ? Terminal : tc.name === "read" || tc.name === "edit" || tc.name === "write" ? FileText : tc.name === "grep" || tc.name === "find" ? Search : Wrench;
+								const cmd = (tc as any).arguments?.command || (tc as any).arguments?.cmd || (tc as any).args?.command || (tc as any).args?.cmd;
+								return (
+									<div className="tool-live" key={`${tc.id || "live"}-${tcIndex}`}>
+										<div className="tool-live-header">
+											<IconComp size={13} className="tool-live-icon" />
+											<span className="tool-live-name">{tc.name}</span>
+											{cmd && (
+												<span className="tool-live-args font-mono text-xs text-muted-foreground truncate max-w-[280px]" title={String(cmd)}>
+													{String(cmd)}
+												</span>
+											)}
+											<span className="tool-live-status">运行中</span>
+										</div>
+										{tc.result && <pre className="tool-live-output">{tc.result.slice(-800)}</pre>}
 									</div>
-									{tc.result && <pre className="tool-live-output">{tc.result.slice(-800)}</pre>}
-								</div>
-							))}
+								);
+							})}
 						</div>
 					)}
 					{reasoning && (
-						<details className="message-reasoning">
-							<summary>思考过程</summary>
-							<pre>{reasoning}</pre>
+						<details className="message-reasoning" open={!text || undefined}>
+							<summary className="flex items-center gap-1.5 cursor-pointer select-none">
+								<BrainCircuit size={13} className={!text ? "animate-pulse text-sky-400" : "text-muted-foreground"} />
+								<span className={!text ? "text-sky-400 font-medium" : ""}>{!text ? "正在深度思考…" : "思考过程"}</span>
+								{!text && (
+									<span className="inline-flex items-center gap-1 text-[11px] text-sky-400 font-mono ml-auto">
+										<span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping" />
+										思考推理中
+									</span>
+								)}
+							</summary>
+							<pre className="whitespace-pre-wrap font-mono text-xs text-muted-foreground mt-2 max-h-96 overflow-y-auto bg-black/10 dark:bg-black/30 p-2.5 rounded-lg border border-border/40">
+								{reasoning}
+								{!text && <span className="inline-block w-1.5 h-3.5 bg-sky-400 ml-1 animate-pulse align-middle" />}
+							</pre>
 						</details>
 					)}
 					{images.length > 0 && <MessageImages images={images} />}

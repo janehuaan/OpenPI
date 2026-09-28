@@ -472,13 +472,85 @@ export const desktopApi = {
 				output,
 				successes,
 			}),
+		triggerDreaming: () => call<JevDreamerResult>("jev_trigger_dreaming"),
+		getDreamerStatus: () => call<JevDreamerStatus>("jev_dreamer_status"),
+		clearBlocks: () => call<{ cleared: boolean }>("jev_clear_blocks"),
 	},
 };
+
+export interface JevBlockRecord {
+	timestamp: number;
+	command: string;
+	action: string;
+	reason: string;
+	risk: number;
+}
+
+export interface JevDreamRecord {
+	timestamp: number;
+	sessionsEvaluated: number;
+	totalNodes: number;
+	optimalBeta: number;
+	paretoReward: number;
+	decisionRounds: number;
+	parallelismEfficiency: number;
+	discoveryQuality?: number;
+	totalChurn?: number;
+	counterfactualSpeedup?: number;
+	contextualBetas?: Record<string, number>;
+}
+
+export interface JevTelemetry {
+	blockedCommands: number;
+	userConfirmedCommands: number;
+	autoPatchedCommands: number;
+	secretsRedacted: number;
+	estimatedTokensSaved: number;
+	loopBreaks: number;
+	recentBlocks: JevBlockRecord[];
+	recentDreams: JevDreamRecord[];
+}
+
+export interface JevDreamerResult {
+	status: "success" | "skipped";
+	sessions_evaluated: number;
+	cache_hits?: number;
+	cache_misses?: number;
+	total_nodes_replayed: number;
+	optimal_beta: number;
+	contextual_betas?: Record<string, number>;
+	latest_metrics?: {
+		discovery_quality: number;
+		total_probes: number;
+		decision_rounds: number;
+		parallelism_efficiency: number;
+		pareto_reward: number;
+		counterfactual_speedup?: number;
+		total_churn?: number;
+	};
+}
+
+export interface JevDreamerStatus {
+	enabled: boolean;
+	optimal_beta: number;
+	loop_breaker_threshold?: number;
+	contextual_betas?: Record<string, number>;
+	last_metrics?: {
+		discovery_quality: number;
+		total_probes: number;
+		decision_rounds: number;
+		parallelism_efficiency: number;
+		pareto_reward: number;
+		counterfactual_speedup?: number;
+		total_churn?: number;
+	};
+}
 
 export interface JevStatus {
 	status: "Ready" | "WarmingUp" | "Degraded";
 	engine: string;
 	ready: boolean;
+	telemetry?: JevTelemetry;
 }
 
 export interface JevRouteDecision {

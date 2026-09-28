@@ -2531,8 +2531,8 @@ export function ReferenceWorkspacePreview({
 						ref={draftInput}
 						placeholder={
 							appMode === "code" || conversation?.instance.mode === "code"
-								? "输入研发任务，智能体将自主编码、全维巡检并自愈直到完全通过 (Enter 发送)..."
-								: "发送消息给 OpenPI，或输入 / 查看命令…"
+								? "输入研发任务，智能体将自主编码、全维巡检并自愈直到完全通过 (⌘Enter 发送，Enter 换行)..."
+								: "发送消息给 OpenPI (⌘Enter 发送，Enter 换行)，或输入 / 查看命令…"
 						}
 						rows={1}
 						value={draft ?? ""}
@@ -2550,7 +2550,10 @@ export function ReferenceWorkspacePreview({
 									setSlashIndex((current) => (current - 1 + slashItems.length) % slashItems.length);
 									return;
 								}
-								if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey)) {
+								if (
+									event.key === "Tab" ||
+									(event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey)
+								) {
 									event.preventDefault();
 									applySlashItem(slashItems[slashIndex] ?? slashItems[0]);
 									return;
@@ -2567,16 +2570,23 @@ export function ReferenceWorkspacePreview({
 								setDraft(topSuggestion);
 								return;
 							}
-							if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-								event.preventDefault();
-								if (isWorking && (draft.trim() || attachments.length > 0 || documents.length > 0)) {
-									if (event.shiftKey) {
-										void submitFollowUp().catch(() => undefined);
+							if (event.key === "Enter") {
+								if (event.nativeEvent.isComposing) {
+									return;
+								}
+								// ⌘/Ctrl+Enter send; plain Enter is newline.
+								const isSend = Boolean(event.metaKey || event.ctrlKey);
+								if (isSend) {
+									event.preventDefault();
+									if (isWorking && (draft.trim() || attachments.length > 0 || documents.length > 0)) {
+										if (event.shiftKey) {
+											void submitFollowUp().catch(() => undefined);
+										} else {
+											void submitSteer().catch(() => undefined);
+										}
 									} else {
-										void submitSteer().catch(() => undefined);
+										void submit().catch(() => undefined);
 									}
-								} else {
-									void submit().catch(() => undefined);
 								}
 							}
 						}}
