@@ -262,6 +262,19 @@ impl JevCoordinator {
                         risk,
                     });
                 }
+                "provenance_block" => {
+                    t.blocked_commands += 1;
+                    t.recent_blocks.insert(0, BlockRecord {
+                        timestamp: Self::now_millis(),
+                        command: cmd.to_string(),
+                        action: "provenance_block".to_string(),
+                        reason: reason.to_string(),
+                        risk,
+                    });
+                }
+                "actkv_prune" => {
+                    t.estimated_tokens_saved += risk.max(0.0) as usize;
+                }
                 _ => {
                     t.recent_blocks.insert(0, BlockRecord {
                         timestamp: Self::now_millis(),

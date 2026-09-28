@@ -16,6 +16,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { execSync } from "node:child_process";
 
 const SOCKET_PATH = process.env.OPENPI_SOCKET_PATH || path.join(os.homedir(), ".openpi", "openpi.sock");
 
@@ -26,10 +27,22 @@ let totalModifiedCount = 0;
 let totalLeaksRedacted = 0;
 let totalTokensSaved = 0;
 let totalLoopBreaks = 0;
+let totalProvenanceBlocks = 0;
+let totalActKVPrunedTokens = 0;
+let lastCheckpointTime = null;
 const blockedLog = [];
 const commandHistory = [];
 const readProvenanceSet = new Set();
 let dynamicLoopThreshold = 2;
+
+// Helper: safe local git operations for workspace transactions
+const runGit = (cmd, cwd) => {
+  try {
+    return execSync(`git ${cmd}`, { cwd, stdio: ["pipe", "pipe", "ignore"], encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+};
 
 // Fallback high-risk patterns if daemon socket is momentarily unavailable
 const LOCAL_HIGH_RISK_PATTERNS = [
@@ -221,6 +234,81 @@ class JevClient {
 export default function sentinelExtension(pi) {
   console.log("[OpenPI Jev Sentinel] System 1 Instinct Safety Engine initialized.");
 
+  // ── Module A: Client-side ActKV Context Trimmer (pi.on("context")) ──
+  pi.on("context", async (event) => {
+    try {
+      if (!event.messages || !Array.isArray(event.messages)) return void 0;
+
+      // Locate all tool / tool_result message indices
+      const toolIndices = [];
+      event.messages.forEach((msg, idx) => {
+        const isTool = msg.role === "tool" || (msg.role === "user" && Array.isArray(msg.content) && msg.content.some((c) => c.type === "tool_result"));
+        if (isTool) toolIndices.push(idx);
+      });
+
+      const KEEP_RECENT = 2;
+      if (toolIndices.length <= KEEP_RECENT) return void 0;
+
+      const pruneIndices = new Set(toolIndices.slice(0, toolIndices.length - KEEP_RECENT));
+      let prunedCharsThisTurn = 0;
+
+      event.messages = event.messages.map((msg, idx) => {
+        if (!pruneIndices.has(idx)) return msg;
+
+        // Case 1: Plain string content
+        if (typeof msg.content === "string" && msg.content.length > 300) {
+          const originalLen = msg.content.length;
+          prunedCharsThisTurn += originalLen - 150;
+          return {
+            ...msg,
+            content: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志以节约显存]\n` + msg.content.slice(0, 150) + "\n..."
+          };
+        }
+
+        // Case 2: Structured array content
+        if (Array.isArray(msg.content)) {
+          let changed = false;
+          const updated = msg.content.map((part) => {
+            if (part && part.type === "text" && typeof part.text === "string" && part.text.length > 300) {
+              const originalLen = part.text.length;
+              prunedCharsThisTurn += originalLen - 150;
+              changed = true;
+              return {
+                ...part,
+                text: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志以节约显存]\n` + part.text.slice(0, 150) + "\n..."
+              };
+            }
+            return part;
+          });
+          if (changed) {
+            return { ...msg, content: updated };
+          }
+        }
+
+        return msg;
+      });
+
+      if (prunedCharsThisTurn > 0) {
+        const savedTokens = Math.round(prunedCharsThisTurn / 4);
+        totalTokensSaved += savedTokens;
+        totalActKVPrunedTokens += savedTokens;
+        void JevClient.query({
+          name: "jev_record_event",
+          event_type: "actkv_prune",
+          command: "context_trim",
+          reason: `ActKV 动态修剪历史 Observation 节省约 ${savedTokens} Tokens`,
+          risk: savedTokens
+        });
+        console.info(`📦 [Jev ActKV] Dynamically pruned ${prunedCharsThisTurn} chars (~${savedTokens} tokens) from deep history.`);
+      }
+
+      return { messages: event.messages };
+    } catch (err) {
+      console.warn("[OpenPI Jev Sentinel] ActKV context pruning error:", err);
+      return void 0;
+    }
+  });
+
   // 1. Physical Pre-Execution Gate (<55ms)
   pi.on("tool_call", async (event, ctx) => {
     try {
@@ -237,15 +325,61 @@ export default function sentinelExtension(pi) {
         return void 0;
       }
 
-      // Guard direct file modifications (write / edit) against sensitive paths
+      // Guard direct file modifications (write / edit) against blind unread writes and sensitive paths
       const isFileWrite = toolName === "write" || toolName === "edit";
       if (isFileWrite) {
         const filePath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
         if (filePath) {
+          const resolvedPath = path.resolve(filePath);
+
+          // ── Module B: Active Provenance Gate ──
+          // If the file already exists on disk, the agent MUST have read it in this session.
+          // Blindly overwriting an unread file is blocked as an ungrounded hallucination.
+          const fileExists = fs.existsSync(resolvedPath);
+          if (fileExists && !readProvenanceSet.has(resolvedPath)) {
+            totalBlockedCount += 1;
+            totalProvenanceBlocks += 1;
+            const entry = {
+              timestamp: Date.now(),
+              tool: event.toolName,
+              command: `blind write/edit -> ${filePath}`,
+              reason: `[Active Provenance Gate] 试图直接覆写未阅读文件: ${filePath}`,
+              risk: 0.95
+            };
+            blockedLog.push(entry);
+            if (blockedLog.length > 50) blockedLog.shift();
+
+            void JevClient.query({
+              name: "jev_record_event",
+              event_type: "provenance_block",
+              command: `write/edit -> ${filePath}`,
+              reason: "试图修改尚未阅读的磁盘已有文件，触发主动溯源拦截",
+              risk: 0.95
+            });
+
+            console.warn(`🛑 [Jev ProvenanceGate] Blocked blind write to unread file: \`${filePath}\``);
+            if (ctx?.ui?.notify) {
+              ctx.ui.notify(`🛑 [Jev 溯源拦截] 严禁盲改未阅读文件: ${path.basename(filePath)}`, "warning");
+            }
+
+            return {
+              block: true,
+              reason: `🛑 [Jev Active Provenance Gate 凭据拦截]\n你正试图修改文件：\`${filePath}\`，但你在本轮会话中【从未阅读过】该文件的原始实现！\n\n严禁凭空盲写。请先调用 \`read\` 工具（或终端查看工具）仔细查看该文件内容与上下文契约，确认现状后再执行修改！`
+            };
+          }
+
           // Record written file in provenance set so future edits pass
-          try {
-            readProvenanceSet.add(path.resolve(filePath));
-          } catch {}
+          readProvenanceSet.add(resolvedPath);
+
+          // ── Module C: Workspace Transaction Snapshot Checkpoint ──
+          const cwd = ctx?.cwd || process.cwd();
+          const isGit = runGit("rev-parse --is-inside-work-tree", cwd) === "true";
+          if (isGit) {
+            try {
+              runGit(`stash create "openpi-checkpoint-${Date.now()}"`, cwd);
+              lastCheckpointTime = new Date().toLocaleTimeString();
+            } catch {}
+          }
 
           const verdict = await JevClient.checkFilePath(filePath);
           if (verdict.action === "deny") {
@@ -560,11 +694,40 @@ export default function sentinelExtension(pi) {
     return void 0;
   });
 
-  // 3. Inspectable Status Tool
+  // 3. Workspace Transaction & /rollback Slash Command
+  pi.registerCommand("rollback", {
+    description: "事务性回滚：撤销智能体最近的所有未提交改动并恢复干净工作区",
+    handler: async (_args, ctx) => {
+      const cwd = ctx.cwd || process.cwd();
+      const isGit = runGit("rev-parse --is-inside-work-tree", cwd) === "true";
+      if (!isGit) {
+        const msg = "当前工作目录未初始化 Git 仓库，无法执行自动事务回滚。";
+        console.warn(`[Jev Transaction] Not a git worktree: ${cwd}`);
+        if (ctx?.ui?.notify) ctx.ui.notify(msg, "warning");
+        return;
+      }
+
+      try {
+        runGit("checkout .", cwd);
+        runGit("clean -fd", cwd);
+        const successMsg = `⏪ 已成功回滚当前工作区代码！所有未提交的修改已重置（最近检查点时间: ${lastCheckpointTime || "刚才"}）。`;
+        console.info(`[Jev Transaction] Worktree rolled back in ${cwd}`);
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify(successMsg, "info");
+        }
+      } catch (err) {
+        const errMsg = `回滚失败: ${err.message || String(err)}`;
+        console.error("[Jev Transaction] Rollback error:", err);
+        if (ctx?.ui?.notify) ctx.ui.notify(errMsg, "error");
+      }
+    }
+  });
+
+  // 4. Inspectable Status Tool
   pi.registerTool({
     name: "jev_sentinel_status",
     label: "OpenPI Jev Sentinel Status",
-    description: "Inspect OpenPI Jev System 1 instincts, SafetyGate statistics, LeakHunter redactions, and log compression.",
+    description: "Inspect OpenPI Jev System 1 instincts, SafetyGate statistics, LeakHunter redactions, ActKV savings, and log compression.",
     parameters: {
       type: "object",
       properties: {}
@@ -586,7 +749,10 @@ export default function sentinelExtension(pi) {
                   autoPatchedCommands: totalModifiedCount,
                   secretsRedacted: totalLeaksRedacted,
                   estimatedTokensSaved: totalTokensSaved,
-                  loopBreaks: totalLoopBreaks
+                  loopBreaks: totalLoopBreaks,
+                  provenanceBlocks: totalProvenanceBlocks,
+                  actKVPrunedTokens: totalActKVPrunedTokens,
+                  lastCheckpointTime: lastCheckpointTime
                 },
                 recentBlocks: blockedLog.slice(-5)
               },
