@@ -1369,6 +1369,21 @@ pub async fn handle_invoke(
             }
         }
 
+        // ── Ephemeral Subagent ──────────────────────────────────────────────
+        "spawn_subagent" | "subagent" => {
+            let mut op = args.clone();
+            if let Some(obj) = op.as_object_mut() {
+                obj.insert("name".to_string(), json!("spawn_subagent"));
+            } else {
+                op = json!({ "name": "spawn_subagent", "args": args });
+            }
+            let res = client.request(ClientRequest::App {
+                id: Uuid::new_v4().to_string(),
+                op,
+            }).await?;
+            Ok(res)
+        }
+
         // ── Memory Hub ─────────────────────────────────────────────────────
         "list_memory_index" => {
             let mut op = args.clone();

@@ -161,8 +161,21 @@ const CODE_MODE_TOOLS: &str = "\
 read,bash,edit,write,search_replace,grep,find,ls,code_search,semantic_search,repo_map,memory,session_search,\
 system_os,system_screen,system_process,\
 browser,web_search,web_fetch,\
-subagent,subagent_status,subagent_stop,subagent_risk,\
+subagent,spawn_subagent,subagent_status,subagent_stop,subagent_risk,\
 task,mcp,mcpScript";
+
+const SUBAGENT_TOOLS: &str = "\
+read,grep,find,ls,code_search,semantic_search,repo_map,\
+system_os,system_process,memory,session_search";
+
+const SUBAGENT_DIRECTIVE: &str = "\
+【OpenPI Ephemeral Subagent Runtime】\n\
+You are an ephemeral exploration and investigation subagent running in an isolated, read-only sub-process.\n\
+Principles:\n\
+1. You have strictly read-only tools (read, grep, find, ls, code_search, repo_map).\n\
+2. Thoroughly investigate the assigned goal with precise, targeted tool calls.\n\
+3. Conclude with a clear, high-density Markdown summary (under 400 words) containing exact file paths, line ranges, and factual findings.\n\
+4. Be factual, concise, and structured. Do not output conversational filler.";
 
 const CODE_MODE_UNATTENDED_DIRECTIVE: &str = "\
 【OpenPI 敏捷研发与自愈准则】：\n\
@@ -476,11 +489,31 @@ impl Supervisor {
                 Ok(Ok((sid, ev))) => {
                     if sid == target_sid {
                         let ev_type = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        if ev_type == "message_end" || ev_type == "message" {
-                            if let Some(text) = ev.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                                final_text = text.to_string();
+                        if ev_type == "message_end" || ev_type == "message" || ev_type == "message_update" {
+                            if let Some(msg) = ev.get("message") {
+                                if let Some(c) = msg.get("content") {
+                                    if let Some(text) = c.as_str() {
+                                        if !text.trim().is_empty() {
+                                            final_text = text.to_string();
+                                        }
+                                    } else if let Some(arr) = c.as_array() {
+                                        let mut combined = String::new();
+                                        for part in arr {
+                                            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
+                                                combined.push_str(t);
+                                            }
+                                        }
+                                        if !combined.trim().is_empty() {
+                                            final_text = combined;
+                                        }
+                                    }
+                                }
+                            } else if let Some(text) = ev.get("content").and_then(|c| c.as_str()) {
+                                if !text.trim().is_empty() {
+                                    final_text = text.to_string();
+                                }
                             }
-                        } else if ev_type == "agent_end" || ev_type == "turn_end" {
+                        } else if (ev_type == "agent_end" || ev_type == "turn_end") && !final_text.trim().is_empty() {
                             break;
                         }
                     }
@@ -750,7 +783,12 @@ impl Supervisor {
             cmd.arg("--model").arg(m);
         }
 
-        if session.info.mode == SessionMode::Code {
+        if session.info.in_memory == Some(true) {
+            cmd.arg("--tools")
+                .arg(SUBAGENT_TOOLS)
+                .arg("--append-system-prompt")
+                .arg(SUBAGENT_DIRECTIVE);
+        } else if session.info.mode == SessionMode::Code {
             let session_title = session.info.name.as_deref().unwrap_or("");
             let title_lower = session_title.to_lowercase();
             

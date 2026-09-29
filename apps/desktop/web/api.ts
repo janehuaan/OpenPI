@@ -329,6 +329,8 @@ export const desktopApi = {
 		call<{ ok: boolean; status?: GitStatusResult; error?: string }>("git_resolve_conflict", opts),
 	applyDiffHunks: (opts: { cwd?: string; filename: string; hunks: any[] }) =>
 		call<{ success: boolean; appliedCount?: number; error?: string }>("apply_diff_hunks", opts),
+	spawnSubagent: (opts: { goal: string; role?: string; cwd?: string; timeout_secs?: number }) =>
+		call<{ success: boolean; role?: string; goal?: string; summary?: string; error?: string }>("spawn_subagent", opts),
 
 	// ── System Operations ───────────────────────────────────────────────
 	getSystemTelemetry: () =>

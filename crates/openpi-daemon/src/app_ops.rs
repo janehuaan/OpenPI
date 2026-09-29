@@ -632,7 +632,7 @@ pub async fn handle_app_op(
         }
 
         // --- Sprint 3: Ephemeral Subagent Dispatch & Context Decoupling ---
-        "spawn_subagent" => {
+        "spawn_subagent" | "subagent" => {
             let goal = op.get("goal").and_then(|g| g.as_str()).unwrap_or("");
             let role = op.get("role").and_then(|r| r.as_str()).unwrap_or("Codebase Explorer");
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
