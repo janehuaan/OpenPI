@@ -1,9 +1,64 @@
 pub mod bm25;
 pub mod vector;
+pub mod indexer;
+pub mod repomap;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 pub use bm25::Bm25Index;
 pub use vector::cosine_similarity;
+pub use indexer::{CodeChunk, CodeSearchHit, CodebaseIndex};
+pub use repomap::RepoMapGenerator;
+
+#[derive(Clone)]
+pub struct CodebaseMemoryManager {
+    indices: Arc<RwLock<HashMap<PathBuf, (Instant, Arc<CodebaseIndex>)>>>,
+}
+
+impl Default for CodebaseMemoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CodebaseMemoryManager {
+    pub fn new() -> Self {
+        Self {
+            indices: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn get_or_index(&self, cwd: &Path, max_files: usize) -> anyhow::Result<Arc<CodebaseIndex>> {
+        let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+        {
+            let map = self.indices.read().unwrap();
+            if let Some((indexed_at, index)) = map.get(&root) {
+                if indexed_at.elapsed() < Duration::from_secs(60) {
+                    return Ok(index.clone());
+                }
+            }
+        }
+
+        let new_index = Arc::new(CodebaseIndex::index_workspace(&root, max_files)?);
+        let mut map = self.indices.write().unwrap();
+        map.insert(root, (Instant::now(), new_index.clone()));
+        Ok(new_index)
+    }
+
+    pub fn search(&self, cwd: &Path, query: &str, limit: usize) -> anyhow::Result<Vec<CodeSearchHit>> {
+        let index = self.get_or_index(cwd, 3000)?;
+        Ok(index.search(query, limit))
+    }
+
+    pub fn repo_map(&self, cwd: &Path, max_depth: usize, max_chars: usize) -> String {
+        let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+        RepoMapGenerator::generate(&root, max_depth, max_chars)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryDoc {

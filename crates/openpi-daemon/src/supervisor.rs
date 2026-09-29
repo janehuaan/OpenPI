@@ -158,7 +158,7 @@ pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
 }
 
 const CODE_MODE_TOOLS: &str = "\
-read,bash,edit,write,grep,find,ls,memory,session_search,\
+read,bash,edit,write,search_replace,grep,find,ls,code_search,semantic_search,repo_map,memory,session_search,\
 system_os,system_screen,system_process,\
 browser,web_search,web_fetch,\
 subagent,subagent_status,subagent_stop,subagent_risk,\
@@ -184,6 +184,7 @@ pub struct Supervisor {
     sessions: Arc<Mutex<HashMap<String, ManagedSession>>>,
     event_tx: broadcast::Sender<(String, Value)>,
     pub jev: Arc<openpi_jev::JevCoordinator>,
+    pub memory: Arc<openpi_memory::CodebaseMemoryManager>,
 }
 
 impl Supervisor {
@@ -258,11 +259,13 @@ impl Supervisor {
 
         let jev = Arc::new(openpi_jev::JevCoordinator::new());
         jev.spawn_async_warmup();
+        let memory = Arc::new(openpi_memory::CodebaseMemoryManager::new());
 
         let supervisor = Self {
             sessions: Arc::new(Mutex::new(map)),
             event_tx,
             jev,
+            memory,
         };
 
         // Save consolidated records in background

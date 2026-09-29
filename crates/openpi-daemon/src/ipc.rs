@@ -277,7 +277,7 @@ async fn handle_request(
                 }
             }
             ClientRequest::App { id, op } => {
-                handle_app_op(&id, &op, &storage, &scheduler, &supervisor.jev).await?
+                handle_app_op(&id, &op, &storage, &scheduler, &supervisor.jev, &supervisor.memory).await?
             }
             ClientRequest::Shutdown { id } => {
                 supervisor.shutdown_all().await;

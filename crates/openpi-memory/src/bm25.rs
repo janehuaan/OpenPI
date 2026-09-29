@@ -1,11 +1,42 @@
 use std::collections::{HashMap, HashSet};
 
 pub fn tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
+    let mut tokens = Vec::new();
+
+    let raw_words = text
         .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-        .filter(|t| !t.is_empty())
-        .map(|s| s.to_string())
-        .collect()
+        .filter(|t| !t.is_empty());
+
+    for raw in raw_words {
+        let lower = raw.to_lowercase();
+        tokens.push(lower.clone());
+
+        // Sub-tokenize on '_' or '-' (snake_case / kebab-case)
+        if lower.contains('_') || lower.contains('-') {
+            for sub in lower.split(|c: char| c == '_' || c == '-') {
+                if !sub.is_empty() {
+                    tokens.push(sub.to_string());
+                }
+            }
+        }
+
+        // Sub-tokenize camelCase / PascalCase
+        let mut camel_part = String::new();
+        for ch in raw.chars() {
+            if ch.is_uppercase() && !camel_part.is_empty() {
+                tokens.push(camel_part.to_lowercase());
+                camel_part.clear();
+            }
+            if ch.is_alphanumeric() {
+                camel_part.push(ch);
+            }
+        }
+        if !camel_part.is_empty() && camel_part.len() < raw.len() {
+            tokens.push(camel_part.to_lowercase());
+        }
+    }
+
+    tokens
 }
 
 pub struct Bm25Index {

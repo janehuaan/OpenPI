@@ -322,10 +322,51 @@ class JevClient {
   static async evaluateTask(goal, command, output, successes) {
     return await this.query({ name: "jev_evaluate_task", goal, command, output, successes }, 200);
   }
+
+  static async searchCode(cwd, query, limit = 5) {
+    return await this.query({ name: "code_search", cwd, query, limit }, 800);
+  }
+
+  static async indexCode(cwd, maxFiles = 3000) {
+    return await this.query({ name: "code_index", cwd, max_files: maxFiles }, 3000);
+  }
+
+  static async getRepoMap(cwd, maxDepth = 4, maxChars = 4000) {
+    return await this.query({ name: "get_repo_map", cwd, max_depth: maxDepth, max_chars: maxChars }, 1200);
+  }
 }
 
 export default function sentinelExtension(pi) {
   console.log("[OpenPI Jev Sentinel] System 1 Instinct Safety Engine initialized.");
+
+  let repoMapInjected = false;
+
+  // ── Module 0: Background Warm Indexing & Repo Map Context Injection ──
+  if (typeof pi.on === "function") {
+    pi.on("session_start", async (_event, ctx) => {
+      repoMapInjected = false;
+      const cwd = ctx?.cwd || process.cwd();
+      void JevClient.indexCode(cwd, 3000);
+    });
+
+    pi.on("before_agent_start", async (event, ctx) => {
+      try {
+        if (!repoMapInjected) {
+          const cwd = ctx?.cwd || process.cwd();
+          const res = await JevClient.getRepoMap(cwd, 4, 3500);
+          if (res && res.repo_map && res.repo_map.trim().length > 10) {
+            repoMapInjected = true;
+            const repoMapBlock = `\n\n<workspace_repo_map>\n# 当前工作区代码架构与主要符号拓扑 (Repo Map)\n${res.repo_map.trim()}\n</workspace_repo_map>\n`;
+            const basePrompt = event.systemPrompt || (ctx?.getSystemPrompt ? ctx.getSystemPrompt() : "");
+            if (basePrompt && !basePrompt.includes("<workspace_repo_map>")) {
+              return { systemPrompt: basePrompt + repoMapBlock };
+            }
+          }
+        }
+      } catch {}
+      return void 0;
+    });
+  }
 
   // ── Module A: Client-side ActKV Context Trimmer (pi.on("context")) ──
   pi.on("context", async (event) => {
@@ -1007,7 +1048,121 @@ export default function sentinelExtension(pi) {
     }
   });
 
-  // 5. Inspectable Status Tool
+  // 5. Code Search & Semantic Discovery (openpi-memory BM25 + Subwords)
+  const registerCodeSearchTool = (toolName) => {
+    pi.registerTool({
+      name: toolName,
+      label: "OpenPI Codebase Search",
+      description: "Search the codebase using BM25 and subword semantic index (openpi-memory). Returns relevant code chunks, exact file paths, line ranges, and relevance scores.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The search query (function name, symbol, error message, or feature description, e.g. 'handle_app_op' or 'loop breaker')"
+          },
+          limit: {
+            type: "number",
+            description: "Max number of matching code snippets to return (default 5, max 20)"
+          },
+          path: {
+            type: "string",
+            description: "Optional subpath or directory to scope the search (defaults to current workspace)"
+          }
+        },
+        required: ["query"]
+      },
+      execute: async (input, ctx) => {
+        try {
+          const query = (input.query || "").trim();
+          if (!query) {
+            return {
+              content: [{ type: "text", text: "Error: query parameter is required." }],
+              details: { success: false }
+            };
+          }
+          const cwd = input.path ? path.resolve(ctx?.cwd || process.cwd(), input.path) : (ctx?.cwd || process.cwd());
+          const limit = Math.min(Math.max(Number(input.limit) || 5, 1), 20);
+
+          const res = await JevClient.searchCode(cwd, query, limit);
+          if (res && Array.isArray(res.hits) && res.hits.length > 0) {
+            let out = `### 🔍 Code Search Results for "${query}" (${res.hits.length} matches):\n\n`;
+            res.hits.forEach((hit, i) => {
+              out += `**${i + 1}. \`${hit.file_path}\`** (lines ${hit.start_line}-${hit.end_line}, score: ${hit.score.toFixed(2)}):\n`;
+              out += "```\n" + hit.snippet + "\n```\n\n";
+              const fullPath = path.resolve(cwd, hit.file_path);
+              readProvenanceSet.add(fullPath);
+            });
+            out += `> 💡 提示：使用 \`read\` 工具指定 \`path\` 及 \`offset: ${res.hits[0].start_line}\` 可查看完整上下文。`;
+            return {
+              content: [{ type: "text", text: out }],
+              details: { success: true, count: res.hits.length, hits: res.hits }
+            };
+          } else {
+            return {
+              content: [{ type: "text", text: `未找到与 "${query}" 相关的代码片段。建议尝试更简短的关键词或使用 \`grep\` 进行精确正则搜索。` }],
+              details: { success: true, count: 0, hits: [] }
+            };
+          }
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: `Error executing code_search: ${err.message || String(err)}` }],
+            details: { success: false, error: err.message }
+          };
+        }
+      }
+    });
+  };
+
+  registerCodeSearchTool("code_search");
+  registerCodeSearchTool("semantic_search");
+
+  // 6. Repo Map Architecture Explorer
+  pi.registerTool({
+    name: "repo_map",
+    label: "OpenPI Repo Map",
+    description: "Generate a compact architectural map and symbol outline of the current workspace or subfolder.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Optional folder path to inspect (defaults to current workspace)"
+        },
+        depth: {
+          type: "number",
+          description: "Exploration directory depth (default 4)"
+        }
+      }
+    },
+    execute: async (input, ctx) => {
+      try {
+        const cwd = input.path ? path.resolve(ctx?.cwd || process.cwd(), input.path) : (ctx?.cwd || process.cwd());
+        const depth = Math.min(Math.max(Number(input.depth) || 4, 1), 8);
+        const res = await JevClient.getRepoMap(cwd, depth, 5000);
+        if (res && res.repo_map) {
+          return {
+            content: [{
+              type: "text",
+              text: `### 🗺️ Workspace Repo Map:\n\`\`\`\n${res.repo_map}\n\`\`\``
+            }],
+            details: { success: true }
+          };
+        }
+        return {
+          content: [{ type: "text", text: "无法生成 Repo Map（可能为空目录或守护进程未响应）。" }],
+          details: { success: false }
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error generating repo_map: ${err.message || String(err)}` }],
+          details: { success: false, error: err.message }
+        };
+      }
+    }
+  });
+
+  // 7. Inspectable Status Tool
   pi.registerTool({
     name: "jev_sentinel_status",
     label: "OpenPI Jev Sentinel Status",

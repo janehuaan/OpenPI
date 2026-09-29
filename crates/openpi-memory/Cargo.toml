@@ -10,3 +10,5 @@ serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 openpi-storage = { path = "../openpi-storage" }
+walkdir = "2.5"
+regex = "1.10"

@@ -12,6 +12,7 @@ pub async fn handle_app_op(
     storage: &Storage,
     scheduler: &Scheduler,
     jev: &openpi_jev::JevCoordinator,
+    memory: &openpi_memory::CodebaseMemoryManager,
 ) -> anyhow::Result<ServerMessage> {
     let name = match op.get("name").and_then(|n| n.as_str()) {
         Some(n) => n,
@@ -577,6 +578,57 @@ pub async fn handle_app_op(
             Ok(ServerMessage::ok(id, res))
         }
 
+        // --- Sprint 2: Codebase Memory & Search & Repo Map ---
+        "code_search" => {
+            let cwd_str = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let query = op.get("query").and_then(|q| q.as_str()).unwrap_or("");
+            let limit = op.get("limit").and_then(|l| l.as_u64()).unwrap_or(5) as usize;
+
+            let path = std::path::Path::new(cwd_str);
+            match memory.search(path, query, limit) {
+                Ok(hits) => {
+                    Ok(ServerMessage::ok(id, serde_json::json!({
+                        "query": query,
+                        "hits": hits
+                    })))
+                }
+                Err(e) => {
+                    Ok(ServerMessage::err(id, format!("Code search failed: {}", e)))
+                }
+            }
+        }
+
+        "code_index" => {
+            let cwd_str = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let max_files = op.get("max_files").and_then(|m| m.as_u64()).unwrap_or(3000) as usize;
+            let path = std::path::Path::new(cwd_str);
+            let start = std::time::Instant::now();
+            match memory.get_or_index(path, max_files) {
+                Ok(idx) => {
+                    let (files, chunks) = idx.stats();
+                    Ok(ServerMessage::ok(id, serde_json::json!({
+                        "indexed": true,
+                        "files": files,
+                        "chunks": chunks,
+                        "duration_ms": start.elapsed().as_millis()
+                    })))
+                }
+                Err(e) => {
+                    Ok(ServerMessage::err(id, format!("Code indexing failed: {}", e)))
+                }
+            }
+        }
+
+        "get_repo_map" => {
+            let cwd_str = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let max_depth = op.get("max_depth").and_then(|d| d.as_u64()).unwrap_or(4) as usize;
+            let max_chars = op.get("max_chars").and_then(|c| c.as_u64()).unwrap_or(5000) as usize;
+            let path = std::path::Path::new(cwd_str);
+            let repo_map = memory.repo_map(path, max_depth, max_chars);
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "repo_map": repo_map
+            })))
+        }
 
         // Default handler
         _ => Ok(ServerMessage::ok(id, serde_json::json!({ "status": "handled_by_rust_daemon" }))),
