@@ -29,6 +29,7 @@ let totalTokensSaved = 0;
 let totalLoopBreaks = 0;
 let totalProvenanceBlocks = 0;
 let totalActKVPrunedTokens = 0;
+let totalDiagnosticAlerts = 0;
 let lastCheckpointTime = null;
 const blockedLog = [];
 const commandHistory = [];
@@ -39,6 +40,98 @@ let dynamicLoopThreshold = 2;
 const runGit = (cmd, cwd) => {
   try {
     return execSync(`git ${cmd}`, { cwd, stdio: ["pipe", "pipe", "ignore"], encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+};
+
+// Helper: Run fast proactive diagnostic check on recently modified file (<3500ms timeout)
+const runProactiveDiagnostic = (targetFilePath, cwd) => {
+  try {
+    const resolvedPath = path.resolve(cwd, targetFilePath);
+    if (!fs.existsSync(resolvedPath)) return null;
+    const ext = path.extname(resolvedPath).toLowerCase();
+
+    // 1. Rust files
+    if (ext === ".rs") {
+      let cargoDir = path.dirname(resolvedPath);
+      while (cargoDir && cargoDir !== path.dirname(cargoDir)) {
+        if (fs.existsSync(path.join(cargoDir, "Cargo.toml"))) break;
+        cargoDir = path.dirname(cargoDir);
+      }
+      if (fs.existsSync(path.join(cargoDir, "Cargo.toml"))) {
+        try {
+          const raw = execSync("cargo check --message-format=json --quiet", {
+            cwd: cargoDir,
+            timeout: 4000,
+            stdio: ["pipe", "pipe", "pipe"],
+            encoding: "utf8"
+          });
+          const errors = [];
+          for (const line of raw.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.reason === "compiler-message" && msg.message?.level === "error") {
+                const primarySpan = msg.message.spans?.find((s) => s.is_primary) || msg.message.spans?.[0];
+                const spanInfo = primarySpan ? ` (line ${primarySpan.line_start}:${primarySpan.column_start})` : "";
+                errors.push(`${msg.message.message}${spanInfo}`);
+              }
+            } catch {}
+          }
+          if (errors.length > 0) return errors.slice(0, 3);
+        } catch (err) {
+          const stdout = err.stdout ? String(err.stdout) : "";
+          const errors = [];
+          for (const line of stdout.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.reason === "compiler-message" && msg.message?.level === "error") {
+                const primarySpan = msg.message.spans?.find((s) => s.is_primary) || msg.message.spans?.[0];
+                const spanInfo = primarySpan ? ` (line ${primarySpan.line_start}:${primarySpan.column_start})` : "";
+                errors.push(`${msg.message.message}${spanInfo}`);
+              }
+            } catch {}
+          }
+          if (errors.length > 0) return errors.slice(0, 3);
+          if (err.stderr) {
+            const stderrLines = String(err.stderr).split("\n").filter((l) => l.includes("error[") || l.includes("error:"));
+            if (stderrLines.length > 0) return stderrLines.slice(0, 3);
+          }
+        }
+      }
+    }
+
+    // 2. Python files
+    if (ext === ".py") {
+      try {
+        execSync(`python3 -m py_compile "${resolvedPath}"`, {
+          timeout: 2500,
+          stdio: ["pipe", "pipe", "pipe"],
+          encoding: "utf8"
+        });
+      } catch (err) {
+        const errMsg = err.stderr ? String(err.stderr).trim() : String(err.message);
+        const match = errMsg.match(/File ".*", line (\d+)[\s\S]*?(SyntaxError: .*)/);
+        if (match) {
+          return [`${match[2]} at line ${match[1]}`];
+        }
+        return [errMsg.slice(0, 150)];
+      }
+    }
+
+    // 3. JSON files
+    if (ext === ".json") {
+      try {
+        const text = fs.readFileSync(resolvedPath, "utf8");
+        JSON.parse(text);
+      } catch (err) {
+        return [`Invalid JSON syntax: ${err.message}`];
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -325,8 +418,8 @@ export default function sentinelExtension(pi) {
         return void 0;
       }
 
-      // Guard direct file modifications (write / edit) against blind unread writes and sensitive paths
-      const isFileWrite = toolName === "write" || toolName === "edit";
+      // Guard direct file modifications (write / edit / search_replace) against blind unread writes and sensitive paths
+      const isFileWrite = toolName === "write" || toolName === "edit" || toolName === "search_replace";
       if (isFileWrite) {
         const filePath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
         if (filePath) {
@@ -631,11 +724,40 @@ export default function sentinelExtension(pi) {
     }
   });
 
-  // 2. Post-Execution Sanitization & Compression
-  pi.on("tool_result", async (event) => {
+  // 2. Post-Execution Sanitization, Proactive Diagnostics & Compression
+  pi.on("tool_result", async (event, ctx) => {
     try {
       if (!event.content || !Array.isArray(event.content)) {
         return void 0;
+      }
+
+      // ── Proactive Diagnostic Gate for Code Mutations ──
+      let diagnosticNotice = "";
+      const toolName = (event.toolName || "").toLowerCase();
+      const isMutation = toolName === "write" || toolName === "edit" || toolName === "search_replace";
+      if (isMutation && !event.isError) {
+        const targetPath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
+        if (targetPath) {
+          const cwd = ctx?.cwd || process.cwd();
+          const diagnosticErrors = runProactiveDiagnostic(targetPath, cwd);
+          if (diagnosticErrors && diagnosticErrors.length > 0) {
+            totalDiagnosticAlerts += diagnosticErrors.length;
+            const errorList = diagnosticErrors.map((e) => `• ${e}`).join("\n");
+            diagnosticNotice = `\n\n⚠️ [Jev Proactive Diagnostic Gate 编译静默诊断提醒]\n系统在检测到您修改该文件后执行了快速静默诊断，发现引入了以下编译/语法错误：\n${errorList}\n\n💡 自动修复引导：请切勿在存在编译错误时直接向用户汇报任务完成！请立即分析上述报错信息，调用代码修改工具原位修复上述错误。`;
+
+            void JevClient.query({
+              name: "jev_record_event",
+              event_type: "proactive_diagnostic_error",
+              command: targetPath,
+              reason: diagnosticErrors.join("; "),
+              risk: 0.95
+            });
+
+            if (ctx?.ui?.notify) {
+              ctx.ui.notify(`⚠️ [Jev 静默诊断] 代码修改引入 ${diagnosticErrors.length} 处编译错误，已提示智能体自愈`, "warning");
+            }
+          }
+        }
       }
 
       const textPieces = [];
@@ -646,15 +768,15 @@ export default function sentinelExtension(pi) {
       }
 
       const rawText = textPieces.join("\n");
-      if (!rawText || rawText.length < 10) {
+      if (!rawText && !diagnosticNotice) {
         return void 0;
       }
 
-      const result = await JevClient.processOutput(rawText);
-      if (result) {
-        let changed = false;
-        let sanitizedText = rawText;
+      const result = rawText && rawText.length >= 10 ? await JevClient.processOutput(rawText) : null;
+      let changed = false;
+      let sanitizedText = rawText || "";
 
+      if (result) {
         if (result.leak?.has_leaks) {
           totalLeaksRedacted += result.leak.leak_count || 1;
           sanitizedText = result.leak.sanitized_text || sanitizedText;
@@ -668,25 +790,29 @@ export default function sentinelExtension(pi) {
           changed = true;
           console.info(`📦 [Jev Compressor] Truncated ${result.compressed.lines_truncated} lines, saved ~${result.compressed.estimated_tokens_saved} tokens.`);
         }
+      }
 
-        if (changed) {
-          let notice = "";
-          if (result.leak?.has_leaks) {
-            notice += `\n[Jev LeakHunter: 已自动脱敏 ${result.leak.leak_count} 处凭证密钥，防止上下文泄露]`;
-          }
-          if (result.compressed?.was_compressed) {
-            notice += `\n[Jev Compressor: 输出已折叠，节省约 ${result.compressed.estimated_tokens_saved} Tokens]`;
-          }
+      let notice = "";
+      if (result?.leak?.has_leaks) {
+        notice += `\n[Jev LeakHunter: 已自动脱敏 ${result.leak.leak_count} 处凭证密钥，防止上下文泄露]`;
+      }
+      if (result?.compressed?.was_compressed) {
+        notice += `\n[Jev Compressor: 输出已折叠，节省约 ${result.compressed.estimated_tokens_saved} Tokens]`;
+      }
+      if (diagnosticNotice) {
+        notice += diagnosticNotice;
+        changed = true;
+      }
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: sanitizedText + notice
-              }
-            ]
-          };
-        }
+      if (changed) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: sanitizedText + notice
+            }
+          ]
+        };
       }
     } catch (err) {
       console.warn("[OpenPI Jev Sentinel] Error in tool_result processing:", err);
@@ -723,11 +849,169 @@ export default function sentinelExtension(pi) {
     }
   });
 
-  // 4. Inspectable Status Tool
+  // 4. Deterministic Atomic Search and Replace Tool
+  pi.registerTool({
+    name: "search_replace",
+    label: "Strict Search & Replace",
+    description: "Precisely replaces exact text in a file. Requires old_string to match exactly ONE location in the file. Guaranteed deterministic atomic modification without truncating large files.",
+    parameters: {
+      type: "object",
+      required: ["path", "old_string", "new_string"],
+      properties: {
+        path: {
+          type: "string",
+          description: "Path to the target file to modify (absolute or relative to current workspace)"
+        },
+        old_string: {
+          type: "string",
+          description: "The exact existing text chunk to find and replace. Must match exactly once in the file. Include sufficient surrounding context lines to ensure uniqueness."
+        },
+        new_string: {
+          type: "string",
+          description: "The new text that will replace old_string."
+        }
+      }
+    },
+    execute: async (input, ctx) => {
+      try {
+        const rawPath = (input.path || "").trim();
+        if (!rawPath) {
+          return {
+            content: [{ type: "text", text: "Error: path is required for search_replace" }],
+            details: { success: false }
+          };
+        }
+        const cwd = ctx?.cwd || process.cwd();
+        const resolvedPath = path.resolve(cwd, rawPath);
+
+        if (!fs.existsSync(resolvedPath)) {
+          return {
+            content: [{ type: "text", text: `Error: File not found at \`${resolvedPath}\`` }],
+            details: { success: false }
+          };
+        }
+
+        // Active Provenance Gate check
+        if (!readProvenanceSet.has(resolvedPath)) {
+          totalBlockedCount += 1;
+          totalProvenanceBlocks += 1;
+          const blockMsg = `🛑 [Active Provenance Gate 凭据拦截]\n你正试图修改文件：\`${rawPath}\`，但你在本轮会话中【从未阅读过】该文件的原始实现！\n\n严禁凭空盲写盲改。请先调用 \`read\` 工具仔细查看该文件内容与上下文契约，确认现状后再执行修改！`;
+          void JevClient.query({
+            name: "jev_record_event",
+            event_type: "provenance_block",
+            command: `search_replace -> ${rawPath}`,
+            reason: "试图修改尚未阅读的磁盘已有文件，触发主动溯源拦截",
+            risk: 0.95
+          });
+          return {
+            content: [{ type: "text", text: blockMsg }],
+            details: { success: false, blocked: true }
+          };
+        }
+
+        // Workspace Transaction Checkpoint
+        const isGit = runGit("rev-parse --is-inside-work-tree", cwd) === "true";
+        if (isGit) {
+          try {
+            runGit(`stash create "openpi-checkpoint-${Date.now()}"`, cwd);
+            lastCheckpointTime = new Date().toLocaleTimeString();
+          } catch {}
+        }
+
+        const oldStr = input.old_string;
+        const newStr = input.new_string;
+        if (typeof oldStr !== "string" || typeof newStr !== "string") {
+          return {
+            content: [{ type: "text", text: "Error: old_string and new_string must be strings" }],
+            details: { success: false }
+          };
+        }
+
+        let fileContent = fs.readFileSync(resolvedPath, "utf8");
+
+        // Count occurrences
+        let count = 0;
+        let pos = fileContent.indexOf(oldStr);
+        while (pos !== -1) {
+          count++;
+          pos = fileContent.indexOf(oldStr, pos + 1);
+        }
+
+        // Fallback for CRLF / LF differences
+        if (count === 0 && oldStr.includes("\n")) {
+          const normalizedOld = oldStr.replace(/\r\n/g, "\n");
+          const normalizedContent = fileContent.replace(/\r\n/g, "\n");
+          let normCount = 0;
+          let normPos = normalizedContent.indexOf(normalizedOld);
+          while (normPos !== -1) {
+            normCount++;
+            normPos = normalizedContent.indexOf(normalizedOld, normPos + 1);
+          }
+          if (normCount === 1) {
+            fileContent = normalizedContent.replace(normalizedOld, newStr.replace(/\r\n/g, "\n"));
+            fs.writeFileSync(resolvedPath, fileContent, "utf8");
+            readProvenanceSet.add(resolvedPath);
+            return {
+              content: [{ type: "text", text: `✅ Successfully replaced 1 unique match in \`${rawPath}\` (line endings normalized).` }],
+              details: { success: true, count: 1 }
+            };
+          }
+        }
+
+        if (count === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `🛑 [search_replace 唯一性校验失败: 0 次匹配]\n在文件 \`${rawPath}\` 中未找到匹配的 \`old_string\`！\n\n提示：请仔细检查缩进空格、空行与换行符。建议先调用 \`read\` 查看该文件最新的确切代码行后再重试。`
+            }],
+            details: { success: false, matches: 0 }
+          };
+        }
+
+        if (count > 1) {
+          return {
+            content: [{
+              type: "text",
+              text: `🛑 [search_replace 唯一性校验失败: 歧义多重匹配]\n在文件 \`${rawPath}\` 中找到了 ${count} 处相同的代码匹配！\n\n提示：为确保修改绝对安全精准，请为 \`old_string\` 增加前后若干行独特的上下文代码行，使其在文件中成为【严格唯一的单个匹配】后再执行替换！`
+            }],
+            details: { success: false, matches: count }
+          };
+        }
+
+        // Exactly 1 match! Replace atomically
+        const updatedContent = fileContent.replace(oldStr, newStr);
+        fs.writeFileSync(resolvedPath, updatedContent, "utf8");
+        readProvenanceSet.add(resolvedPath);
+
+        void JevClient.query({
+          name: "jev_record_event",
+          event_type: "search_replace",
+          command: `search_replace -> ${rawPath}`,
+          reason: "精准原子代码替换成功",
+          risk: 0.1
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `✅ [search_replace 成功] 已在 \`${rawPath}\` 中原子替换 1 处匹配代码块。`
+          }],
+          details: { success: true, count: 1 }
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error in search_replace: ${err.message || String(err)}` }],
+          details: { success: false, error: err.message }
+        };
+      }
+    }
+  });
+
+  // 5. Inspectable Status Tool
   pi.registerTool({
     name: "jev_sentinel_status",
     label: "OpenPI Jev Sentinel Status",
-    description: "Inspect OpenPI Jev System 1 instincts, SafetyGate statistics, LeakHunter redactions, ActKV savings, and log compression.",
+    description: "Inspect OpenPI Jev System 1 instincts, SafetyGate statistics, LeakHunter redactions, ActKV savings, Proactive Diagnostics, and log compression.",
     parameters: {
       type: "object",
       properties: {}
@@ -752,6 +1036,7 @@ export default function sentinelExtension(pi) {
                   loopBreaks: totalLoopBreaks,
                   provenanceBlocks: totalProvenanceBlocks,
                   actKVPrunedTokens: totalActKVPrunedTokens,
+                  diagnosticAlerts: totalDiagnosticAlerts,
                   lastCheckpointTime: lastCheckpointTime
                 },
                 recentBlocks: blockedLog.slice(-5)

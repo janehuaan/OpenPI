@@ -275,6 +275,15 @@ impl JevCoordinator {
                 "actkv_prune" => {
                     t.estimated_tokens_saved += risk.max(0.0) as usize;
                 }
+                "proactive_diagnostic_error" => {
+                    t.recent_blocks.insert(0, BlockRecord {
+                        timestamp: Self::now_millis(),
+                        command: cmd.to_string(),
+                        action: "diagnostic_error".to_string(),
+                        reason: reason.to_string(),
+                        risk,
+                    });
+                }
                 _ => {
                     t.recent_blocks.insert(0, BlockRecord {
                         timestamp: Self::now_millis(),
