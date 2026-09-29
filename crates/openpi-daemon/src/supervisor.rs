@@ -185,6 +185,7 @@ pub struct Supervisor {
     event_tx: broadcast::Sender<(String, Value)>,
     pub jev: Arc<openpi_jev::JevCoordinator>,
     pub memory: Arc<openpi_memory::CodebaseMemoryManager>,
+    pub pi_cli_path: Arc<tokio::sync::RwLock<String>>,
 }
 
 impl Supervisor {
@@ -260,12 +261,14 @@ impl Supervisor {
         let jev = Arc::new(openpi_jev::JevCoordinator::new());
         jev.spawn_async_warmup();
         let memory = Arc::new(openpi_memory::CodebaseMemoryManager::new());
+        let pi_cli_path = Arc::new(tokio::sync::RwLock::new(String::new()));
 
         let supervisor = Self {
             sessions: Arc::new(Mutex::new(map)),
             event_tx,
             jev,
             memory,
+            pi_cli_path,
         };
 
         // Save consolidated records in background
@@ -396,6 +399,121 @@ impl Supervisor {
     pub async fn get_session(&self, id: &str) -> Option<SessionInfo> {
         let sessions = self.sessions.lock().await;
         sessions.get(id).map(|s| s.info.clone())
+    }
+
+    pub async fn set_pi_cli_path(&self, path: &str) {
+        let mut p = self.pi_cli_path.write().await;
+        *p = path.to_string();
+    }
+
+    pub async fn get_pi_cli_path(&self) -> String {
+        self.pi_cli_path.read().await.clone()
+    }
+
+    pub async fn run_ephemeral_subagent(
+        &self,
+        goal: &str,
+        role: &str,
+        cwd: &str,
+        timeout_secs: u64,
+    ) -> anyhow::Result<String> {
+        let subagent_id = format!("subagent-{}", uuid::Uuid::new_v4());
+        let mode = SessionMode::Code;
+        let mut pi_cli = self.get_pi_cli_path().await;
+        if pi_cli.is_empty() {
+            let rpc = resolve_pi_rpc_entry("");
+            pi_cli = rpc.to_string_lossy().to_string();
+        }
+
+        // 1. Create in-memory ephemeral session (no disk session files)
+        let _info = self.create_session(
+            subagent_id.clone(),
+            cwd.to_string(),
+            mode,
+            None,
+            Some(format!("Subagent: {}", role)),
+            Some(true),
+        ).await?;
+
+        // 2. Ensure process runs
+        if let Err(e) = self.ensure_process(&subagent_id, &pi_cli).await {
+            let _ = self.delete_session(&subagent_id).await;
+            anyhow::bail!("Failed to spawn subagent process: {}", e);
+        }
+
+        // 3. Prepare high-density directive
+        let prompt_text = format!(
+            "【Ephemeral Subagent Directive】\nRole: {}\nObjective: {}\n\n\
+             Instructions:\n\
+             - Investigate and execute tools (read, grep, find, code_search, repo_map) to thoroughly fulfill the objective.\n\
+             - Conclude with a clear, high-density Markdown summary (under 400 words) containing exact file paths, line ranges, and findings.\n\
+             - Be factual, concise, and structured.",
+            role, goal
+        );
+
+        let rpc_cmd = serde_json::json!({
+            "type": "prompt",
+            "message": prompt_text
+        });
+
+        // 4. Subscribe to events
+        let mut rx = self.subscribe_events();
+        let target_sid = subagent_id.clone();
+
+        let s_clone = self.clone();
+        let sid_for_send = subagent_id.clone();
+        tokio::spawn(async move {
+            let _ = s_clone.send_rpc(&sid_for_send, &rpc_cmd).await;
+        });
+
+        // 5. Await finish or timeout
+        let start = std::time::Instant::now();
+        let max_duration = std::time::Duration::from_secs(timeout_secs.max(10));
+        let mut final_text = String::new();
+
+        while start.elapsed() < max_duration {
+            match tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await {
+                Ok(Ok((sid, ev))) => {
+                    if sid == target_sid {
+                        let ev_type = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        if ev_type == "message_end" || ev_type == "message" {
+                            if let Some(text) = ev.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                                final_text = text.to_string();
+                            }
+                        } else if ev_type == "agent_end" || ev_type == "turn_end" {
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    let is_running = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(&target_sid).map(|s| s.info.running).unwrap_or(false)
+                    };
+                    if !is_running && !final_text.is_empty() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if final_text.trim().is_empty() {
+            if let Ok(res) = self.send_rpc(&subagent_id, &serde_json::json!({ "type": "get_last_assistant_text" })).await {
+                if let Some(t) = res.get("text").and_then(|v| v.as_str()) {
+                    final_text = t.to_string();
+                }
+            }
+        }
+
+        // 6. Tear down ephemeral session cleanly
+        let _ = self.stop_session(&subagent_id).await;
+        let _ = self.delete_session(&subagent_id).await;
+
+        if final_text.trim().is_empty() {
+            final_text = format!("### 🤖 [Ephemeral Subagent: {}]\n**Goal**: {}\n\nSubagent completed investigation.", role, goal);
+        }
+
+        Ok(final_text)
     }
 
     pub async fn create_session(

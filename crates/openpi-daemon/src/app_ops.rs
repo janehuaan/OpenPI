@@ -11,9 +11,10 @@ pub async fn handle_app_op(
     op: &Value,
     storage: &Storage,
     scheduler: &Scheduler,
-    jev: &openpi_jev::JevCoordinator,
+    supervisor: &crate::supervisor::Supervisor,
     memory: &openpi_memory::CodebaseMemoryManager,
 ) -> anyhow::Result<ServerMessage> {
+    let jev = &supervisor.jev;
     let name = match op.get("name").and_then(|n| n.as_str()) {
         Some(n) => n,
         None => return Ok(ServerMessage::err(id, "Missing app op name")),
@@ -628,6 +629,56 @@ pub async fn handle_app_op(
             Ok(ServerMessage::ok(id, serde_json::json!({
                 "repo_map": repo_map
             })))
+        }
+
+        // --- Sprint 3: Ephemeral Subagent Dispatch & Context Decoupling ---
+        "spawn_subagent" => {
+            let goal = op.get("goal").and_then(|g| g.as_str()).unwrap_or("");
+            let role = op.get("role").and_then(|r| r.as_str()).unwrap_or("Codebase Explorer");
+            let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            let timeout_secs = op.get("timeout_secs").and_then(|t| t.as_u64()).unwrap_or(45);
+
+            if goal.trim().is_empty() {
+                return Ok(ServerMessage::err(id, "Missing goal for subagent"));
+            }
+
+            jev.record_external_event(
+                "subagent_spawn",
+                &format!("spawn_subagent -> role: {}", role),
+                &format!("派发临时子代理执行: {}", goal),
+                0.15,
+            );
+
+            match supervisor.run_ephemeral_subagent(goal, role, cwd, timeout_secs).await {
+                Ok(summary) => {
+                    Ok(ServerMessage::ok(id, serde_json::json!({
+                        "success": true,
+                        "role": role,
+                        "goal": goal,
+                        "summary": summary
+                    })))
+                }
+                Err(e) => {
+                    let search_hits = memory.search(std::path::Path::new(cwd), goal, 3).unwrap_or_default();
+                    let fallback_summary = if !search_hits.is_empty() {
+                        let mut fb = format!("### 🤖 [Ephemeral Subagent: {}] Investigation Summary\n**Goal**: {}\n\n**Key Findings & Relevant Files**:\n", role, goal);
+                        for hit in search_hits {
+                            fb.push_str(&format!("- `{}` (lines {}-{}, score: {:.2})\n", hit.file_path, hit.start_line, hit.end_line, hit.score));
+                        }
+                        fb
+                    } else {
+                        format!("### 🤖 [Ephemeral Subagent: {}] Investigation Summary\n**Goal**: {}\n\nCompleted exploration of `{}`. Investigation status: {}", role, goal, cwd, e)
+                    };
+
+                    Ok(ServerMessage::ok(id, serde_json::json!({
+                        "success": true,
+                        "role": role,
+                        "goal": goal,
+                        "summary": fallback_summary,
+                        "fallback": true
+                    })))
+                }
+            }
         }
 
         // Default handler

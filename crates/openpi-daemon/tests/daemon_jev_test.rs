@@ -1,5 +1,4 @@
 use openpi_daemon::app_ops::handle_app_op;
-use openpi_jev::JevCoordinator;
 use openpi_proto::{ServerMessage, ServerResponse};
 use openpi_scheduler::Scheduler;
 use openpi_storage::Storage;
@@ -18,12 +17,12 @@ fn extract_data(res: ServerMessage) -> Value {
 async fn test_daemon_jev_ops() -> anyhow::Result<()> {
     let storage = Storage::in_memory()?;
     let scheduler = Scheduler::new(storage.clone());
-    let jev = Arc::new(JevCoordinator::new());
+    let supervisor = openpi_daemon::Supervisor::new();
     let memory = Arc::new(openpi_memory::CodebaseMemoryManager::new());
 
     // 1. Test jev_status
     let status_req = json!({ "name": "jev_status" });
-    let res = handle_app_op("1", &status_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("1", &status_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert_eq!(data["engine"], "ModernBERT-base (FP32)");
 
@@ -33,7 +32,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "prompt": "帮我写个用户登录页的前端组件和提交接口",
         "has_workspace": true
     });
-    let res = handle_app_op("2", &route_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("2", &route_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert_eq!(data["mode"], "code");
 
@@ -42,7 +41,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "name": "jev_check_command",
         "command": "rm -rf /"
     });
-    let res = handle_app_op("3", &check_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("3", &check_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert_eq!(data["action"], "deny");
 
@@ -51,7 +50,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "name": "jev_process_output",
         "output": "API Key is sk-proj-1234567890abcdef1234567890 and build succeeded"
     });
-    let res = handle_app_op("4", &output_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("4", &output_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert!(data["leak"]["has_leaks"].as_bool().unwrap());
     let sanitized = data["leak"]["sanitized_text"].as_str().unwrap();
@@ -66,7 +65,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "output": "test result: ok. 12 passed; 0 failed",
         "successes": 1
     });
-    let res = handle_app_op("5", &eval_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("5", &eval_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert_eq!(data["should_stop"], true);
 
@@ -81,7 +80,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "cwd": temp_dir.to_string_lossy(),
         "max_files": 100
     });
-    let res = handle_app_op("6", &index_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("6", &index_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     assert_eq!(data["indexed"], true);
     assert_eq!(data["files"], 1);
@@ -92,7 +91,7 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "query": "execute background job",
         "limit": 3
     });
-    let res = handle_app_op("7", &search_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("7", &search_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     let hits = data["hits"].as_array().unwrap();
     assert!(!hits.is_empty());
@@ -105,10 +104,25 @@ async fn test_daemon_jev_ops() -> anyhow::Result<()> {
         "max_depth": 3,
         "max_chars": 2000
     });
-    let res = handle_app_op("8", &repomap_req, &storage, &scheduler, &jev, &memory).await?;
+    let res = handle_app_op("8", &repomap_req, &storage, &scheduler, &supervisor, &memory).await?;
     let data = extract_data(res);
     let repo_map = data["repo_map"].as_str().unwrap();
     assert!(repo_map.contains("worker.rs"));
+
+    // 8. Test Sprint 3: spawn_subagent
+    let subagent_req = json!({
+        "name": "spawn_subagent",
+        "role": "Background Worker Auditor",
+        "goal": "Audit background task worker structure",
+        "cwd": temp_dir.to_string_lossy(),
+        "timeout_secs": 15
+    });
+    let res = handle_app_op("9", &subagent_req, &storage, &scheduler, &supervisor, &memory).await?;
+    let data = extract_data(res);
+    assert_eq!(data["success"], true);
+    assert_eq!(data["role"], "Background Worker Auditor");
+    let summary = data["summary"].as_str().unwrap();
+    assert!(summary.contains("worker.rs") || summary.contains("Subagent"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 

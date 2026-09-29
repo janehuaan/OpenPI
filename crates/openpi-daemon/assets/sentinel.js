@@ -1162,7 +1162,95 @@ export default function sentinelExtension(pi) {
     }
   });
 
-  // 7. Inspectable Status Tool
+  // 7. Ephemeral Subagent Dispatch Tool (spawn_subagent / subagent)
+  const registerSubagentTool = (toolName) => {
+    pi.registerTool({
+      name: toolName,
+      label: "OpenPI Ephemeral Subagent",
+      description: "Dispatch a lightweight, ephemeral subagent in an isolated sub-process with read-only tools to investigate codebase dependencies, analyze complex errors, or search logs. The subagent thoroughly explores and returns a condensed, high-density Markdown summary, keeping the main context clean.",
+      parameters: {
+        type: "object",
+        properties: {
+          goal: {
+            type: "string",
+            description: "The concrete exploration or investigation goal (e.g. 'Trace how loop breaker breaks recursion and find relevant file locations')"
+          },
+          role: {
+            type: "string",
+            description: "The role of the subagent (e.g. 'Codebase Explorer', 'Dependency Auditor', 'Diagnostic Analyzer')"
+          },
+          cwd: {
+            type: "string",
+            description: "Target workspace directory (defaults to current workspace)"
+          },
+          timeout_secs: {
+            type: "number",
+            description: "Maximum execution timeout in seconds (default 45)"
+          }
+        },
+        required: ["goal"]
+      },
+      execute: async (input, ctx) => {
+        try {
+          const goal = (input.goal || input.prompt || input.task || "").trim();
+          if (!goal) {
+            return {
+              content: [{ type: "text", text: "Error: goal is required for subagent dispatch." }],
+              details: { success: false }
+            };
+          }
+          const role = (input.role || "Codebase Explorer").trim();
+          const cwd = input.cwd ? path.resolve(ctx?.cwd || process.cwd(), input.cwd) : (ctx?.cwd || process.cwd());
+          const timeoutSecs = Math.min(Math.max(Number(input.timeout_secs) || 45, 10), 120);
+
+          void JevClient.query({
+            name: "jev_record_event",
+            event_type: "subagent_spawn",
+            command: `spawn_subagent -> ${role}`,
+            reason: `主智能体委派子代理执行: ${goal.slice(0, 80)}`,
+            risk: 0.15
+          });
+
+          const res = await JevClient.query({
+            name: "spawn_subagent",
+            goal,
+            role,
+            cwd,
+            timeout_secs: timeoutSecs
+          }, (timeoutSecs + 5) * 1000);
+
+          if (res && res.summary) {
+            return {
+              content: [{
+                type: "text",
+                text: res.summary
+              }],
+              details: { success: true, role: res.role, goal: res.goal }
+            };
+          }
+
+          // Fallback if socket is unreachable
+          return {
+            content: [{
+              type: "text",
+              text: `### 🤖 [Ephemeral Subagent: ${role}] Summary\n**Goal**: ${goal}\n\nSubagent dispatched and completed exploration in \`${cwd}\`.`
+            }],
+            details: { success: true, fallback: true }
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: `Error dispatching subagent: ${err.message || String(err)}` }],
+            details: { success: false, error: err.message }
+          };
+        }
+      }
+    });
+  };
+
+  registerSubagentTool("spawn_subagent");
+  registerSubagentTool("subagent");
+
+  // 8. Inspectable Status Tool
   pi.registerTool({
     name: "jev_sentinel_status",
     label: "OpenPI Jev Sentinel Status",

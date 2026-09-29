@@ -27,6 +27,7 @@ pub async fn run_ipc_server(
         std::fs::create_dir_all(parent)?;
     }
 
+    supervisor.set_pi_cli_path(&pi_cli_path).await;
     let listener = UnixListener::bind(socket_path)?;
     info!("OpenPI Rust Daemon listening on {}", socket_path);
 
@@ -277,7 +278,7 @@ async fn handle_request(
                 }
             }
             ClientRequest::App { id, op } => {
-                handle_app_op(&id, &op, &storage, &scheduler, &supervisor.jev, &supervisor.memory).await?
+                handle_app_op(&id, &op, &storage, &scheduler, &supervisor, &supervisor.memory).await?
             }
             ClientRequest::Shutdown { id } => {
                 supervisor.shutdown_all().await;
