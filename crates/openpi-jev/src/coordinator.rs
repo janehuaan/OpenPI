@@ -32,6 +32,7 @@ pub struct JevCoordinator {
     contextual_betas: Arc<RwLock<std::collections::HashMap<String, f64>>>,
     tree_cache: Arc<RwLock<std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, DiscoveryTree)>>>,
     last_dream_metrics: Arc<RwLock<Option<ParetoMetrics>>>,
+    last_dream_time: Arc<RwLock<Option<std::time::Instant>>>,
     telemetry: Arc<StdRwLock<JevTelemetry>>,
     telemetry_path: std::path::PathBuf,
 }
@@ -70,6 +71,7 @@ impl JevCoordinator {
             contextual_betas: Arc::new(RwLock::new(std::collections::HashMap::new())),
             tree_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
             last_dream_metrics: Arc::new(RwLock::new(None)),
+            last_dream_time: Arc::new(RwLock::new(None)),
             telemetry: Arc::new(StdRwLock::new(initial_telemetry)),
             telemetry_path,
         }
@@ -494,6 +496,21 @@ impl JevCoordinator {
 
     // Pillar 7: Dream-RSI (Recursive Self-Improvement through Evolving Worlds)
     pub async fn trigger_offline_dreaming(&self, sessions_dir: &std::path::Path) -> anyhow::Result<serde_json::Value> {
+        // Cooldown throttle: Dreaming cannot run more frequently than once every 10 minutes (600s)
+        {
+            let mut last = self.last_dream_time.write().await;
+            if let Some(prev) = *last {
+                if prev.elapsed() < std::time::Duration::from_secs(600) {
+                    return Ok(serde_json::json!({
+                        "status": "skipped",
+                        "reason": "cooldown_active",
+                        "cooldown_remaining_secs": 600 - prev.elapsed().as_secs(),
+                    }));
+                }
+            }
+            *last = Some(std::time::Instant::now());
+        }
+
         let mut session_files = Vec::new();
         let mut scan_dirs = vec![sessions_dir.to_path_buf()];
         if let Some(parent) = sessions_dir.parent() {
@@ -527,6 +544,11 @@ impl JevCoordinator {
             }));
         }
 
+        // Ignore files larger than 1.5MB to avoid parsing massive transcripts in background
+        session_files.retain(|p| {
+            std::fs::metadata(p).map(|m| m.len() < 1_500_000).unwrap_or(false)
+        });
+
         // Sort sessions by modified time descending (freshest sessions first)
         session_files.sort_by(|a, b| {
             let mtime_a = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
@@ -534,9 +556,9 @@ impl JevCoordinator {
             mtime_b.cmp(&mtime_a)
         });
 
-        // LRU Cap: prioritize Top 15 most recent sessions so dreaming stays instantaneous
-        if session_files.len() > 15 {
-            session_files.truncate(15);
+        // LRU Cap: prioritize Top 5 most recent sessions so dreaming stays instantaneous (<15ms)
+        if session_files.len() > 5 {
+            session_files.truncate(5);
         }
 
         let mut total_nodes = 0;

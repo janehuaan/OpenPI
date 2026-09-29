@@ -21,12 +21,36 @@ const IGNORED_DIRS: &[&str] = &[
     ".gradle",
     ".idea",
     ".vscode",
+    "Library",
+    "Applications",
+    "Music",
+    "Movies",
+    "Pictures",
+    "Downloads",
+    "Documents",
+    "Desktop",
+    ".Trash",
+    ".npm",
+    ".cargo",
+    ".rustup",
+    ".pyenv",
+    ".nvm",
+    ".docker",
 ];
 
 pub struct RepoMapGenerator;
 
 impl RepoMapGenerator {
     pub fn generate(root: &Path, max_depth: usize, max_chars: usize) -> String {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() && (root == Path::new(&home) || root == Path::new("/")) {
+            return String::new();
+        }
+        let forbidden_roots = ["/Users", "/System", "/Library", "/Applications", "/Volumes", "/private", "/var", "/etc", "/bin", "/usr", "/sbin"];
+        if forbidden_roots.iter().any(|f| root == Path::new(f)) {
+            return String::new();
+        }
+
         let rust_regex = Regex::new(r"(?m)^\s*(?:pub(?:\([^\)]+\))?\s+)?(?:struct|enum|trait)\s+([A-Za-z0-9_]+)|^\s*(?:pub(?:\([^\)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)").unwrap();
         let ts_regex = Regex::new(r"(?m)^\s*export\s+(?:default\s+)?(?:class|interface|type|enum)\s+([A-Za-z0-9_]+)|^\s*export\s+(?:default\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)").unwrap();
         let py_regex = Regex::new(r"(?m)^\s*(?:class|def)\s+([A-Za-z0-9_]+)").unwrap();
@@ -42,6 +66,9 @@ impl RepoMapGenerator {
             .filter_entry(|e| !Self::is_ignored_dir(e))
             .filter_map(|e| e.ok())
         {
+            if total_files >= 60 {
+                break;
+            }
             let path = entry.path();
             if !path.is_file() {
                 continue;
@@ -164,6 +191,10 @@ mod tests {
         let src_dir = temp_dir.join("src");
         fs::create_dir_all(&src_dir).unwrap();
 
+        let cargo_toml = temp_dir.join("Cargo.toml");
+        let mut fc = fs::File::create(&cargo_toml).unwrap();
+        writeln!(fc, "[package]\nname = \"test\"").unwrap();
+
         let file1 = src_dir.join("lib.rs");
         let mut f1 = fs::File::create(&file1).unwrap();
         writeln!(f1, "pub struct EngineManager;\npub fn run_engine() {{}}").unwrap();
@@ -177,6 +208,10 @@ mod tests {
         assert!(repomap.contains("lib.rs"));
         assert!(repomap.contains("EngineManager") || repomap.contains("run_engine"));
         assert!(repomap.contains("DesktopApp") || repomap.contains("launch"));
+
+        // Verify root and system root directories return empty string
+        assert_eq!(RepoMapGenerator::generate(Path::new("/"), 4, 2000), "");
+        assert_eq!(RepoMapGenerator::generate(Path::new("/Users"), 4, 2000), "");
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

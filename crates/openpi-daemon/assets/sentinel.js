@@ -340,28 +340,49 @@ export default function sentinelExtension(pi) {
   console.log("[OpenPI Jev Sentinel] System 1 Instinct Safety Engine initialized.");
 
   let repoMapInjected = false;
+  let consecutiveReadOnlyProbeCount = 0;
 
-  // ── Module 0: Background Warm Indexing & Repo Map Context Injection ──
+  // ── Module 0: Background Warm Indexing, Speed Directives & Repo Map Context Injection ──
   if (typeof pi.on === "function") {
     pi.on("session_start", async (_event, ctx) => {
       repoMapInjected = false;
+      consecutiveReadOnlyProbeCount = 0;
       const cwd = ctx?.cwd || process.cwd();
       void JevClient.indexCode(cwd, 3000);
     });
 
+    pi.on("turn_start", async () => {
+      consecutiveReadOnlyProbeCount = 0;
+    });
+
+    pi.on("input", async () => {
+      consecutiveReadOnlyProbeCount = 0;
+    });
+
     pi.on("before_agent_start", async (event, ctx) => {
       try {
+        let injected = false;
+        let basePrompt = event.systemPrompt || (ctx?.getSystemPrompt ? ctx.getSystemPrompt() : "");
+        const efficiencyDirective = `\n\n<execution_efficiency>\n# ⚡ 极速响应与务实执行准则 (Efficiency & Directness Directives)\n1. 务实与敏捷优先：对于日常查询、网络查看、环境排查、状态诊断类任务，执行 1~2 个最关键命令即可，严禁陷入无休止的盲目探测！\n2. 适时总结汇报：在获取到基础信息（如网关、本机、活跃 IP 列表、端口状态）后，应立即整合结论直接回答用户，并在回答末尾附带说明可选的深入排查建议，切勿在背后自行发起几十轮扫描试探！\n3. 严禁端口暴力穷举与协议盲测：除非用户明确要求进行深度渗透或端口全量扫描，严禁自行对局域网每个 IP 循环探测全部常用端口。\n4. 批量合并命令：如确需多步检查，使用 \`cmd1 && cmd2\` 合并执行，减少工具调用的网络往返延迟。\n</execution_efficiency>\n`;
+        if (basePrompt && !basePrompt.includes("<execution_efficiency>")) {
+          basePrompt += efficiencyDirective;
+          injected = true;
+        }
+
         if (!repoMapInjected) {
           const cwd = ctx?.cwd || process.cwd();
           const res = await JevClient.getRepoMap(cwd, 4, 3500);
           if (res && res.repo_map && res.repo_map.trim().length > 10) {
             repoMapInjected = true;
             const repoMapBlock = `\n\n<workspace_repo_map>\n# 当前工作区代码架构与主要符号拓扑 (Repo Map)\n${res.repo_map.trim()}\n</workspace_repo_map>\n`;
-            const basePrompt = event.systemPrompt || (ctx?.getSystemPrompt ? ctx.getSystemPrompt() : "");
-            if (basePrompt && !basePrompt.includes("<workspace_repo_map>")) {
-              return { systemPrompt: basePrompt + repoMapBlock };
+            if (!basePrompt.includes("<workspace_repo_map>")) {
+              basePrompt += repoMapBlock;
+              injected = true;
             }
           }
+        }
+        if (injected) {
+          return { systemPrompt: basePrompt };
         }
       } catch {}
       return void 0;
@@ -373,10 +394,13 @@ export default function sentinelExtension(pi) {
     try {
       if (!event.messages || !Array.isArray(event.messages)) return void 0;
 
-      // Locate all tool / tool_result message indices
+      // Locate all tool / toolResult / bashExecution message indices
       const toolIndices = [];
       event.messages.forEach((msg, idx) => {
-        const isTool = msg.role === "tool" || (msg.role === "user" && Array.isArray(msg.content) && msg.content.some((c) => c.type === "tool_result"));
+        const isTool = msg.role === "tool" || 
+                       msg.role === "toolResult" || 
+                       msg.role === "bashExecution" ||
+                       (msg.role === "user" && Array.isArray(msg.content) && msg.content.some((c) => c.type === "tool_result"));
         if (isTool) toolIndices.push(idx);
       });
 
@@ -390,12 +414,12 @@ export default function sentinelExtension(pi) {
         if (!pruneIndices.has(idx)) return msg;
 
         // Case 1: Plain string content
-        if (typeof msg.content === "string" && msg.content.length > 300) {
+        if (typeof msg.content === "string" && msg.content.length > 250) {
           const originalLen = msg.content.length;
-          prunedCharsThisTurn += originalLen - 150;
+          prunedCharsThisTurn += originalLen - 120;
           return {
             ...msg,
-            content: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志以节约显存]\n` + msg.content.slice(0, 150) + "\n..."
+            content: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志]\n` + msg.content.slice(0, 120) + "\n..."
           };
         }
 
@@ -403,13 +427,13 @@ export default function sentinelExtension(pi) {
         if (Array.isArray(msg.content)) {
           let changed = false;
           const updated = msg.content.map((part) => {
-            if (part && part.type === "text" && typeof part.text === "string" && part.text.length > 300) {
+            if (part && part.type === "text" && typeof part.text === "string" && part.text.length > 250) {
               const originalLen = part.text.length;
-              prunedCharsThisTurn += originalLen - 150;
+              prunedCharsThisTurn += originalLen - 120;
               changed = true;
               return {
                 ...part,
-                text: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志以节约显存]\n` + part.text.slice(0, 150) + "\n..."
+                text: `[ActKV Pruned: 历史步骤执行完毕，已修剪 ${originalLen} 字符冗余日志]\n` + part.text.slice(0, 120) + "\n..."
               };
             }
             return part;
@@ -450,6 +474,7 @@ export default function sentinelExtension(pi) {
 
       // Track Read Provenance (Pillar 2 & Active Provenance Gate)
       if (toolName === "read") {
+        consecutiveReadOnlyProbeCount += 1;
         const readPath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
         if (readPath) {
           try {
@@ -462,6 +487,7 @@ export default function sentinelExtension(pi) {
       // Guard direct file modifications (write / edit / search_replace) against blind unread writes and sensitive paths
       const isFileWrite = toolName === "write" || toolName === "edit" || toolName === "search_replace";
       if (isFileWrite) {
+        consecutiveReadOnlyProbeCount = 0;
         const filePath = (event.input?.path || event.input?.filePath || event.input?.file || "").trim();
         if (filePath) {
           const resolvedPath = path.resolve(filePath);
@@ -588,6 +614,50 @@ export default function sentinelExtension(pi) {
       const cmd = (event.input?.command || event.input?.cmd || "").trim();
       if (!cmd) {
         return void 0;
+      }
+
+      // Check whether this shell command is mutating code/files or purely exploratory
+      const isMutatingCmd = /\b(git\s+(commit|push|merge|rebase)|cargo\s+(build|test)|npm\s+(install|run)|yarn\s+(add|install|build)|pip\s+install|pnpm|mkdir|touch|rm\s+|mv\s+|cp\s+)/i.test(cmd);
+      if (isMutatingCmd) {
+        consecutiveReadOnlyProbeCount = 0;
+      } else {
+        consecutiveReadOnlyProbeCount += 1;
+      }
+
+      // ── Pillar 4.1: Anti-Rabbit-Hole Speed Breaker (Over-exploration Guard) ──
+      // If the agent has executed 5 consecutive exploratory read commands without answering or mutating, trip fuse!
+      if (consecutiveReadOnlyProbeCount >= 5) {
+        totalBlockedCount += 1;
+        totalLoopBreaks += 1;
+        const entry = {
+          timestamp: Date.now(),
+          tool: event.toolName,
+          command: cmd,
+          reason: `[Jev SpeedGuard] 连续单向探查 ${consecutiveReadOnlyProbeCount} 次且未回复，触发极速响应熔断`,
+          risk: 0.95
+        };
+        blockedLog.push(entry);
+        if (blockedLog.length > 50) blockedLog.shift();
+
+        void JevClient.query({
+          name: "jev_record_event",
+          event_type: "loop_break",
+          command: cmd,
+          reason: `连续发起 ${consecutiveReadOnlyProbeCount} 次探测命令，触发极速响应熔断`,
+          risk: 0.95
+        });
+
+        console.warn(`🛑 [Jev SpeedGuard] Over-exploration circuit breaker tripped (${consecutiveReadOnlyProbeCount} consecutive probes): \`${cmd}\``);
+
+        if (ctx?.ui?.notify) {
+          ctx.ui.notify(`🛑 [Jev 极速保护] 单轮探测已达上限，已强制终止并引导输出结果`, "warning");
+        }
+
+        return {
+          block: true,
+          terminate: true,
+          reason: `🛑 [Jev 极速执行保护熔断]\n系统检测到当前任务已连续发起 ${consecutiveReadOnlyProbeCount} 轮探查探测命令，但尚未给出答复！\n为保证极速执行体验并避免过度扫描导致用户长时间等待，系统已强制终止探查。\n\n💡 请立即：根据目前已经获取到的网络/系统信息，停止调用工具，直接为用户输出完整、清晰的答复！`
+        };
       }
 
       // ── Active Provenance: 自动解析 Bash 中的只读查看命令 (cat, grep, head, tail, view) ──
@@ -842,6 +912,10 @@ export default function sentinelExtension(pi) {
       }
       if (diagnosticNotice) {
         notice += diagnosticNotice;
+        changed = true;
+      }
+      if (consecutiveReadOnlyProbeCount >= 3) {
+        notice += `\n\n⚡ [Jev 极速执行引导]: 你已连续执行 ${consecutiveReadOnlyProbeCount} 轮探查命令！请避免过度深入网络/系统扫描（如端口试探、协议暴力穷举）。请立即基于当前已有信息向用户输出清晰、结构化的答复！`;
         changed = true;
       }
 
