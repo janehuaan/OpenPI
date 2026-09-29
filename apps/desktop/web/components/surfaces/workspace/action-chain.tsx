@@ -29,11 +29,13 @@ export function AgentActionChain({
 	runningTools = [],
 	defaultOpen,
 	isWorking = false,
+	workspaceCwd,
 }: {
 	actions: ActionChainItem[];
 	runningTools?: RunningTool[];
 	defaultOpen?: boolean;
 	isWorking?: boolean;
+	workspaceCwd?: string;
 }) {
 	const hasError = actions.some((a) => a.isError);
 	const [isOpen, setIsOpen] = useState(defaultOpen ?? isWorking);
@@ -209,6 +211,7 @@ export function AgentActionChain({
 										<MiniDiffView
 											diffText={effectiveOutput}
 											filename={item.target}
+											workspaceCwd={workspaceCwd}
 										/>
 									) : (
 										<div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	applyHunksToSource,
+	buildSideBySideRows,
 	isDiffContent,
 	parseDiffHunks,
 	parseDiffLines,
@@ -167,4 +168,106 @@ export function multiply(a: number, b: number) {
 		expect(result).not.toContain("a + b + 1");
 	});
 });
+
+describe("Side-by-Side (Split) Diff Alignment (buildSideBySideRows)", () => {
+	it("aligns balanced changes and synchronizes context lines", () => {
+		const diffText = `@@ -10,3 +10,3 @@
+ context top
+-old line
++new line
+ context bottom`;
+
+		const parsed = parseDiffHunks(diffText);
+		expect(parsed.hunks).toHaveLength(1);
+		const rows = buildSideBySideRows(parsed.hunks[0]);
+
+		expect(rows).toHaveLength(3);
+		// Row 0: Context line
+		expect(rows[0].left).toEqual({ type: "ctx", content: "context top", lineNo: 10 });
+		expect(rows[0].right).toEqual({ type: "ctx", content: "context top", lineNo: 10 });
+
+		// Row 1: Modified line (del on left, add on right)
+		expect(rows[1].left).toEqual({ type: "del", content: "old line", lineNo: 11 });
+		expect(rows[1].right).toEqual({ type: "add", content: "new line", lineNo: 11 });
+
+		// Row 2: Context bottom
+		expect(rows[2].left).toEqual({ type: "ctx", content: "context bottom", lineNo: 12 });
+		expect(rows[2].right).toEqual({ type: "ctx", content: "context bottom", lineNo: 12 });
+	});
+
+	it("aligns pure additions with empty cells on the left", () => {
+		const diffText = `@@ -5,1 +5,3 @@
+ context
++new line 1
++new line 2`;
+
+		const parsed = parseDiffHunks(diffText);
+		const rows = buildSideBySideRows(parsed.hunks[0]);
+
+		expect(rows).toHaveLength(3);
+		// Row 0: Context
+		expect(rows[0].left.type).toBe("ctx");
+		expect(rows[0].right.type).toBe("ctx");
+
+		// Row 1: First addition
+		expect(rows[1].left.type).toBe("empty");
+		expect(rows[1].right).toEqual({ type: "add", content: "new line 1", lineNo: 6 });
+
+		// Row 2: Second addition
+		expect(rows[2].left.type).toBe("empty");
+		expect(rows[2].right).toEqual({ type: "add", content: "new line 2", lineNo: 7 });
+	});
+
+	it("aligns pure deletions with empty cells on the right", () => {
+		const diffText = `@@ -20,3 +20,1 @@
+ context
+-deleted line 1
+-deleted line 2`;
+
+		const parsed = parseDiffHunks(diffText);
+		const rows = buildSideBySideRows(parsed.hunks[0]);
+
+		expect(rows).toHaveLength(3);
+		expect(rows[0].left.type).toBe("ctx");
+		expect(rows[0].right.type).toBe("ctx");
+
+		expect(rows[1].left).toEqual({ type: "del", content: "deleted line 1", lineNo: 21 });
+		expect(rows[1].right.type).toBe("empty");
+
+		expect(rows[2].left).toEqual({ type: "del", content: "deleted line 2", lineNo: 22 });
+		expect(rows[2].right.type).toBe("empty");
+	});
+
+	it("handles unbalanced changes (e.g. 1 deletion replaced by 3 additions)", () => {
+		const diffText = `@@ -1,2 +1,4 @@
+-const x = 1;
++const x = 1;
++const y = 2;
++const z = 3;
+ const keep = true;`;
+
+		const parsed = parseDiffHunks(diffText);
+		const rows = buildSideBySideRows(parsed.hunks[0]);
+
+		// 3 rows for the changes + 1 context row = 4 rows
+		expect(rows).toHaveLength(4);
+
+		// First change row: 1 del vs 1st add
+		expect(rows[0].left).toEqual({ type: "del", content: "const x = 1;", lineNo: 1 });
+		expect(rows[0].right).toEqual({ type: "add", content: "const x = 1;", lineNo: 1 });
+
+		// Second change row: empty on left vs 2nd add
+		expect(rows[1].left.type).toBe("empty");
+		expect(rows[1].right).toEqual({ type: "add", content: "const y = 2;", lineNo: 2 });
+
+		// Third change row: empty on left vs 3rd add
+		expect(rows[2].left.type).toBe("empty");
+		expect(rows[2].right).toEqual({ type: "add", content: "const z = 3;", lineNo: 3 });
+
+		// Fourth row: context
+		expect(rows[3].left).toEqual({ type: "ctx", content: "const keep = true;", lineNo: 2 });
+		expect(rows[3].right).toEqual({ type: "ctx", content: "const keep = true;", lineNo: 4 });
+	});
+});
+
 

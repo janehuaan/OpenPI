@@ -698,7 +698,17 @@ export function GitSurface({
 									<span>正在加载文件差异…</span>
 								</div>
 							) : diffText.trim() ? (
-								<MiniDiffView diffText={diffText} filename={selectedFile.path} />
+								<MiniDiffView
+									diffText={diffText}
+									filename={selectedFile.path}
+									workspaceCwd={cwd}
+									onApplied={onRefresh}
+									onRollback={async () => {
+										await api.gitDiscard({ cwd, paths: [selectedFile.path] });
+										onRefresh();
+										setSelectedFile(null);
+									}}
+								/>
 							) : (
 								<div className="diff-empty-box">
 									<Check size={24} />

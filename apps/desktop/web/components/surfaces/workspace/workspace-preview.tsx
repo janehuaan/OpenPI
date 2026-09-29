@@ -2269,6 +2269,7 @@ export function ReferenceWorkspacePreview({
 													actions={item.actions}
 													runningTools={isLatestActions && isWorking ? runningTools : []}
 													isWorking={isWorking && isLastActions}
+													workspaceCwd={workspace}
 												/>
 											)}
 										</div>
@@ -2408,6 +2409,7 @@ export function ReferenceWorkspacePreview({
 										actions={[]}
 										runningTools={runningTools}
 										isWorking={isWorking}
+										workspaceCwd={workspace}
 									/>
 								</div>
 							)}

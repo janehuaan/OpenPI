@@ -267,3 +267,65 @@ export function applyHunksToSource(
 		rejectedCount,
 	};
 }
+
+export interface SideBySideCell {
+	type: "ctx" | "add" | "del" | "empty";
+	content?: string;
+	lineNo?: number;
+}
+
+export interface SideBySideRow {
+	left: SideBySideCell;
+	right: SideBySideCell;
+}
+
+/**
+ * Builds aligned Side-by-Side rows for a given diff hunk.
+ * Synchronizes context lines across left and right columns,
+ * and groups consecutive deletion and addition clusters with empty cell padding.
+ */
+export function buildSideBySideRows(hunk: DiffHunk): SideBySideRow[] {
+	const rows: SideBySideRow[] = [];
+	const lines = hunk.lines.filter((l) => l.type !== "hunk" && l.type !== "header");
+
+	let i = 0;
+	while (i < lines.length) {
+		const current = lines[i];
+		if (current.type === "ctx") {
+			rows.push({
+				left: { type: "ctx", content: current.content, lineNo: current.oldLineNo },
+				right: { type: "ctx", content: current.content, lineNo: current.newLineNo },
+			});
+			i++;
+		} else {
+			// Change cluster: collect consecutive deletions and additions
+			const dels: DiffLine[] = [];
+			const adds: DiffLine[] = [];
+			while (i < lines.length && (lines[i].type === "del" || lines[i].type === "add")) {
+				if (lines[i].type === "del") {
+					dels.push(lines[i]);
+				} else {
+					adds.push(lines[i]);
+				}
+				i++;
+			}
+
+			const maxCount = Math.max(dels.length, adds.length);
+			for (let k = 0; k < maxCount; k++) {
+				const delLine = dels[k];
+				const addLine = adds[k];
+				rows.push({
+					left: delLine
+						? { type: "del", content: delLine.content, lineNo: delLine.oldLineNo }
+						: { type: "empty" },
+					right: addLine
+						? { type: "add", content: addLine.content, lineNo: addLine.newLineNo }
+						: { type: "empty" },
+				});
+			}
+		}
+	}
+
+	return rows;
+}
+

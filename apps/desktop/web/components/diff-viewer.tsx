@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Pencil, RotateCcw, X } from "./icons.tsx";
-import { parseDiffHunks, type DiffHunk, type HunkStatus } from "../lib/diff";
+import { Check, Columns, Copy, Pencil, RotateCcw, Rows, X } from "./icons.tsx";
+import {
+	buildSideBySideRows,
+	parseDiffHunks,
+	type DiffHunk,
+	type HunkStatus,
+} from "../lib/diff";
 import { desktopApi } from "../api";
 
 export function MiniDiffView({
@@ -8,14 +13,28 @@ export function MiniDiffView({
 	filename,
 	workspaceCwd,
 	onApplied,
+	onRollback,
+	initialMode,
 }: {
 	diffText: string;
 	filename?: string;
 	workspaceCwd?: string;
 	onApplied?: () => void;
+	onRollback?: () => void | Promise<void>;
+	initialMode?: "unified" | "split";
 }) {
+	const [viewMode, setViewMode] = useState<"unified" | "split">(() => {
+		if (initialMode) return initialMode;
+		try {
+			const saved = localStorage.getItem("openpi_diff_view_mode");
+			if (saved === "unified" || saved === "split") return saved;
+		} catch {}
+		return "split";
+	});
+
 	const [copied, setCopied] = useState(false);
 	const [applying, setApplying] = useState(false);
+	const [rollingBack, setRollingBack] = useState(false);
 	const [applyStatus, setApplyStatus] = useState<string | null>(null);
 	const [editingHunkId, setEditingHunkId] = useState<string | null>(null);
 	const [editingDraft, setEditingDraft] = useState<string>("");
@@ -29,6 +48,13 @@ export function MiniDiffView({
 
 	const acceptedCount = hunks.filter((h) => h.status === "accepted").length;
 	const rejectedCount = hunks.filter((h) => h.status === "rejected").length;
+
+	const handleToggleViewMode = (mode: "unified" | "split") => {
+		setViewMode(mode);
+		try {
+			localStorage.setItem("openpi_diff_view_mode", mode);
+		} catch {}
+	};
 
 	const handleCopy = () => {
 		void navigator.clipboard.writeText(diffText).then(() => {
@@ -101,8 +127,40 @@ export function MiniDiffView({
 		}
 	};
 
+	const handleRollback = async () => {
+		if (!filename && !onRollback) return;
+		setRollingBack(true);
+		setApplyStatus(null);
+		try {
+			if (onRollback) {
+				await onRollback();
+				setApplyStatus("已撤销变更");
+			} else if (filename) {
+				const res = await desktopApi.gitDiscard({
+					cwd: workspaceCwd,
+					paths: [filename],
+				});
+				if (res?.ok) {
+					setApplyStatus("已撤销变更");
+					if (onApplied) onApplied();
+				} else {
+					setApplyStatus(`撤销失败: ${res?.error || "未知错误"}`);
+				}
+			}
+			setTimeout(() => setApplyStatus(null), 3500);
+		} catch (err: any) {
+			setApplyStatus(`撤销失败: ${err?.message || String(err)}`);
+		} finally {
+			setRollingBack(false);
+		}
+	};
+
 	return (
-		<div className="mini-diff-viewer" role="region" aria-label="交互式代码变更对比">
+		<div
+			className={`mini-diff-viewer view-${viewMode}`}
+			role="region"
+			aria-label="交互式代码变更对比"
+		>
 			<div className="mini-diff-header">
 				<div className="mini-diff-info">
 					{filename && <span className="mini-diff-filename" title={filename}>{filename}</span>}
@@ -110,7 +168,7 @@ export function MiniDiffView({
 						{parsed.totalAdds > 0 && <span className="stat-add">+{parsed.totalAdds}</span>}
 						{parsed.totalDels > 0 && <span className="stat-del">-{parsed.totalDels}</span>}
 					</span>
-					{hunks.length > 1 && (
+					{hunks.length > 0 && (
 						<span className="mini-diff-hunk-summary">
 							({hunks.length} 块 · {acceptedCount} 已采纳{rejectedCount > 0 ? ` · ${rejectedCount} 已忽略` : ""})
 						</span>
@@ -118,6 +176,28 @@ export function MiniDiffView({
 				</div>
 
 				<div className="mini-diff-actions">
+					{/* View mode toggle */}
+					<div className="diff-view-mode-toggle" role="group" aria-label="视图模式切换">
+						<button
+							type="button"
+							className={`diff-mode-btn ${viewMode === "split" ? "active" : ""}`}
+							onClick={() => handleToggleViewMode("split")}
+							title="左右分栏对照 (Side-by-Side)"
+						>
+							<Columns size={11} />
+							<span>分栏</span>
+						</button>
+						<button
+							type="button"
+							className={`diff-mode-btn ${viewMode === "unified" ? "active" : ""}`}
+							onClick={() => handleToggleViewMode("unified")}
+							title="单栏统一视图 (Unified)"
+						>
+							<Rows size={11} />
+							<span>统一</span>
+						</button>
+					</div>
+
 					{hunks.length > 1 && (
 						<>
 							<button
@@ -145,6 +225,19 @@ export function MiniDiffView({
 								<RotateCcw size={10} />
 							</button>
 						</>
+					)}
+
+					{(filename || onRollback) && (
+						<button
+							type="button"
+							className="diff-action-btn diff-rollback-btn"
+							onClick={handleRollback}
+							disabled={rollingBack}
+							title="放弃当前文件改动并回滚至最近提交"
+						>
+							<RotateCcw size={10} />
+							<span>{rollingBack ? "撤销中…" : "撤销修改"}</span>
+						</button>
 					)}
 
 					{filename && (
@@ -271,6 +364,44 @@ export function MiniDiffView({
 										</button>
 									</div>
 								</div>
+							) : viewMode === "split" ? (
+								<div className="diff-split-container">
+									<div className="diff-split-column-header">
+										<div className="diff-split-header-cell pane-left">旧版本 (原代码)</div>
+										<div className="diff-split-header-cell pane-right">新版本 (变更后)</div>
+									</div>
+									{buildSideBySideRows(hunk).map((row, rIdx) => (
+										<div
+											key={`sb-${hunk.id}-${rIdx}`}
+											className={`diff-split-row ${hunk.status === "rejected" ? "dimmed" : ""}`}
+										>
+											{/* Left Pane (Old / Del) */}
+											<div className={`diff-split-pane pane-left diff-cell-${row.left.type}`}>
+												<span className="diff-col-num">{row.left.lineNo ?? ""}</span>
+												<span className="diff-col-sign">
+													{row.left.type === "del" ? "-" : row.left.type === "ctx" ? " " : ""}
+												</span>
+												<span className="diff-col-code">{row.left.content ?? ""}</span>
+											</div>
+											{/* Right Pane (New / Add) */}
+											<div className={`diff-split-pane pane-right diff-cell-${row.right.type}`}>
+												<span className="diff-col-num">{row.right.lineNo ?? ""}</span>
+												<span className="diff-col-sign">
+													{row.right.type === "add" ? "+" : row.right.type === "ctx" ? " " : ""}
+												</span>
+												<span className="diff-col-code">{row.right.content ?? ""}</span>
+											</div>
+										</div>
+									))}
+									{hunk.editedLines && (
+										<div className="diff-hunk-edited-preview">
+											<div className="edited-tag">✏️ 已微调内容:</div>
+											<pre className="edited-content">
+												{hunk.editedLines.join("\n")}
+											</pre>
+										</div>
+									)}
+								</div>
 							) : (
 								<div className="diff-hunk-lines">
 									{hunk.lines.map((line, idx) => {
@@ -306,4 +437,5 @@ export function MiniDiffView({
 		</div>
 	);
 }
+
 
