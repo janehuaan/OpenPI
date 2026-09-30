@@ -363,7 +363,7 @@ export default function sentinelExtension(pi) {
       try {
         let injected = false;
         let basePrompt = event.systemPrompt || (ctx?.getSystemPrompt ? ctx.getSystemPrompt() : "");
-        const efficiencyDirective = `\n\n<execution_efficiency>\n# ⚡ 极速响应与务实执行准则 (Efficiency & Directness Directives)\n1. 务实与敏捷优先：对于日常查询、网络查看、环境排查、状态诊断类任务，执行 1~2 个最关键命令即可，严禁陷入无休止的盲目探测！\n2. 适时总结汇报：在获取到基础信息（如网关、本机、活跃 IP 列表、端口状态）后，应立即整合结论直接回答用户，并在回答末尾附带说明可选的深入排查建议，切勿在背后自行发起几十轮扫描试探！\n3. 严禁端口暴力穷举与协议盲测：除非用户明确要求进行深度渗透或端口全量扫描，严禁自行对局域网每个 IP 循环探测全部常用端口。\n4. 批量合并命令：如确需多步检查，使用 \`cmd1 && cmd2\` 合并执行，减少工具调用的网络往返延迟。\n</execution_efficiency>\n`;
+        const efficiencyDirective = `\n\n<execution_efficiency>\n# ⚡ 极速响应与务实执行准则 (Efficiency & Directness Directives)\n1. 务实与敏捷优先：对于日常查询、网络查看、环境排查、状态诊断类任务，执行 1~2 个最关键命令即可，严禁陷入无休止的盲目探测！\n2. 适时总结汇报：在获取到基础信息（如网关、本机、活跃 IP 列表、端口状态）后，应立即整合结论直接回答用户，并在回答末尾附带说明可选的深入排查建议，切勿在背后自行发起几十轮扫描试探！\n3. 严禁端口暴力穷举与协议盲测：除非用户明确要求进行深度渗透或端口全量扫描，严禁自行对局域网每个 IP 循环探测全部常用端口。\n4. 批量合并命令：如确需多步检查，使用 \`cmd1 && cmd2\` 合并执行，减少工具调用的网络往返延迟。\n5. 严禁全盘递归搜索：切勿在用户主目录 (~ 或 /Users/xxx) 或系统根目录发起 \`grep -r\` 或无 -maxdepth 限制的 \`find\`！如需查找代码，先执行 \`ls\` 明确目标项目，再在具体项目内搜索。\n</execution_efficiency>\n`;
         if (basePrompt && !basePrompt.includes("<execution_efficiency>")) {
           basePrompt += efficiencyDirective;
           injected = true;
@@ -614,6 +614,34 @@ export default function sentinelExtension(pi) {
       const cmd = (event.input?.command || event.input?.cmd || "").trim();
       if (!cmd) {
         return void 0;
+      }
+
+      // ── Enforce Default Execution Timeout on Shell Commands ──
+      if (!event.input.timeout) {
+        const isSearchCmd = /\b(grep|find|cat|head|tail|curl|python3?\s+-c|route|arp|ping|dns-sd|ls)\b/i.test(cmd);
+        event.input.timeout = isSearchCmd ? 20 : 45;
+      } else {
+        const isSearchCmd = /\b(grep|find|curl|python3?\s+-c)\b/i.test(cmd);
+        if (isSearchCmd && event.input.timeout > 30) {
+          event.input.timeout = 30;
+        }
+      }
+
+      // ── Broad Recursive Search Interceptor ──
+      const userHome = os.homedir();
+      const currentCwd = ctx?.cwd || process.cwd();
+      const broadGrepPattern = new RegExp(
+        "\\b(grep|egrep|fgrep)\\s+(-[a-zA-Z]*r[a-zA-Z]*)\\s+.*(?:\\s|^|[\"'])(~/?|\\$HOME|/Users/[^/\\s\"']+/?|/)(?:[\"']|\\s|$)",
+        "i"
+      );
+      const isBroadSearch = broadGrepPattern.test(cmd)
+        || ((currentCwd === userHome || currentCwd === "/") && /\b(grep|egrep|fgrep)\s+(-[a-zA-Z]*r[a-zA-Z]*)\b/i.test(cmd));
+      if (isBroadSearch) {
+        totalBlockedCount += 1;
+        return {
+          block: true,
+          reason: "🛑 [Jev SafetyGate 物理阻断]\n系统检测到你正在用户主目录 (~ 或 /Users/xxx) 或系统根目录发起全盘递归搜索 (grep -r)！\n该命令将无差别深度遍历数十万缓存、系统文件及工程依赖，耗时极长导致严重卡死。\n\n💡 正确排查步骤：\n1. 请先使用 `ls` 查看当前有哪些具体项目文件夹。\n2. 明确具体目标项目后，进入该项目目录再执行局部精准搜索！"
+        };
       }
 
       // Check whether this shell command is mutating code/files or purely exploratory

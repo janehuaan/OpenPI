@@ -44,6 +44,17 @@ fn test_pillar2_gatekeeper() {
     // Harmless cargo test -> Allow
     let v4 = coordinator.pre_check_command("cargo test");
     assert_eq!(v4, GateVerdict::Allow);
+
+    // Broad recursive grep on home or /Users/xxx -> Denied
+    let v5 = coordinator.pre_check_command("grep -rn \"Tavily returned\" /Users/huaan --exclude-dir=\".openpi\"");
+    assert!(matches!(v5, GateVerdict::Deny { .. }));
+
+    let v6 = coordinator.pre_check_command("grep -r \"foo\" ~");
+    assert!(matches!(v6, GateVerdict::Deny { .. }));
+
+    // Targeted project grep -> Allow
+    let v7 = coordinator.pre_check_command("grep -rn \"foo\" src/");
+    assert_eq!(v7, GateVerdict::Allow);
 }
 
 #[test]

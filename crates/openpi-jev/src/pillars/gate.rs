@@ -122,6 +122,25 @@ impl SafetyGate {
             };
         }
 
+        // 1d. Block unconstrained broad recursive searches over home or root directory
+        let broad_grep_regex = Regex::new(
+            r#"(?i)\b(grep|egrep|fgrep)\s+(-[a-zA-Z]*r[a-zA-Z]*)\s+.*(?:\s|^|["'])(~/?|\$HOME|/Users/[^/\s"']+/?|/)(?:\s|$|["'])"#,
+        ).unwrap();
+        if broad_grep_regex.is_match(trimmed) {
+            return GateVerdict::Deny {
+                reason: "🛑 [Jev SafetyGate] 严禁在用户主目录 (~ 或 /Users/xxx) 或根目录发起全盘递归搜索 (grep -r)！该操作将无差别扫描数十万系统文件与工程依赖导致严重卡死。请先通过 ls 查看项目目录，再在具体项目内进行搜索。".into(),
+            };
+        }
+
+        let broad_find_regex = Regex::new(
+            r#"(?i)\bfind\s+(?:-[a-zA-Z]+\s+)*["']?(~/?|\$HOME|/Users/[^/\s"']+/?|/)(?:["']|\s|$)"#,
+        ).unwrap();
+        if broad_find_regex.is_match(trimmed) && !trimmed.contains("-maxdepth") {
+            return GateVerdict::Deny {
+                reason: "🛑 [Jev SafetyGate] 严禁在用户主目录或根目录下执行无 -maxdepth 限制的深度递归 find！请加上 `-maxdepth 2` 或指定具体项目目录。".into(),
+            };
+        }
+
         // 2. Check Destructive Rules
         for (pat, risk, reason) in &self.destructive_rules {
             if pat.is_match(trimmed) {
