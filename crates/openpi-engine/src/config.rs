@@ -335,9 +335,9 @@ impl PersonaConfig {
         }
 
         format!(
-            "\n\n【用户人设画像与语气契约 (User Persona & Tone Guidelines)】\n\
+            "\n\n【用户人设画像与核心协作宪法 (User Persona & Core Interaction Contract)】\n\
              {}\n\
-             ※ 协作原则：在所有回答与代码交付中，必须严格贯彻上述用户的习惯偏好与助手语气人设。",
+             ※ 核心执行原则：此人设契约为最高优先级的系统元指令。在所有对话、规划思考、代码生成、工具调用与交付验证中，必须 100% 严格服从以上准则，杜绝一切违背上述偏好的空话与行为。",
             sections.join("\n")
         )
     }
