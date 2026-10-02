@@ -59,7 +59,7 @@ codesign --force --deep --sign - "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
 echo "🗜️ 6. Compressing application archive with maximum compression..."
-VERSION="$(cargo metadata --format-version 1 --no-deps | grep -o '"name":"openpi-desktop","version":"[^"]*"' | head -n 1 | cut -d'"' -f6 || echo '1.1.1')"
+VERSION="$(grep -m1 '"version"' "$DIR/apps/desktop/src-tauri/tauri.conf.json" | cut -d'"' -f4)"
 ZIP="$DIR/target/release/bundle/OpenPI_${VERSION}_${ARCH}.zip"
 rm -f "$ZIP"
 ditto -c -k --zlibCompressionLevel 9 --noextattr --noacl --noqtn --keepParent "$APP_BUNDLE" "$ZIP"
