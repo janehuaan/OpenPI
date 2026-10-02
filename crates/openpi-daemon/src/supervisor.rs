@@ -199,6 +199,7 @@ pub struct Supervisor {
     pub jev: Arc<openpi_jev::JevCoordinator>,
     pub memory: Arc<openpi_memory::CodebaseMemoryManager>,
     pub pi_cli_path: Arc<tokio::sync::RwLock<String>>,
+    pub engine: Arc<openpi_engine::EngineSessionManager>,
 }
 
 impl Supervisor {
@@ -276,12 +277,25 @@ impl Supervisor {
         let memory = Arc::new(openpi_memory::CodebaseMemoryManager::new());
         let pi_cli_path = Arc::new(tokio::sync::RwLock::new(String::new()));
 
+        let engine_cfg = openpi_engine::EngineConfig::load().unwrap_or_else(|_| openpi_engine::EngineConfig {
+            default_provider: None,
+            default_model: None,
+            models: HashMap::new(),
+        });
+        let tool_reg = openpi_engine::ToolRegistry::new(jev.clone(), memory.clone());
+        let engine = Arc::new(openpi_engine::EngineSessionManager::new(
+            engine_cfg,
+            tool_reg,
+            event_tx.clone(),
+        ));
+
         let supervisor = Self {
             sessions: Arc::new(Mutex::new(map)),
             event_tx,
             jev,
             memory,
             pi_cli_path,
+            engine,
         };
 
         // Save consolidated records in background
@@ -635,6 +649,13 @@ impl Supervisor {
         Ok(())
     }
 
+    pub fn use_native_engine() -> bool {
+        if let Ok(v) = std::env::var("OPENPI_ENGINE") {
+            return v.to_lowercase() != "node";
+        }
+        true
+    }
+
     pub async fn ensure_process(
         &self,
         session_id: &str,
@@ -684,6 +705,12 @@ impl Supervisor {
         }
 
         let session = sessions.get_mut(session_id).unwrap();
+
+        if Self::use_native_engine() {
+            session.info.running = true;
+            let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({ "type": "rpc_ready" })));
+            return Ok(());
+        }
 
         if session.child.is_some() {
             return Ok(());
@@ -1028,6 +1055,62 @@ impl Supervisor {
     }
 
     pub async fn send_rpc(&self, session_id: &str, command: &Value) -> anyhow::Result<Value> {
+        if Self::use_native_engine() {
+            let cmd_type = command.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match cmd_type {
+                "prompt" => {
+                    let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let cwd = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
+                    };
+                    let model_override = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(session_id).and_then(|s| s.info.model.clone())
+                    };
+
+                    self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
+                    return Ok(serde_json::json!(true));
+                }
+                "abort" => {
+                    self.engine.abort(session_id).await?;
+                    return Ok(serde_json::json!(true));
+                }
+                "set_model" => {
+                    if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
+                        let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                        let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
+                        self.engine.set_model(session_id, &model_str).await;
+                        let _ = self.update_session_model(session_id, model_str).await;
+                    }
+                    return Ok(serde_json::json!(true));
+                }
+                "steer" => {
+                    let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let cwd = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
+                    };
+                    let model_override = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(session_id).and_then(|s| s.info.model.clone())
+                    };
+                    let _ = self.engine.abort(session_id).await;
+                    self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
+                    return Ok(serde_json::json!(true));
+                }
+                "get_commands" => {
+                    return Ok(serde_json::json!({ "commands": ["/help", "/compact", "/reset", "/model"] }));
+                }
+                "extension_ui_response" => {
+                    return Ok(serde_json::json!(true));
+                }
+                _ => {
+                    return Ok(serde_json::json!(true));
+                }
+            }
+        }
+
         let (child_stdin, pending) = {
             let mut sessions = self.sessions.lock().await;
             let session = match sessions.get_mut(session_id) {

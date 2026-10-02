@@ -66,6 +66,7 @@ async fn abort_and_old_stdout_do_not_block_or_reset_new_process() {
     std::fs::write(&script, FAKE_RPC).unwrap();
     std::env::set_var("OPENPI_DIR", &dir);
     std::env::set_var("OPENPI_PI_RPC_ENTRY", &script);
+    std::env::set_var("OPENPI_ENGINE", "node");
 
     let socket = std::env::current_dir().unwrap().join(format!("op-{}.sock", &uuid::Uuid::new_v4().to_string()[..8]));
     let socket_str = socket.to_string_lossy().to_string();

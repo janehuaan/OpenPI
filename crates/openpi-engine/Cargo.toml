@@ -1,27 +1,23 @@
 [package]
-name = "openpi-daemon"
+name = "openpi-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 openpi-proto = { path = "../openpi-proto" }
-openpi-storage = { path = "../openpi-storage" }
-openpi-scheduler = { path = "../openpi-scheduler" }
-openpi-memory = { path = "../openpi-memory" }
-openpi-state = { path = "../openpi-state" }
 openpi-tools = { path = "../openpi-tools" }
 openpi-jev = { path = "../openpi-jev" }
-openpi-engine = { path = "../openpi-engine" }
+openpi-memory = { path = "../openpi-memory" }
+openpi-storage = { path = "../openpi-storage" }
 tokio.workspace = true
 tokio-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 futures-util.workspace = true
-base64.workspace = true
+reqwest = { version = "0.12", features = ["json", "stream"] }

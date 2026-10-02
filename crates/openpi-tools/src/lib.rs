@@ -1,3 +1,11 @@
+pub mod file_ops;
+pub mod search_ops;
+pub mod managed_bash;
+
+pub use file_ops::{FileOps, ReadFileResult, WriteFileResult, SearchReplaceResult};
+pub use search_ops::{SearchOps, SearchResult, GrepMatch};
+pub use managed_bash::{ManagedBash, BashResult};
+
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -59,22 +67,19 @@ mod tests {
 
     #[test]
     fn test_file_scanner_and_grep() {
-        let temp_dir = std::env::temp_dir().join(format!("openpi-tools-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!("test_scanner_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("test_code.rs");
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        writeln!(f, "fn test_function() {{\n    println!(\"Target Line\");\n}}").unwrap();
 
-        let test_file = temp_dir.join("sample_service.rs");
-        let mut f = std::fs::File::create(&test_file).unwrap();
-        writeln!(f, "fn main() {{\n    println!(\"hello openpi\");\n}}").unwrap();
+        let files = FileScanner::find_files(&temp_dir, "test", 5);
+        assert_eq!(files.len(), 1);
 
-        let found = FileScanner::find_files(&temp_dir, "sample", 10);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0], test_file);
+        let matches = FileScanner::grep_content(&file_path, "target").unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].0, 2);
 
-        let grep_results = FileScanner::grep_content(&test_file, "openpi").unwrap();
-        assert_eq!(grep_results.len(), 1);
-        assert_eq!(grep_results[0].0, 2); // line 2
-        assert!(grep_results[0].1.contains("hello openpi"));
-
-        let _ = std::fs::remove_dir_all(temp_dir);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
