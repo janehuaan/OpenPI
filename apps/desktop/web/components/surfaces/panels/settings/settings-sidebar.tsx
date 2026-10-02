@@ -16,12 +16,12 @@ interface SettingsSidebarProps {
 	mcpCount?: number;
 }
 
-export const SettingsSidebar: FC<SettingsSidebarProps> = ({
+export const SettingsSidebar = ({
 	activeTab,
 	onSelectTab,
 	providerCount = 0,
 	mcpCount = 0,
-}) => {
+}: SettingsSidebarProps) => {
 	return (
 		<aside className="settings-sidebar" role="tablist" aria-label="设置导航">
 			<span className="settings-nav-section-title">核心设置</span>

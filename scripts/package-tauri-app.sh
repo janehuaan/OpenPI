@@ -9,12 +9,12 @@ if [[ "$(uname -s)" != Darwin ]]; then
     exit 1
 fi
 
-for tool in yarn cargo node rsync codesign ditto unzip; do
+for tool in yarn cargo codesign ditto unzip; do
     command -v "$tool" >/dev/null || { echo "error: missing $tool" >&2; exit 1; }
 done
 
-[[ -f "$DIR/yarn.lock" && -d "$DIR/node_modules/@earendil-works/pi-coding-agent" ]] || {
-    echo "error: install the yarn.lock dependencies before packaging" >&2
+[[ -f "$DIR/yarn.lock" ]] || {
+    echo "error: yarn.lock is missing" >&2
     exit 1
 }
 
@@ -38,132 +38,39 @@ DAEMON="$DIR/target/release/openpi-daemon"
     exit 1
 }
 
-echo "🔗 3. Embedding openpi-daemon binary..."
-mkdir -p "$RUNTIME/bin" "$RUNTIME/node_modules"
+echo "🔗 3. Embedding pure Rust openpi-daemon binary..."
+mkdir -p "$RUNTIME/bin"
 cp "$DAEMON" "$RUNTIME/bin/openpi-daemon"
 chmod +x "$RUNTIME/bin/openpi-daemon"
 
-echo "🧹 4. Pruning and copying ONLY required production runtime dependencies (excluding dev/frontend bloat)..."
-python3 -c "
-import os, json, subprocess
-
-visited = set()
-to_visit = [
-    '@earendil-works/pi-coding-agent',
-    '@earendil-works/pi-ai',
-    '@earendil-works/pi-agent-core',
-    '@earendil-works/chord',
-    '@earendil-works/pi-tui'
-]
-
-while to_visit:
-    pkg = to_visit.pop(0)
-    if pkg in visited:
-        continue
-    visited.add(pkg)
-    
-    pkg_json = os.path.join('$DIR/node_modules', pkg, 'package.json')
-    if os.path.exists(pkg_json):
-        try:
-            with open(pkg_json) as f:
-                data = json.load(f)
-            for dep in data.get('dependencies', {}).keys():
-                if dep not in visited:
-                    to_visit.append(dep)
-        except Exception:
-            pass
-
-target_nm = '$RUNTIME/node_modules'
-subprocess.run(['rm', '-rf', target_nm], check=True)
-os.makedirs(target_nm, exist_ok=True)
-
-for pkg in sorted(list(visited)):
-    src = os.path.join('$DIR/node_modules', pkg)
-    dest = os.path.join(target_nm, pkg)
-    if os.path.exists(src):
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        subprocess.run(['rsync', '-aL', f'{src}/', f'{dest}/'], check=True)
-
-def patch_node20_compat(base_dir):
-    pm_path = os.path.join(base_dir, '@earendil-works/pi-coding-agent/dist/core/package-manager.js')
-    if os.path.exists(pm_path):
-        with open(pm_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        if 'import { chmodSync, existsSync, globSync,' in content:
-            content = content.replace(
-                'import { chmodSync, existsSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, } from "node:fs";',
-                'import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, } from "node:fs";'
-            )
-            content = content.replace(
-                'import { minimatch } from "minimatch";',
-                'import { minimatch } from "minimatch";\\nconst globSync = (pattern, { cwd = process.cwd() } = {}) => { try { return readdirSync(cwd, { recursive: true }).filter(f => minimatch(String(f), pattern, { dot: true })); } catch { return []; } };'
-            )
-            with open(pm_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-    undici_webidl = os.path.join(base_dir, 'undici/lib/web/webidl/index.js')
-    if os.path.exists(undici_webidl):
-        with open(undici_webidl, 'r', encoding='utf-8') as f:
-            content = f.read()
-        if 'webidl.util.markAsUncloneable = markAsUncloneable\\n' in content:
-            content = content.replace(
-                'webidl.util.markAsUncloneable = markAsUncloneable\\n',
-                'webidl.util.markAsUncloneable = markAsUncloneable ?? (() => {})\\n'
-            )
-            with open(undici_webidl, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-patch_node20_compat('$DIR/node_modules')
-patch_node20_compat(target_nm)
-
-print(f'Successfully copied {len(visited)} essential production runtime packages.')
-"
-
-CLI="$RUNTIME/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-RPC="$RUNTIME/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"
-[[ -f "$CLI" && -f "$RPC" ]] || {
-    echo "error: pi CLI or RPC entry is missing from the packaged dependencies" >&2
-    exit 1
-}
-
-# Verify that system Node can cleanly import the bundled pi agent
-node --check "$CLI"
-node --check "$RPC"
-node --input-type=module -e 'await import(process.argv[1])' "$RUNTIME/node_modules/@earendil-works/pi-coding-agent/dist/index.js" || {
-    echo "error: bundled pi dependencies cannot be loaded with Node" >&2
-    exit 1
-}
-
-echo "📝 5. Generating daemon launcher..."
+echo "📝 4. Generating daemon launcher..."
 cat > "$APP_BUNDLE/Contents/MacOS/openpi-daemon" <<'LAUNCHER'
 #!/bin/bash
 set -euo pipefail
 MACOS_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUNTIME="$MACOS_DIR/../Resources/openpi"
-export OPENPI_PI_CLI_PATH="$RUNTIME/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-export OPENPI_PI_RPC_ENTRY="$RUNTIME/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"
 exec "$RUNTIME/bin/openpi-daemon" "$@"
 LAUNCHER
 chmod +x "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
 bash -n "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
 
-echo "🔏 6. Re-signing application bundle..."
+echo "🔏 5. Re-signing application bundle..."
 codesign --force --deep --sign - "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
-echo "🗜️ 7. Compressing application archive with maximum compression..."
-VERSION="$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
+echo "🗜️ 6. Compressing application archive with maximum compression..."
+VERSION="$(cargo metadata --format-version 1 --no-deps | grep -o '"name":"openpi-desktop","version":"[^"]*"' | head -n 1 | cut -d'"' -f6 || echo '1.1.1')"
 ZIP="$DIR/target/release/bundle/OpenPI_${VERSION}_${ARCH}.zip"
 rm -f "$ZIP"
 ditto -c -k --zlibCompressionLevel 9 --noextattr --noacl --noqtn --keepParent "$APP_BUNDLE" "$ZIP"
 unzip -tq "$ZIP"
-for entry in 'Contents/MacOS/openpi-daemon' 'Contents/Resources/openpi/bin/openpi-daemon' 'Contents/Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js'; do
+for entry in 'Contents/MacOS/openpi-daemon' 'Contents/Resources/openpi/bin/openpi-daemon'; do
     unzip -Z1 "$ZIP" | grep -Fx "OpenPI.app/$entry" >/dev/null || {
         echo "error: release archive is missing $entry" >&2
         exit 1
     }
 done
 
-echo "🎉 Success! Packaged lightweight macOS Tauri app: $ZIP"
+echo "🎉 Success! Packaged pure native macOS Tauri app: $ZIP"
 du -sh "$APP_BUNDLE"
 ls -lh "$ZIP"
