@@ -7,7 +7,7 @@ pub mod session_manager;
 pub mod tool_registry;
 
 pub use agent_loop::AgentLoop;
-pub use config::{EngineConfig, ModelConfig};
+pub use config::{EngineConfig, ModelConfig, PersonaConfig};
 pub use llm_client::LlmClient;
 pub use session_manager::EngineSessionManager;
 pub use tool_registry::ToolRegistry;
@@ -104,6 +104,28 @@ mod tests {
         let res = registry.execute("bash", &json!({"command": "grep -rn 'hello' ~"}), cwd).await.unwrap();
         assert!(res.is_error);
         assert!(res.output.contains("SafetyGate"));
+    }
+
+    #[test]
+    fn test_persona_directive_generation() {
+        let persona = PersonaConfig {
+            user_name: Some("Huaan".into()),
+            user_role: Some("Full-stack Architect".into()),
+            user_habits: Some("Prefers minimal atomic edits, direct execution".into()),
+            assistant_name: Some("OpenPI".into()),
+            assistant_role: Some("Senior Pair Engineer".into()),
+            tone: Some("concise".into()),
+            custom_tone_prompt: Some("No pleasantries, explain root cause directly".into()),
+            code_style: Some("Clean Rust & TS, MDL law".into()),
+            response_language: Some("zh-CN".into()),
+        };
+
+        let directive = persona.to_prompt_directive();
+        assert!(directive.contains("Huaan"));
+        assert!(directive.contains("Full-stack Architect"));
+        assert!(directive.contains("Prefers minimal atomic edits"));
+        assert!(directive.contains("极简干练"));
+        assert!(directive.contains("No pleasantries"));
     }
 }
 

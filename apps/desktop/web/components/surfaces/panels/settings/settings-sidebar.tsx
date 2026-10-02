@@ -1,13 +1,13 @@
-import type { FC } from "react";
 import {
 	Cable,
 	Cpu,
 	Info,
 	Shield,
 	Sliders,
+	UserRound,
 } from "../../../icons";
 
-export type SettingsTabId = "general" | "models" | "extensions" | "security" | "about";
+export type SettingsTabId = "general" | "persona" | "models" | "extensions" | "security" | "about";
 
 interface SettingsSidebarProps {
 	activeTab: SettingsTabId;
@@ -34,6 +34,17 @@ export const SettingsSidebar: FC<SettingsSidebarProps> = ({
 			>
 				<Sliders size={16} />
 				<span>常规偏好</span>
+			</button>
+
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeTab === "persona"}
+				className={`settings-nav-item ${activeTab === "persona" ? "active" : ""}`}
+				onClick={() => onSelectTab("persona")}
+			>
+				<UserRound size={16} />
+				<span>人设与偏好</span>
 			</button>
 
 			<button

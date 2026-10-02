@@ -2,6 +2,7 @@ import { type FC, useEffect, useState } from "react";
 import { ArrowLeft, RefreshCw } from "../../../icons";
 import { SettingsSidebar, type SettingsTabId } from "./settings-sidebar";
 import { GeneralTab } from "./tabs/general-tab";
+import { PersonaTab } from "./tabs/persona-tab";
 import { ModelsTab } from "./tabs/models-tab";
 import { ExtensionsTab } from "./tabs/extensions-tab";
 import { SecurityTab } from "./tabs/security-tab";
@@ -137,6 +138,7 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 
 				<main className="settings-main">
 					{tab === "general" && <GeneralTab instanceId={instanceId} onReload={onReload} />}
+					{tab === "persona" && <PersonaTab />}
 					{tab === "models" && <ModelsTab instanceId={instanceId} onReload={onReload} />}
 					{tab === "extensions" && (
 						<ExtensionsTab

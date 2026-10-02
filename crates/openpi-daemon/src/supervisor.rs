@@ -859,10 +859,14 @@ impl Supervisor {
                 )
             };
 
+            let persona = openpi_engine::PersonaConfig::load();
+            let persona_directive = persona.to_prompt_directive();
+            let final_prompt = format!("{}{}", dynamic_prompt, persona_directive);
+
             cmd.arg("--tools")
                 .arg(CODE_MODE_TOOLS)
                 .arg("--append-system-prompt")
-                .arg(dynamic_prompt);
+                .arg(final_prompt);
         }
 
         if is_electron {

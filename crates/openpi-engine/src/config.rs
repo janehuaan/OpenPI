@@ -197,3 +197,149 @@ impl EngineConfig {
         bail!("Model '{}' not found in configuration", key)
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PersonaConfig {
+    pub user_name: Option<String>,
+    pub user_role: Option<String>,
+    pub user_habits: Option<String>,
+    pub assistant_name: Option<String>,
+    pub assistant_role: Option<String>,
+    pub tone: Option<String>,
+    pub custom_tone_prompt: Option<String>,
+    pub code_style: Option<String>,
+    pub response_language: Option<String>,
+}
+
+impl PersonaConfig {
+    pub fn load() -> Self {
+        let profile_path = agent_dir().join("profile.json");
+        if !profile_path.exists() {
+            return Self::default();
+        }
+        if let Ok(c) = std::fs::read_to_string(&profile_path) {
+            if let Ok(val) = serde_json::from_str::<Value>(&c) {
+                let user_name = val.get("nickname")
+                    .or_else(|| val.get("userName"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let user_role = val.get("userRole")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let user_habits = val.get("userHabits")
+                    .or_else(|| val.get("habits"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let assistant_name = val.get("assistantName")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let assistant_role = val.get("assistantRole")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let tone = val.get("tone")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let custom_tone_prompt = val.get("customTonePrompt")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let code_style = val.get("codeStyle")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let response_language = val.get("responseLanguage")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                return Self {
+                    user_name,
+                    user_role,
+                    user_habits,
+                    assistant_name,
+                    assistant_role,
+                    tone,
+                    custom_tone_prompt,
+                    code_style,
+                    response_language,
+                };
+            }
+        }
+        Self::default()
+    }
+
+    pub fn to_prompt_directive(&self) -> String {
+        let mut sections = Vec::new();
+
+        if let Some(ref name) = self.user_name {
+            if !name.trim().is_empty() {
+                sections.push(format!("- 用户称呼/姓名: {}", name));
+            }
+        }
+        if let Some(ref role) = self.user_role {
+            if !role.trim().is_empty() {
+                sections.push(format!("- 用户角色身份: {}", role));
+            }
+        }
+        if let Some(ref habits) = self.user_habits {
+            if !habits.trim().is_empty() {
+                sections.push(format!("- 用户工作与交互习惯: {}", habits));
+            }
+        }
+        if let Some(ref style) = self.code_style {
+            if !style.trim().is_empty() {
+                sections.push(format!("- 用户代码风格偏好: {}", style));
+            }
+        }
+        if let Some(ref a_name) = self.assistant_name {
+            if !a_name.trim().is_empty() {
+                sections.push(format!("- 助手设定名称: {}", a_name));
+            }
+        }
+        if let Some(ref a_role) = self.assistant_role {
+            if !a_role.trim().is_empty() {
+                sections.push(format!("- 助手角色定位: {}", a_role));
+            }
+        }
+
+        let tone_desc = match self.tone.as_deref() {
+            Some("concise") => "极简干练（直奔主题，避免客套与冗余解释，直接给出解决方案与代码）",
+            Some("professional") => "严谨专业（逻辑缜密，全面分析系统根因，结构化分点陈述）",
+            Some("friendly") => "亲切自然（温和耐受，通俗生动，如资深结对伙伴并肩作战）",
+            _ => "",
+        };
+
+        if !tone_desc.is_empty() {
+            sections.push(format!("- 回答语气基调: {}", tone_desc));
+        }
+
+        if let Some(ref custom_tone) = self.custom_tone_prompt {
+            if !custom_tone.trim().is_empty() {
+                sections.push(format!("- 自定义语气细节要求: {}", custom_tone));
+            }
+        }
+
+        if let Some(ref lang) = self.response_language {
+            if !lang.trim().is_empty() {
+                sections.push(format!("- 语言偏好: {}", lang));
+            }
+        }
+
+        if sections.is_empty() {
+            return String::new();
+        }
+
+        format!(
+            "\n\n【用户人设画像与语气契约 (User Persona & Tone Guidelines)】\n\
+             {}\n\
+             ※ 协作原则：在所有回答与代码交付中，必须严格贯彻上述用户的习惯偏好与助手语气人设。",
+            sections.join("\n")
+        )
+    }
+}
+

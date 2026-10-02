@@ -170,6 +170,9 @@ impl AgentLoop {
         };
 
         let beta = self.tool_registry.jev.contextual_beta(ctx_key).await;
+        let persona = crate::config::PersonaConfig::load();
+        let persona_directive = persona.to_prompt_directive();
+
         let system_prompt = format!(
             "You are OpenPI, an autonomous AI software engineer running on the native Rust engine (openpi-engine).\n\
              Workspace: {}\n\
@@ -177,8 +180,8 @@ impl AgentLoop {
              1. Fast, surgical execution: use read to inspect files, edit/search_replace to perform minimal atomic updates, and bash to test or run commands.\n\
              2. Always inspect files or run safe commands rather than guessing.\n\
              3. Never run broad recursive searches across the home directory; use targeted grep or find instead.\n\
-             4. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.",
-            cwd, ctx_label, beta
+             4. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.{}",
+            cwd, ctx_label, beta, persona_directive
         );
 
         active_messages.push(ChatMessage::system(system_prompt));

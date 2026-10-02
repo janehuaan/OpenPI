@@ -45,6 +45,23 @@ import type {
 
 export type DaemonStatus = "connected" | "reconnecting" | "disconnected";
 
+export interface UserProfile {
+	nickname?: string;
+	avatar?: string;
+	avatarEmoji?: string;
+	avatarUrl?: string;
+	synced?: boolean;
+	updatedAt?: string;
+	userRole?: string;
+	userHabits?: string;
+	assistantName?: string;
+	assistantRole?: string;
+	tone?: "concise" | "professional" | "friendly" | "custom";
+	customTonePrompt?: string;
+	codeStyle?: string;
+	responseLanguage?: string;
+}
+
 type OpenPiBridge = {
 	isNative: boolean;
 	invoke: (channel: string, args?: unknown) => Promise<unknown>;
@@ -251,15 +268,8 @@ export const desktopApi = {
 		call<{ provider: string; type: string }>("provider_login", { instanceId, provider, authType }),
 	providerLogout: (instanceId: string, provider: string) => call<boolean>("provider_logout", { instanceId, provider }),
 	openExternal: (url: string) => call<boolean>("open_external", { url }),
-	getUserProfile: () =>
-		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string; synced?: boolean; updatedAt?: string }>(
-			"get_user_profile",
-		),
-	saveUserProfile: (profile: { nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string }) =>
-		call<{ nickname?: string; avatar?: string; avatarEmoji?: string; avatarUrl?: string; synced?: boolean; updatedAt?: string }>(
-			"save_user_profile",
-			profile,
-		),
+	getUserProfile: () => call<UserProfile>("get_user_profile"),
+	saveUserProfile: (profile: Partial<UserProfile>) => call<UserProfile>("save_user_profile", profile),
 	getVisionFallback: () => call<VisionFallbackConfig>("get_vision_fallback"),
 	getVisionFallbackModels: () => call<VisionFallbackModel[]>("get_vision_fallback_models"),
 	configureVisionFallback: async (input: { apiKey?: string; enabled: boolean; model?: string }) => {
