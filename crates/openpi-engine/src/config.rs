@@ -324,11 +324,16 @@ impl PersonaConfig {
             }
         }
 
-        if let Some(ref lang) = self.response_language {
-            if !lang.trim().is_empty() {
-                sections.push(format!("- 语言偏好: {}", lang));
+        let lang_str = self.response_language.as_deref().unwrap_or("zh-CN");
+        let lower_lang = lang_str.to_lowercase();
+        let lang_rule = match lower_lang.as_str() {
+            "zh" | "zh-cn" | "zh_cn" | "chinese" | "简体中文" => {
+                "必须且始终使用规范的【简体中文】回答所有问题、输出思考与进行技术解释（严禁擅自使用英文或繁体中文整段回复，代码中的关键字、变量与专有名词除外）"
             }
-        }
+            "en" | "en-us" | "english" => "Must always respond in English.",
+            other => other,
+        };
+        sections.push(format!("- 强制回答语言 (Mandatory Language): {}", lang_rule));
 
         if sections.is_empty() {
             return String::new();
