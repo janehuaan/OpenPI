@@ -139,7 +139,12 @@ impl LlmClient {
 
         let mut accumulated_text = String::new();
         let mut accumulated_reasoning = String::new();
-        let mut tool_calls_map: HashMap<usize, (String, String, String)> = HashMap::new(); // index -> (id, name, args)
+        // Streaming tool calls are accumulated in arrival order. `index` is only a
+        // grouping hint, and some OpenAI-compatible gateways reuse the same index
+        // (often 0) for every call — so we additionally split by `id` to avoid
+        // merging distinct calls into a single broken invocation.
+        let mut tool_calls_map: HashMap<usize, usize> = HashMap::new(); // stream index -> position in tool_calls_vec
+        let mut tool_calls_vec: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
         let mut finish_reason: Option<String> = None;
         let mut usage: Option<TokenUsage> = None;
 
@@ -244,33 +249,47 @@ impl LlmClient {
                                     }
 
                                     for tc in tcs {
-                                        let entry = tool_calls_map.entry(tc.index).or_insert_with(|| {
-                                            (
-                                                tc.id.clone().unwrap_or_else(|| {
-                                                    format!("call_{}_{}", tc.index, uuid::Uuid::new_v4().simple())
-                                                }),
-                                                String::new(),
-                                                String::new(),
-                                            )
-                                        });
+                                        let incoming_id = tc.id.clone().filter(|s| !s.is_empty());
 
-                                        if let Some(new_id) = tc.id {
-                                            if !new_id.is_empty() {
-                                                entry.0 = new_id;
+                                        let existing = tool_calls_map.get(&tc.index).copied();
+                                        // A new tool call has started when the incoming id
+                                        // differs from the entry currently owning this index.
+                                        let starts_new = matches!(
+                                            (existing, incoming_id.as_ref()),
+                                            (Some(pos), Some(id)) if tool_calls_vec[pos].0 != *id
+                                        );
+
+                                        let pos = match existing {
+                                            Some(existing_pos) if !starts_new => existing_pos,
+                                            _ => {
+                                                let p = tool_calls_vec.len();
+                                                let id = incoming_id.clone().unwrap_or_else(|| {
+                                                    format!("call_{}_{}", tc.index, uuid::Uuid::new_v4().simple())
+                                                });
+                                                tool_calls_vec.push((id, String::new(), String::new()));
+                                                tool_calls_map.insert(tc.index, p);
+                                                p
                                             }
+                                        };
+
+                                        if let Some(id) = incoming_id {
+                                            tool_calls_vec[pos].0 = id;
                                         }
 
                                         if let Some(fn_call) = tc.function {
                                             if let Some(name) = fn_call.name {
                                                 if !name.is_empty() {
-                                                    entry.1.push_str(&name);
-                                                    handler.on_tool_call_start(tc.index, &entry.0, &entry.1);
+                                                    tool_calls_vec[pos].1.push_str(&name);
+                                                    let id = tool_calls_vec[pos].0.clone();
+                                                    let acc_name = tool_calls_vec[pos].1.clone();
+                                                    handler.on_tool_call_start(tc.index, &id, &acc_name);
                                                 }
                                             }
                                             if let Some(args_chunk) = fn_call.arguments {
                                                 if !args_chunk.is_empty() {
-                                                    entry.2.push_str(&args_chunk);
-                                                    handler.on_tool_call_delta(tc.index, &entry.0, &args_chunk);
+                                                    tool_calls_vec[pos].2.push_str(&args_chunk);
+                                                    let id = tool_calls_vec[pos].0.clone();
+                                                    handler.on_tool_call_delta(tc.index, &id, &args_chunk);
                                                 }
                                             }
                                         }
@@ -290,7 +309,7 @@ impl LlmClient {
             }
         }
 
-        if !stream_done && accumulated_text.is_empty() && tool_calls_map.is_empty() {
+        if !stream_done && accumulated_text.is_empty() && tool_calls_vec.is_empty() {
             bail!("LLM stream closed prematurely by provider without returning any content or tool calls");
         }
 
@@ -301,23 +320,18 @@ impl LlmClient {
             handler.on_text_end();
         }
 
-        // Notify tool call ends
+        // Notify tool call ends (arrival order, which matches the model's call order)
         let mut tool_calls = Vec::new();
-        let mut sorted_indices: Vec<usize> = tool_calls_map.keys().cloned().collect();
-        sorted_indices.sort_unstable();
-
-        for idx in sorted_indices {
-            if let Some((id, name, args)) = tool_calls_map.remove(&idx) {
-                handler.on_tool_call_end(idx, &id);
-                tool_calls.push(ToolCall {
-                    id,
-                    r#type: "function".into(),
-                    function: FunctionCall {
-                        name,
-                        arguments: args,
-                    },
-                });
-            }
+        for (index, (id, name, args)) in tool_calls_vec.into_iter().enumerate() {
+            handler.on_tool_call_end(index, &id);
+            tool_calls.push(ToolCall {
+                id,
+                r#type: "function".into(),
+                function: FunctionCall {
+                    name,
+                    arguments: args,
+                },
+            });
         }
 
         Ok(AccumulatedResponse {

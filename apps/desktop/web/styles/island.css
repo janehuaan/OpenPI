@@ -32,13 +32,13 @@
 	padding: 0 11px;
 	background: #000000;
 	color: #ffffff;
-	border: 1px solid rgba(255, 255, 255, 0.16);
-	border-top: none;
+	border: none !important;
+	outline: none !important;
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
-	border-bottom-left-radius: 14px;
-	border-bottom-right-radius: 14px;
-	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+	border-bottom-left-radius: 12px;
+	border-bottom-right-radius: 12px;
+	box-shadow: none !important;
 	cursor: pointer;
 	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 	position: relative;
@@ -46,8 +46,9 @@
 }
 
 .island-pill:hover {
-	border-color: rgba(255, 255, 255, 0.3);
-	box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+	border: none !important;
+	outline: none !important;
+	box-shadow: none !important;
 	background: #0a0a0c;
 }
 
@@ -172,15 +173,14 @@
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
-	border-top: none;
+	border: none !important;
+	outline: none !important;
 	border-top-left-radius: 0;
 	border-top-right-radius: 0;
 	border-bottom-left-radius: 22px;
 	border-bottom-right-radius: 22px;
 	background: var(--bg); /* Uniform canvas background matching main window 1:1 */
-	border: 1px solid var(--border-subtle);
-	border-top: none;
-	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.1);
+	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.15);
 	overflow: hidden;
 	animation: island-slide-down 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }

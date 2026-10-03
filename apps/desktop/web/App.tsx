@@ -1362,9 +1362,17 @@ export function App() {
 		? snapshot.runs.filter((run) => (run.taskId || (run as any).task_id) === selectedTaskId)
 		: []
 	).sort((left, right) => {
-		const leftTime = left.createdAt || (left as any).created_at || "";
-		const rightTime = right.createdAt || (right as any).created_at || "";
-		return rightTime.localeCompare(leftTime);
+		const toSortable = (value: unknown): number => {
+			if (typeof value === "number") return value;
+			if (typeof value === "string") {
+				const parsed = Date.parse(value);
+				return Number.isNaN(parsed) ? 0 : parsed;
+			}
+			return 0;
+		};
+		const leftTime = toSortable(left.createdAt ?? (left as any).created_at);
+		const rightTime = toSortable(right.createdAt ?? (right as any).created_at);
+		return rightTime - leftTime;
 	});
 	const selectedRun = snapshot.runs.find((run) => run.id === selectedRunId) ?? taskRuns[0];
 	const activeConversation = conversation?.instance?.id === selectedInstanceId ? conversation : undefined;

@@ -4,6 +4,30 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 use crate::config::{agent_dir, openpi_dir, PersonaConfig};
 
+/// Byte-safe prefix slice that never panics on a multi-byte UTF-8 boundary.
+fn char_prefix(s: &str, max_bytes: usize) -> &str {
+	if s.len() <= max_bytes {
+		return s;
+	}
+	let mut end = max_bytes;
+	while end > 0 && !s.is_char_boundary(end) {
+		end -= 1;
+	}
+	&s[..end]
+}
+
+/// Byte-safe suffix slice starting at (or just after) `start_bytes`.
+fn char_from(s: &str, start_bytes: usize) -> &str {
+	if start_bytes >= s.len() {
+		return "";
+	}
+	let mut start = start_bytes;
+	while start < s.len() && !s.is_char_boundary(start) {
+		start += 1;
+	}
+	&s[start..]
+}
+
 pub fn memories_dir() -> PathBuf {
 	openpi_dir().join("memories")
 }
@@ -401,11 +425,7 @@ pub async fn autonomous_memory_extract(
 	let r_dir = rollout_summaries_dir();
 	let _ = fs::create_dir_all(&r_dir);
 
-	let short_sid = if session_id.len() > 8 {
-		&session_id[..8]
-	} else {
-		session_id
-	};
+	let short_sid = char_prefix(session_id, 8);
 
 	let summary_filename = format!("{}-{}.md", today, short_sid);
 	let summary_path = r_dir.join(&summary_filename);
@@ -564,8 +584,8 @@ pub fn reconcile_all_session_memories() -> Result<()> {
 		if stem.len() < 11 {
 			continue;
 		}
-		let date = &stem[..10];
-		let short_sid = &stem[11..];
+		let date = char_prefix(stem, 10);
+		let short_sid = char_from(stem, 11);
 
 		// Find corresponding session jsonl
 		let mut matching_sess_file = None;
@@ -720,7 +740,7 @@ pub fn consolidate_memories_internal() -> Result<()> {
 			for f in files {
 				if let Ok(content) = fs::read_to_string(&f) {
 					let fname = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-					let date = if fname.len() >= 10 { &fname[..10] } else { "最近" };
+					let date = if fname.len() >= 10 { char_prefix(fname, 10) } else { "最近" };
 					let focus = content
 						.lines()
 						.skip_while(|l| !l.starts_with("### Focus"))

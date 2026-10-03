@@ -379,6 +379,9 @@ impl AgentLoop {
                     // assistant message that only carries tool calls.
                     asst_msg.content = None;
                 }
+                if !llm_res.reasoning.trim().is_empty() {
+                    asst_msg.reasoning_content = Some(llm_res.reasoning.clone());
+                }
                 asst_msg.tool_calls = Some(llm_res.tool_calls.clone());
                 active_messages.push(asst_msg);
 

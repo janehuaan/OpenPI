@@ -2291,7 +2291,7 @@ pub async fn handle_invoke(
             let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
             let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded }));
             if let Some(island) = app.get_webview_window("island") {
-                let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 32.0) };
+                let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 25.0) };
                 crate::island_native::position_island_top_center(&island, w, h);
                 if expanded {
                     let _ = island.show();
@@ -2316,7 +2316,7 @@ pub async fn handle_invoke(
                     if visible {
                         let _ = island.hide();
                     } else {
-                        crate::island_native::position_island_top_center(&island, 280.0, 32.0);
+                        crate::island_native::position_island_top_center(&island, 280.0, 25.0);
                         let _ = island.show();
                     }
                 }
@@ -2326,7 +2326,7 @@ pub async fn handle_invoke(
 
         "show_island_window" => {
             if let Some(island) = app.get_webview_window("island") {
-                crate::island_native::position_island_top_center(&island, 280.0, 32.0);
+                crate::island_native::position_island_top_center(&island, 280.0, 25.0);
                 let _ = island.show();
             }
             Ok(json!(true))

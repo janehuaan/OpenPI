@@ -28,7 +28,7 @@
         "title": "OpenPI Island",
         "url": "index.html?window=island",
         "width": 280,
-        "height": 32,
+        "height": 25,
         "resizable": false,
         "fullscreen": false,
         "transparent": true,

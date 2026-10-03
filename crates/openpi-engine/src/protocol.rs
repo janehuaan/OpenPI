@@ -48,6 +48,11 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Reasoning models (DeepSeek-R1 family and compatible gateways) require the
+    /// assistant turn's `reasoning_content` to be echoed back on subsequent requests,
+    /// otherwise multi-turn tool calling is rejected or degraded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 impl ChatMessage {
@@ -58,6 +63,7 @@ impl ChatMessage {
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         }
     }
 
@@ -68,6 +74,7 @@ impl ChatMessage {
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         }
     }
 
@@ -78,6 +85,7 @@ impl ChatMessage {
             name: None,
             tool_calls: None,
             tool_call_id: None,
+            reasoning_content: None,
         }
     }
 
@@ -88,6 +96,7 @@ impl ChatMessage {
             name: None,
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
+            reasoning_content: None,
         }
     }
 }

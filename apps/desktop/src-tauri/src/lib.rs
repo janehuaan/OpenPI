@@ -61,7 +61,7 @@ pub fn run() {
                             if let Some(ev_type) = event_obj.get("type").and_then(|v| v.as_str()) {
                                 if ev_type == "agent_start" || ev_type == "turn_start" {
                                     if let Some(island) = handle_events.get_webview_window("island") {
-                                        island_native::position_island_top_center(&island, 280.0, 32.0);
+                                        island_native::position_island_top_center(&island, 280.0, 25.0);
                                         let _ = island.show();
                                     }
                                 }
@@ -80,7 +80,7 @@ pub fn run() {
 
             // Configure OpenPI Island window at top-center of screen (starts hidden)
             if let Some(island) = handle.get_webview_window("island") {
-                island_native::position_island_top_center(&island, 280.0, 32.0);
+                island_native::position_island_top_center(&island, 280.0, 25.0);
                 let _ = island.hide();
             }
 
@@ -154,7 +154,7 @@ pub fn run() {
                                     } else if *arg == "collapse" || *arg == "close" {
                                         let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 280.0, 32.0);
+                                            island_native::position_island_top_center(&island, 280.0, 25.0);
                                             let _ = island.show();
                                         }
                                     } else if *arg == "hide" {
@@ -163,7 +163,7 @@ pub fn run() {
                                         }
                                     } else if *arg == "show" {
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 280.0, 32.0);
+                                            island_native::position_island_top_center(&island, 280.0, 25.0);
                                             let _ = island.show();
                                         }
                                     }
