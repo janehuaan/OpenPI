@@ -59,11 +59,12 @@ impl LlmClient {
         cancel_token: CancellationToken,
         handler: &(dyn StreamEventHandler + 'static),
     ) -> Result<AccumulatedResponse> {
-        let mut url = format!("{}/chat/completions", config.base_url);
-        // Clean double slashes
-        if url.contains("//chat") {
-            url = url.replace("//chat", "/chat");
-        }
+        let trimmed_base = config.base_url.trim().trim_end_matches('/');
+        let url = if trimmed_base.ends_with("/chat/completions") {
+            trimmed_base.to_string()
+        } else {
+            format!("{}/chat/completions", trimmed_base)
+        };
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -150,11 +151,14 @@ impl LlmClient {
             _ = cancel_token.cancelled() => {
                 bail!("LLM stream cancelled by user");
             }
-            res = tokio::time::timeout(Duration::from_secs(45), stream.next()) => {
+            res = tokio::time::timeout(Duration::from_secs(180), stream.next()) => {
                 match res {
                     Ok(next) => next,
                     Err(_) => {
-                        warn!("LLM stream inactive for 45s, terminating stream gracefully");
+                        warn!("LLM stream inactive for 180s, stream read timed out");
+                        if !stream_done {
+                            bail!("LLM stream timed out after 180s of inactivity from provider (interrupted generation)");
+                        }
                         None
                     }
                 }
@@ -284,6 +288,10 @@ impl LlmClient {
             if stream_done {
                 break 'stream_loop;
             }
+        }
+
+        if !stream_done && accumulated_text.is_empty() && tool_calls_map.is_empty() {
+            bail!("LLM stream closed prematurely by provider without returning any content or tool calls");
         }
 
         if in_reasoning {

@@ -35,12 +35,20 @@ pub struct ModelConfig {
     pub reasoning: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub base_url: String,
+    pub api_key: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
     pub max_steps: usize,
     pub models: HashMap<String, ModelConfig>,
+    pub providers: HashMap<String, ProviderConfig>,
 }
 
 impl EngineConfig {
@@ -90,6 +98,7 @@ impl EngineConfig {
         }
 
         let mut models = HashMap::new();
+        let mut providers_map = HashMap::new();
 
         if models_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&models_path) {
@@ -107,6 +116,15 @@ impl EngineConfig {
                                 .and_then(|k| k.as_str())
                                 .unwrap_or("")
                                 .to_string();
+
+                            providers_map.insert(
+                                prov_name.clone(),
+                                ProviderConfig {
+                                    name: prov_name.clone(),
+                                    base_url: base_url.clone(),
+                                    api_key: api_key.clone(),
+                                },
+                            );
 
                             if let Some(m_arr) = prov_val.get("models").and_then(|m| m.as_array()) {
                                 for m in m_arr {
@@ -158,6 +176,7 @@ impl EngineConfig {
             default_model,
             max_steps,
             models,
+            providers: providers_map,
         })
     }
 
@@ -189,6 +208,19 @@ impl EngineConfig {
             if let Some(m) = self.models.get(id) {
                 return Ok(m.clone());
             }
+            // If provider is configured, synthesize ModelConfig on the fly
+            if let Some(p) = self.providers.get(prov) {
+                return Ok(ModelConfig {
+                    id: id.to_string(),
+                    name: Some(id.to_string()),
+                    provider: prov.to_string(),
+                    base_url: p.base_url.clone(),
+                    api_key: p.api_key.clone(),
+                    context_window: 128_000,
+                    max_tokens: 8192,
+                    reasoning: false,
+                });
+            }
         }
 
         // Try find any model matching suffix
@@ -204,6 +236,32 @@ impl EngineConfig {
             if let Some(m) = self.models.get(&fallback_key) {
                 return Ok(m.clone());
             }
+            if let Some(p) = self.providers.get(prov) {
+                return Ok(ModelConfig {
+                    id: key.clone(),
+                    name: Some(key.clone()),
+                    provider: prov.clone(),
+                    base_url: p.base_url.clone(),
+                    api_key: p.api_key.clone(),
+                    context_window: 128_000,
+                    max_tokens: 8192,
+                    reasoning: false,
+                });
+            }
+        }
+
+        // If still not found, check if there is ANY provider configured with credentials
+        if let Some((prov_name, p)) = self.providers.iter().find(|(_, p)| !p.api_key.is_empty()) {
+            return Ok(ModelConfig {
+                id: key.clone(),
+                name: Some(key.clone()),
+                provider: prov_name.clone(),
+                base_url: p.base_url.clone(),
+                api_key: p.api_key.clone(),
+                context_window: 128_000,
+                max_tokens: 8192,
+                reasoning: false,
+            });
         }
 
         bail!("Model '{}' not found in configuration", key)

@@ -58,6 +58,10 @@ impl EngineSessionManager {
         }
     }
 
+    pub fn reload_config(&self) -> Result<()> {
+        self.agent_loop.reload_config()
+    }
+
     pub async fn prompt(
         &self,
         session_id: &str,

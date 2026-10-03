@@ -119,7 +119,7 @@ impl StreamEventHandler for DesktopStreamBridge {
 }
 
 pub struct AgentLoop {
-    pub config: EngineConfig,
+    pub config: std::sync::RwLock<EngineConfig>,
     pub tool_registry: ToolRegistry,
     pub llm_client: LlmClient,
     pub event_tx: broadcast::Sender<(String, Value)>,
@@ -132,11 +132,19 @@ impl AgentLoop {
         event_tx: broadcast::Sender<(String, Value)>,
     ) -> Self {
         Self {
-            config,
+            config: std::sync::RwLock::new(config),
             tool_registry,
             llm_client: LlmClient::new(),
             event_tx,
         }
+    }
+
+    pub fn reload_config(&self) -> Result<()> {
+        let new_cfg = EngineConfig::load()?;
+        let mut w = self.config.write().map_err(|e| anyhow::anyhow!("Poisoned lock: {}", e))?;
+        *w = new_cfg;
+        info!("Native engine config hot-reloaded successfully from disk");
+        Ok(())
     }
 
     fn compact_inflight_messages(messages: &mut [ChatMessage]) {
@@ -181,7 +189,21 @@ impl AgentLoop {
         model_override: Option<&str>,
         cancel_token: CancellationToken,
     ) -> Result<()> {
-        let model_cfg = self.config.resolve_model(model_override)?;
+        let model_cfg = {
+            let r = self.config.read().map_err(|e| anyhow::anyhow!("Poisoned lock: {}", e))?;
+            match r.resolve_model(model_override) {
+                Ok(cfg) => cfg,
+                Err(err) => {
+                    drop(r);
+                    info!("Model not found in cached engine config, reloading models.json from disk...");
+                    let _ = self.reload_config();
+                    let r2 = self.config.read().map_err(|e| anyhow::anyhow!("Poisoned lock: {}", e))?;
+                    r2.resolve_model(model_override).map_err(|e| {
+                        anyhow::anyhow!("无法定位或合成模型配置 ({}): {}", e, err)
+                    })?
+                }
+            }
+        };
         let mut journal = SessionJournal::open(session_id);
 
         // 1. Read existing conversation history from journal
@@ -249,8 +271,12 @@ impl AgentLoop {
         });
 
         let mut step = 0;
-        let is_unlimited = self.config.max_steps == 0;
-        let max_steps = if is_unlimited { usize::MAX } else { self.config.max_steps.max(25) };
+        let (is_unlimited, max_steps) = {
+            let cfg_guard = self.config.read().map_err(|e| anyhow::anyhow!("Poisoned lock: {}", e))?;
+            let is_unlim = cfg_guard.max_steps == 0;
+            let ms = if is_unlim { usize::MAX } else { cfg_guard.max_steps.max(25) };
+            (is_unlim, ms)
+        };
         let mut last_assistant_text = String::new();
         let mut finished_normally = false;
 
