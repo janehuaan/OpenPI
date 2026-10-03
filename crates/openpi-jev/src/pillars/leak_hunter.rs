@@ -16,7 +16,7 @@ impl LeakHunter {
         let secret_patterns = vec![
             (
                 "OpenAI/Anthropic/Agnes API Key",
-                Regex::new(r"(?i)\b(sk-[a-zA-Z0-9_\-]{20,64})\b").unwrap(),
+                Regex::new(r"(?i)\b(sk-[a-zA-Z0-9_\-]{20,200})\b").unwrap(),
                 "[REDACTED_API_KEY]",
             ),
             (
@@ -33,6 +33,41 @@ impl LeakHunter {
                 "AWS Access Key ID",
                 Regex::new(r"\b(AKIA[0-9A-Z]{16})\b").unwrap(),
                 "[REDACTED_AWS_KEY]",
+            ),
+            (
+                "AWS Secret Access Key",
+                Regex::new(r#"(?i)(aws_?secret[_a-z]*\s*[=:]\s*["']?)([A-Za-z0-9/+=]{40})"#).unwrap(),
+                "$1[REDACTED_AWS_SECRET]",
+            ),
+            (
+                "Google API Key",
+                Regex::new(r"\b(AIza[0-9A-Za-z_\-]{35})\b").unwrap(),
+                "[REDACTED_GOOGLE_KEY]",
+            ),
+            (
+                "Slack Token",
+                Regex::new(r"\b(xox[baprs]-[0-9A-Za-z-]{10,72})\b").unwrap(),
+                "[REDACTED_SLACK_TOKEN]",
+            ),
+            (
+                "Stripe Secret Key",
+                Regex::new(r"\b((?:sk|rk)_live_[0-9a-zA-Z]{16,})\b").unwrap(),
+                "[REDACTED_STRIPE_KEY]",
+            ),
+            (
+                "npm Token",
+                Regex::new(r"\b(npm_[A-Za-z0-9]{36})\b").unwrap(),
+                "[REDACTED_NPM_TOKEN]",
+            ),
+            (
+                "JWT",
+                Regex::new(r"\b(eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,})\b").unwrap(),
+                "[REDACTED_JWT]",
+            ),
+            (
+                "Generic secret assignment",
+                Regex::new(r#"(?i)((?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\s*[=:]\s*["']?)([^\s"',;]{6,})"#).unwrap(),
+                "$1[REDACTED]",
             ),
             (
                 "RSA/Ed25519 Private Key Block",
