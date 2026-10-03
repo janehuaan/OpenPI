@@ -1556,42 +1556,92 @@ pub async fn handle_invoke(
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
             let provider = args.get("provider").and_then(|v| v.as_str()).unwrap_or("");
             let model_id = args.get("modelId").and_then(|v| v.as_str()).unwrap_or("");
-            let res = client.request(ClientRequest::Rpc {
-                id: Uuid::new_v4().to_string(),
-                session_id: sid.to_string(),
-                command: json!({ "type": "set_model", "provider": provider, "modelId": model_id }),
-            }).await;
-            let final_res = match res {
-                Ok(data) => Ok(data),
-                Err(err) => {
-                    if err.contains("Model not found") && !sid.is_empty() {
-                        let _ = client.request(ClientRequest::StopSession {
-                            id: Uuid::new_v4().to_string(),
-                            session_id: sid.to_string(),
-                        }).await;
-                        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-                        client.request(ClientRequest::Rpc {
-                            id: Uuid::new_v4().to_string(),
-                            session_id: sid.to_string(),
-                            command: json!({ "type": "set_model", "provider": provider, "modelId": model_id }),
-                        }).await
-                    } else {
-                        Err(err)
+            let mut resolved_name = model_id.to_string();
+            let models_path = agent_dir().join("models.json");
+            if models_path.exists() {
+                if let Ok(content) = fs::read_to_string(&models_path) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(providers) = json.get("providers").and_then(|p| p.as_object()) {
+                            if let Some(p_val) = providers.get(provider) {
+                                if let Some(m_arr) = p_val.get("models").and_then(|m| m.as_array()) {
+                                    for mo in m_arr {
+                                        let id_match = mo.get("id").and_then(|v| v.as_str()) == Some(model_id)
+                                            || mo.as_str() == Some(model_id);
+                                        if id_match {
+                                            if let Some(n) = mo.get("name").and_then(|v| v.as_str()) {
+                                                resolved_name = n.to_string();
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }?;
-            Ok(final_res)
+            }
+
+            let _ = client.request(ClientRequest::Rpc {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_string(),
+                command: json!({ "type": "set_model", "provider": provider, "modelId": model_id, "name": resolved_name }),
+            }).await;
+
+            // Persist model_change line to session file
+            let session_file = find_session_file(sid);
+            if session_file.exists() {
+                use std::io::Write;
+                if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&session_file) {
+                    let entry = json!({
+                        "type": "model_change",
+                        "modelId": model_id,
+                        "name": resolved_name,
+                        "provider": provider,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    });
+                    let _ = writeln!(f, "{}", entry.to_string());
+                }
+            }
+
+            Ok(json!({
+                "model": {
+                    "id": model_id,
+                    "name": resolved_name,
+                    "provider": provider
+                },
+                "sessionId": sid,
+                "isStreaming": false,
+                "isCompacting": false
+            }))
         }
 
         "set_conversation_thinking_level" => {
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
             let level = args.get("level").and_then(|v| v.as_str()).unwrap_or("medium");
-            let res = client.request(ClientRequest::Rpc {
+            let _ = client.request(ClientRequest::Rpc {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
                 command: json!({ "type": "set_thinking_level", "level": level }),
-            }).await?;
-            Ok(res)
+            }).await;
+
+            // Persist thinking_level_change to session file
+            let session_file = find_session_file(sid);
+            if session_file.exists() {
+                use std::io::Write;
+                if let Ok(mut f) = fs::OpenOptions::new().append(true).open(&session_file) {
+                    let entry = json!({
+                        "type": "thinking_level_change",
+                        "thinkingLevel": level,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    });
+                    let _ = writeln!(f, "{}", entry.to_string());
+                }
+            }
+
+            Ok(json!({
+                "thinkingLevel": level,
+                "sessionId": sid
+            }))
         }
 
         // ── Task DAG Flow ──────────────────────────────────────────────────

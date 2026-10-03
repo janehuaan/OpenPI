@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::agent_loop::AgentLoop;
 use crate::config::EngineConfig;
+use crate::session_journal::SessionJournal;
 use crate::tool_registry::ToolRegistry;
 
 struct ActiveSessionState {
@@ -51,11 +52,14 @@ impl EngineSessionManager {
         Ok(())
     }
 
-    pub async fn set_model(&self, session_id: &str, model: &str) {
+    pub async fn set_model(&self, session_id: &str, provider: &str, model: &str, name: &str) {
         let mut active = self.active_sessions.lock().await;
+        let model_str = if provider.is_empty() { model.to_string() } else { format!("{}/{}", provider, model) };
         if let Some(state) = active.get_mut(session_id) {
-            state.model = Some(model.to_string());
+            state.model = Some(model_str);
         }
+        let mut journal = SessionJournal::open(session_id);
+        let _ = journal.append_model_change(provider, model, name);
     }
 
     pub fn reload_config(&self) -> Result<()> {

@@ -2038,7 +2038,20 @@ export function App() {
 		setError(undefined);
 		try {
 			const state = await action(instanceId);
-			setConversation((current) => (current?.instance?.id === instanceId ? { ...current, state } : current));
+			setConversation((current) => {
+				if (!current || current.instance?.id !== instanceId) return current;
+				const mergedState: ConversationState =
+					typeof state === "object" && state !== null
+						? {
+								...current.state,
+								...state,
+								model: (state as any).model
+									? { ...current.state?.model, ...(state as any).model }
+									: current.state?.model,
+						  }
+						: current.state;
+				return { ...current, state: mergedState };
+			});
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
@@ -2543,7 +2556,17 @@ export function App() {
 						const highest = getHighestThinkingLevel(model);
 						await desktopApi.setConversationThinkingLevel(instanceId, highest).catch(() => {});
 					}
-					return res;
+					return {
+						...res,
+						model: {
+							provider: model.provider,
+							id: model.id,
+							name: model.name,
+							contextWindow: model.contextWindow,
+							maxTokens: model.maxTokens,
+							reasoning: modelSupportsReasoning(model),
+						},
+					} as ConversationState;
 				})
 			}
 			onThinkingLevelChange={(level) =>

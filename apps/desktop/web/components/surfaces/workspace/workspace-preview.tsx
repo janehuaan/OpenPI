@@ -2732,6 +2732,10 @@ export function ReferenceWorkspacePreview({
 																		setModelMenuOpen(false);
 																		onModelChange(model);
 																	}}
+																	onClick={() => {
+																		setModelMenuOpen(false);
+																		onModelChange(model);
+																	}}
 																>
 																	<span className="model-option-main">
 																		<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>

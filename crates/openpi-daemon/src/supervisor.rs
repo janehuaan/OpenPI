@@ -1181,11 +1181,32 @@ impl Supervisor {
                 "set_model" => {
                     if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
                         let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = command.get("name").and_then(|v| v.as_str()).unwrap_or(m);
                         let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
-                        self.engine.set_model(session_id, &model_str).await;
+                        self.engine.set_model(session_id, prov, m, name).await;
                         let _ = self.update_session_model(session_id, model_str).await;
+
+                        return Ok(serde_json::json!({
+                            "model": {
+                                "id": m,
+                                "name": name,
+                                "provider": prov
+                            },
+                            "sessionId": session_id,
+                            "isStreaming": false,
+                            "isCompacting": false
+                        }));
                     }
                     return Ok(serde_json::json!(true));
+                }
+                "set_thinking_level" => {
+                    let level = command.get("level").and_then(|v| v.as_str()).unwrap_or("medium");
+                    let mut journal = openpi_engine::session_journal::SessionJournal::open(session_id);
+                    let _ = journal.append_thinking_level_change(level);
+                    return Ok(serde_json::json!({
+                        "thinkingLevel": level,
+                        "sessionId": session_id
+                    }));
                 }
                 "steer" => {
                     let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");

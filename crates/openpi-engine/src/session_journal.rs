@@ -413,6 +413,40 @@ impl SessionJournal {
         self.append_entry(&entry)?;
         Ok(entry_id)
     }
+
+    pub fn append_model_change(&mut self, provider: &str, model_id: &str, model_name: &str) -> Result<String> {
+        let entry_id = Uuid::new_v4().simple().to_string()[..8].to_string();
+        let now = Utc::now();
+
+        let entry = json!({
+            "type": "model_change",
+            "id": entry_id,
+            "parentId": self.last_entry_id,
+            "timestamp": now.to_rfc3339(),
+            "provider": provider,
+            "modelId": model_id,
+            "name": model_name
+        });
+
+        self.append_entry(&entry)?;
+        Ok(entry_id)
+    }
+
+    pub fn append_thinking_level_change(&mut self, level: &str) -> Result<String> {
+        let entry_id = Uuid::new_v4().simple().to_string()[..8].to_string();
+        let now = Utc::now();
+
+        let entry = json!({
+            "type": "thinking_level_change",
+            "id": entry_id,
+            "parentId": self.last_entry_id,
+            "timestamp": now.to_rfc3339(),
+            "thinkingLevel": level
+        });
+
+        self.append_entry(&entry)?;
+        Ok(entry_id)
+    }
 }
 
 #[cfg(test)]

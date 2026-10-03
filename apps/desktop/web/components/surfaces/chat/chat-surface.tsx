@@ -1810,6 +1810,10 @@ export function ChatSurface({
 																			setModelMenuOpen(false);
 																			if (!selected) onModelChange(model);
 																		}}
+																		onClick={() => {
+																			setModelMenuOpen(false);
+																			if (!selected) onModelChange(model);
+																		}}
 																	>
 																		<span className="model-option-main">
 																			<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
