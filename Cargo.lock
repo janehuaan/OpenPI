@@ -2764,6 +2764,7 @@ dependencies = [
  "openpi-jev",
  "openpi-memory",
  "openpi-proto",
+ "openpi-security",
  "openpi-storage",
  "openpi-tools",
  "reqwest 0.12.28",
@@ -2831,6 +2832,17 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "openpi-security"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "regex",
+ "serde",
+ "serde_json",
+ "walkdir",
 ]
 
 [[package]]

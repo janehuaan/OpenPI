@@ -9,6 +9,7 @@ openpi-proto = { path = "../openpi-proto" }
 openpi-tools = { path = "../openpi-tools" }
 openpi-jev = { path = "../openpi-jev" }
 openpi-memory = { path = "../openpi-memory" }
+openpi-security = { path = "../openpi-security" }
 openpi-storage = { path = "../openpi-storage" }
 tokio.workspace = true
 tokio-util.workspace = true

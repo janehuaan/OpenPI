@@ -6,6 +6,7 @@ members = [
     "crates/openpi-memory",
     "crates/openpi-state",
     "crates/openpi-tools",
+    "crates/openpi-security",
     "crates/openpi-daemon",
     "crates/openpi-jev",
     "crates/openpi-engine",

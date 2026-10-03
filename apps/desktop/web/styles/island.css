@@ -20,18 +20,27 @@
 	overflow: hidden;
 }
 
-/* ── 1. 胶囊静默/工作态 (The Pill — Hardware Top-Docked Notch Island) ── */
+/* ── Island: the persistent notch pill, always docked at the top ── */
 .island-pill {
+	--pill-fg: #ffffff;
+	--pill-fg-2: rgba(255, 255, 255, 0.72);
+	--pill-fg-3: rgba(255, 255, 255, 0.52);
 	pointer-events: auto;
-	width: 100%;
-	height: 100%;
+	z-index: 20;
+	width: 280px;
+	height: 25px;
+	flex-shrink: 0;
 	box-sizing: border-box;
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	padding: 0 11px;
-	background: #000000;
-	color: #ffffff;
+	padding: 0 12px;
+	/* Frosted dark material: semi-transparent + backdrop blur samples the
+	   macOS menu bar underneath, so the island always blends with it. */
+	background: rgba(22, 22, 24, 0.58);
+	-webkit-backdrop-filter: blur(28px) saturate(180%);
+	backdrop-filter: blur(28px) saturate(180%);
+	color: var(--pill-fg);
 	border: none !important;
 	outline: none !important;
 	border-top-left-radius: 0;
@@ -40,265 +49,66 @@
 	border-bottom-right-radius: 12px;
 	box-shadow: none !important;
 	cursor: pointer;
-	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-	position: relative;
-	overflow: hidden;
+	transition: background var(--anim-fast), color 220ms ease;
 }
 
 .island-pill:hover {
-	border: none !important;
-	outline: none !important;
-	box-shadow: none !important;
-	background: #0a0a0c;
+	background: rgba(36, 36, 38, 0.66);
 }
 
-.island-pill-left {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	min-width: 0;
-	flex-shrink: 0;
+.island-pill.expanded {
+	cursor: default;
 }
 
-.island-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	flex-shrink: 0;
-}
-
-.island-dot.idle {
-	background: #34c759;
-	box-shadow: 0 0 6px #34c759;
-}
-
-.island-dot.completed {
-	background: #34c759;
-	box-shadow: 0 0 8px rgba(52, 199, 89, 0.8);
-}
-
-.island-dot.busy {
-	background: #ff9f0a;
-	box-shadow: 0 0 8px #ff9f0a;
-	animation: island-pulse 1.4s infinite ease-in-out;
-}
-
-@keyframes island-pulse {
-	0%, 100% { transform: scale(1); opacity: 1; }
-	50% { transform: scale(1.3); opacity: 0.7; }
-}
-
-.island-brand {
-	font-size: 11px;
-	font-weight: 600;
-	letter-spacing: -0.2px;
-	color: #ffffff;
-}
-
-.island-pill-center {
-	flex: 1;
-	margin: 0 6px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	text-align: center;
-	font-size: 11px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	gap: 5px;
-}
-
-.island-pill-center.idle {
-	color: rgba(255, 255, 255, 0.65);
-}
-
-.island-pill-center.completed {
-	color: #34c759;
-	font-weight: 500;
-}
-
-.island-pill-center.busy {
-	color: #ff9f0a;
-	font-weight: 500;
-	animation: island-fade 2s infinite ease-in-out;
-}
-
-@keyframes island-fade {
-	0%, 100% { opacity: 0.95; }
-	50% { opacity: 0.6; }
-}
-
-.island-pill-right {
-	display: flex;
-	align-items: center;
-	color: rgba(255, 255, 255, 0.5);
-	transition: color 0.15s ease;
-	flex-shrink: 0;
-}
-
-.island-pill:hover .island-pill-right {
-	color: #ffffff;
-}
-
-.island-pill-dismiss-btn {
-	background: none;
-	border: none;
-	color: rgba(255, 255, 255, 0.45);
-	cursor: pointer;
-	padding: 2px 3px;
-	margin-right: 4px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	border-radius: 4px;
-	transition: all 0.15s ease;
-	opacity: 0;
-}
-
-.island-pill:hover .island-pill-dismiss-btn {
-	opacity: 1;
-}
-
-.island-pill-dismiss-btn:hover {
-	color: #ffffff;
-	background: rgba(255, 255, 255, 0.2);
-}
-
-/* ── 2. 展开交互小窗态 (The Expanded Card — Flowing Down From The Notch 1:1 with Main Window) ── */
-.island-card {
+/* ── Window: a separate dropdown panel floating below the island ── */
+.island-panel {
 	pointer-events: auto;
-	width: 100%;
-	height: 100%;
+	z-index: 10;
+	width: 432px;
+	flex: 1;
+	min-height: 0;
+	margin-top: 8px;
 	box-sizing: border-box;
 	display: flex;
 	flex-direction: column;
+	overflow: hidden;
 	border: none !important;
 	outline: none !important;
-	border-top-left-radius: 0;
-	border-top-right-radius: 0;
-	border-bottom-left-radius: 22px;
-	border-bottom-right-radius: 22px;
-	background: var(--bg); /* Uniform canvas background matching main window 1:1 */
-	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.15);
-	overflow: hidden;
-	animation: island-slide-down 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes island-slide-down {
-	from {
-		opacity: 0.4;
-		transform: translateY(-16px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
-/* Header — Zero dividing line cutting into card */
-.island-header {
-	height: 46px;
-	box-sizing: border-box;
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 0 16px;
-	background: transparent;
-	border-bottom: none;
-	flex-shrink: 0;
-}
-
-.island-header-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-	flex: 1;
-}
-
-.island-header-title {
-	font-size: 13px;
-	font-weight: 600;
+	border-radius: 16px;
+	background: var(--bg);
 	color: var(--text);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	max-width: 190px;
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+	transform-origin: top center;
 }
 
-.island-header-badge {
-	font-size: 10.5px;
-	font-family: var(--mono, ui-monospace, Menlo, monospace);
-	padding: 2px 7px;
-	border-radius: 6px;
-	background: var(--bg-muted);
-	border: 1px solid var(--border-subtle);
-	color: var(--text-secondary);
-	white-space: nowrap;
+.island-panel.visible {
+	opacity: 1;
+	animation: island-panel-in 220ms var(--ease-spring);
 }
 
-.island-header-actions {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	flex-shrink: 0;
+.island-panel.hidden {
+	opacity: 0;
+	pointer-events: none;
 }
 
-.island-action-btn {
-	appearance: none !important;
-	-webkit-appearance: none !important;
-	background: var(--bg-muted);
-	border: 1px solid var(--border-subtle);
-	border-radius: 8px;
-	padding: 4px 8px;
-	color: var(--text-secondary);
-	font-size: 11.5px;
-	font-weight: 500;
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	cursor: pointer;
-	transition: all 0.15s ease;
-	font-family: inherit;
-}
-
-.island-action-btn:hover {
-	background: var(--bg-elevated);
-	color: var(--text);
-	border-color: var(--border-strong);
-}
-
-.island-close-btn {
-	appearance: none !important;
-	-webkit-appearance: none !important;
-	background: transparent;
-	border: none !important;
-	padding: 6px;
-	border-radius: 8px;
-	color: var(--text-tertiary);
-	cursor: pointer;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	transition: all 0.15s ease;
-}
-
-.island-close-btn:hover {
-	background: var(--bg-muted);
-	color: var(--text);
+@keyframes island-panel-in {
+	from { opacity: 0; transform: translateY(-10px) scale(0.985); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Body / Messages List */
 .island-body {
 	flex: 1;
 	overflow-y: auto;
-	padding: 4px 16px;
+	padding: 6px 16px 18px;
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
 	scrollbar-width: none;
 	background: transparent;
+	/* Soften both ends so content never hard-cuts into a stray half row. */
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 16px), transparent 100%);
+	mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .island-body::-webkit-scrollbar {
@@ -571,4 +381,132 @@
 	padding: 0 4px;
 	font-size: 10.5px;
 	color: var(--text-tertiary);
+}
+
+/* ── Pill internals (persistent compact row) ── */
+.island-pill-left {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	flex-shrink: 0;
+}
+
+.island-dot {
+	width: 6.5px;
+	height: 6.5px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.island-dot.idle {
+	background: var(--ok);
+}
+
+.island-dot.completed {
+	background: var(--ok);
+	box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 55%, transparent);
+}
+
+.island-dot.busy {
+	background: var(--warn);
+	animation: island-pulse 1.4s infinite ease-in-out;
+}
+
+@keyframes island-pulse {
+	0%, 100% { transform: scale(1); opacity: 1; }
+	50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+.island-brand {
+	font-size: 11.5px;
+	font-weight: 600;
+	letter-spacing: -0.1px;
+	color: var(--pill-fg, #ffffff);
+}
+
+.island-pill-center {
+	flex: 1;
+	margin: 0 6px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: center;
+	font-size: 11px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+}
+
+.island-pill-center.idle {
+	color: var(--pill-fg-2, rgba(255, 255, 255, 0.68));
+}
+
+.island-pill-center.completed {
+	color: var(--ok);
+	font-weight: 500;
+}
+
+.island-pill-center.busy {
+	color: var(--warn);
+	font-weight: 500;
+	animation: island-fade 2s infinite ease-in-out;
+}
+
+@keyframes island-fade {
+	0%, 100% { opacity: 0.95; }
+	50% { opacity: 0.6; }
+}
+
+.island-pill-right {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--pill-fg-3, rgba(255, 255, 255, 0.5));
+	transition: color 0.15s ease;
+	flex-shrink: 0;
+}
+
+.island-pill-dismiss-btn {
+	background: none;
+	border: none;
+	color: inherit;
+	cursor: pointer;
+	padding: 2px 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	opacity: 0;
+	transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.island-pill:hover .island-pill-dismiss-btn,
+.island-pill.expanded .island-pill-dismiss-btn {
+	opacity: 1;
+}
+
+.island-pill-dismiss-btn:hover {
+	background: rgba(127, 127, 127, 0.18);
+}
+
+.island-pill-act-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	background: none;
+	border: none;
+	padding: 3px 7px;
+	border-radius: 6px;
+	color: inherit;
+	font-size: 11px;
+	font-weight: 500;
+	font-family: inherit;
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+
+.island-pill-act-btn:hover {
+	background: rgba(127, 127, 127, 0.16);
 }

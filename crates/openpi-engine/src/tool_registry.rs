@@ -177,6 +177,19 @@ impl ToolRegistry {
                     "required": ["name", "description", "content"]
                 }),
             ),
+            ToolDefinition::new(
+                "skill_scan",
+                "Statically scan OpenPI stored skills or arbitrary skill content for security risks: prompt injection, data exfiltration, privilege escalation, supply chain, excessive agency, memory poisoning. Pure static regex analysis — the scanned skill code is never executed. Use before trusting a skill, or to audit the Skills Hub.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "dir": { "type": "string", "description": "Directory to scan (default: ~/.openpi/memories/skills)" },
+                        "content": { "type": "string", "description": "Optional raw SKILL.md content to scan instead of a directory" },
+                        "min": { "type": "string", "description": "Minimum severity to report: low|medium|high|critical (default: medium)" }
+                    },
+                    "required": []
+                }),
+            ),
         ]
     }
 
@@ -512,6 +525,37 @@ impl ToolRegistry {
                     });
                 }
 
+                let findings: Vec<_> = openpi_security::scan_content(
+                    std::path::Path::new(&format!("{}.md", name)),
+                    content,
+                )
+                .into_iter()
+                .filter(|f| f.severity >= openpi_security::Severity::High)
+                .collect();
+                if !findings.is_empty() {
+                    let detail: Vec<String> = findings
+                        .iter()
+                        .map(|f| {
+                            format!(
+                                "[{}] {} L{}: {}",
+                                f.severity.label(),
+                                f.rule_id,
+                                f.line,
+                                f.snippet
+                            )
+                        })
+                        .collect();
+                    return Ok(ToolExecutionResult {
+                        output: format!(
+                            "Refused: skill '{}' contains {} high-risk pattern(s) and was NOT persisted:\n{}\n\nFix the flagged content (prompt injection / exfiltration / destructive commands) and retry.",
+                            name,
+                            findings.len(),
+                            detail.join("\n")
+                        ),
+                        is_error: true,
+                    });
+                }
+
                 match crate::skill_synthesizer::save_synthesized_skill(name, desc, content) {
                     Ok(path) => Ok(ToolExecutionResult {
                         output: format!(
@@ -526,6 +570,90 @@ impl ToolRegistry {
                         is_error: true,
                     }),
                 }
+            }
+
+            "skill_scan" => {
+                let min = match args.get("min").and_then(|v| v.as_str()).unwrap_or("medium") {
+                    "low" => openpi_security::Severity::Low,
+                    "medium" => openpi_security::Severity::Medium,
+                    "high" => openpi_security::Severity::High,
+                    "critical" => openpi_security::Severity::Critical,
+                    other => {
+                        return Ok(ToolExecutionResult {
+                            output: format!(
+                                "Invalid 'min' severity '{}'; use low|medium|high|critical.",
+                                other
+                            ),
+                            is_error: true,
+                        });
+                    }
+                };
+
+                let mut report = if let Some(content) =
+                    args.get("content").and_then(|v| v.as_str())
+                {
+                    openpi_security::ScanReport {
+                        files_scanned: 1,
+                        findings: openpi_security::scan_content(
+                            std::path::Path::new("<inline>"),
+                            content,
+                        ),
+                    }
+                } else {
+                    let dir = args
+                        .get("dir")
+                        .and_then(|v| v.as_str())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(openpi_security::skills_dir);
+                    if !dir.exists() {
+                        return Ok(ToolExecutionResult {
+                            output: format!(
+                                "Failed: directory '{}' does not exist.",
+                                dir.display()
+                            ),
+                            is_error: true,
+                        });
+                    }
+                    openpi_security::scan_dir(&dir)
+                };
+
+                report.findings.retain(|f| f.severity >= min);
+                let mut out = format!(
+                    "🛡️ skill_scan: {} file(s), {} rule(s)\n",
+                    report.files_scanned,
+                    openpi_security::rule_count()
+                );
+                if report.findings.is_empty() {
+                    out.push_str("✅ No risk findings.");
+                } else {
+                    for f in &report.findings {
+                        out.push_str(&format!(
+                            "\n{} [{}] {} · {} ({}:L{})\n   {} — {}",
+                            f.severity.emoji(),
+                            f.severity.label(),
+                            f.rule_id,
+                            f.category,
+                            f.file,
+                            f.line,
+                            f.description,
+                            f.snippet
+                        ));
+                    }
+                    out.push_str(&format!(
+                        "\n\nSummary: 🟥{} 🟧{} 🟨{} ⬜{}  total {}  | blocking: {}",
+                        report.count(openpi_security::Severity::Critical),
+                        report.count(openpi_security::Severity::High),
+                        report.count(openpi_security::Severity::Medium),
+                        report.count(openpi_security::Severity::Low),
+                        report.findings.len(),
+                        report.has_blocking(),
+                    ));
+                }
+
+                Ok(ToolExecutionResult {
+                    output: out,
+                    is_error: false,
+                })
             }
 
             other => Ok(ToolExecutionResult {

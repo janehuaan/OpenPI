@@ -228,7 +228,16 @@ export function IslandApp() {
 	// Hook to synchronize theme automatically with OpenPI
 	useTheme();
 
-	const [isExpanded, setIsExpanded] = useState(false);
+	// ── Fluid Bezier Animation Lifecycle ──
+	// "collapsed": strictly 280x25, pill visible, card unmounted, native window 280x25
+	// "expanding": native window expanded to 460x540, card mounted, shell transitioning to 432x526
+	// "expanded": 432x526, card visible, interactive
+	// "collapsing": card fading out, shell transitioning to 280x25; after 340ms -> collapsed & native window resized to 280x25
+	const [animState, setAnimState] = useState<"collapsed" | "expanding" | "expanded" | "collapsing">("collapsed");
+	const animStateRef = useRef(animState);
+	animStateRef.current = animState;
+
+	const isExpanded = animState === "expanding" || animState === "expanded";
 	const isExpandedRef = useRef(false);
 	isExpandedRef.current = isExpanded;
 
@@ -249,6 +258,44 @@ export function IslandApp() {
 	activeInstanceRef.current = activeInstance;
 	const isBusyRef = useRef(false);
 
+	// Fluid expand with Bezier animation
+	const handleExpand = useCallback(async () => {
+		if (animStateRef.current === "expanded" || animStateRef.current === "expanding") return;
+
+		try {
+			await desktopApi.setIslandExpanded(true);
+		} catch (err) {
+			console.error("Failed to set island expanded:", err);
+		}
+
+		setAnimState("expanding");
+		requestAnimationFrame(() => {
+			requestAnimationFrame(() => {
+				setAnimState("expanded");
+			});
+		});
+	}, []);
+
+	// Fluid collapse with Bezier animation
+	const handleCollapse = useCallback(async () => {
+		if (animStateRef.current === "collapsed" || animStateRef.current === "collapsing") return;
+
+		setAnimState("collapsing");
+
+		setTimeout(async () => {
+			setAnimState("collapsed");
+			try {
+				await desktopApi.setIslandExpanded(false);
+				if (!isBusyRef.current) {
+					await desktopApi.hideIslandWindow();
+					setJustCompleted(false);
+				}
+			} catch (err) {
+				console.error("Failed to collapse island:", err);
+			}
+		}, 340);
+	}, []);
+
 	// Cleanup any completion timer on unmount
 	useEffect(() => {
 		return () => {
@@ -262,13 +309,17 @@ export function IslandApp() {
 	useEffect(() => {
 		const unlisten = desktopApi.onIslandState?.((payload) => {
 			if (typeof payload?.expanded === "boolean") {
-				setIsExpanded(payload.expanded);
+				if (payload.expanded && animStateRef.current === "collapsed") {
+					void handleExpand();
+				} else if (!payload.expanded && (animStateRef.current === "expanded" || animStateRef.current === "expanding")) {
+					void handleCollapse();
+				}
 			}
 		});
 		return () => {
 			unlisten?.();
 		};
-	}, []);
+	}, [handleExpand, handleCollapse]);
 
 	// Load and set conversation by instanceId
 	const loadConversation = useCallback(async (instanceId: string) => {
@@ -320,10 +371,12 @@ export function IslandApp() {
 		refreshSnapshot();
 	}, [refreshSnapshot]);
 
-	// Auto-scroll to bottom on messages, tools, or streaming update
+	// Auto-scroll to bottom on messages, tools, or streaming update (only when expanded)
 	useEffect(() => {
-		messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [conversation?.messages?.length, runningTools.length, isStreaming]);
+		if (isExpanded) {
+			messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+		}
+	}, [conversation?.messages?.length, runningTools.length, isStreaming, isExpanded]);
 
 	// Derive display states
 	const isBusy =
@@ -341,7 +394,9 @@ export function IslandApp() {
 				completionTimerRef.current = null;
 			}
 			setJustCompleted(false);
-			void desktopApi.showIslandWindow();
+			if (!isExpandedRef.current) {
+				void desktopApi.showIslandWindow();
+			}
 		}
 	}, [isBusy]);
 
@@ -373,7 +428,9 @@ export function IslandApp() {
 			if (instanceId === "task-scheduler") {
 				const evType = event.type;
 				if (evType === "task_run_started") {
-					void desktopApi.showIslandWindow();
+					if (!isExpandedRef.current) {
+						void desktopApi.showIslandWindow();
+					}
 				} else if (evType === "task_run_completed") {
 					setJustCompleted(true);
 					setTimeout(() => {
@@ -451,7 +508,9 @@ export function IslandApp() {
 					completionTimerRef.current = null;
 				}
 				setJustCompleted(false);
-				void desktopApi.showIslandWindow();
+				if (!isExpandedRef.current) {
+					void desktopApi.showIslandWindow();
+				}
 				setIsStreaming(true);
 				setConversation((curr) =>
 					curr ? { ...curr, state: { ...curr.state, isStreaming: true } } : curr,
@@ -552,29 +611,17 @@ export function IslandApp() {
 		};
 	}, [loadConversation]);
 
-	// Toggle Island Expand / Collapse (280x42 <-> 460x540 pinned to screen top)
-	const handleToggleExpand = useCallback(async (expand: boolean) => {
-		setIsExpanded(expand);
-		try {
-			await desktopApi.setIslandExpanded(expand);
-			if (!expand && !isBusyRef.current) {
-				// Collapsed while idle -> auto-hide island window
-				await desktopApi.hideIslandWindow();
-				setJustCompleted(false);
-			}
-		} catch (err) {
-			console.error("Failed to toggle island expand:", err);
-		}
-	}, []);
-
 	// Open Main Window & Collapse Island
 	const handleOpenMain = useCallback(async () => {
 		try {
 			await desktopApi.openMainFromIsland();
-			await desktopApi.setIslandExpanded(false);
-			await desktopApi.hideIslandWindow();
-			setIsExpanded(false);
-			setJustCompleted(false);
+			setAnimState("collapsing");
+			setTimeout(async () => {
+				setAnimState("collapsed");
+				await desktopApi.setIslandExpanded(false);
+				await desktopApi.hideIslandWindow();
+				setJustCompleted(false);
+			}, 200);
 		} catch (err) {
 			console.error("Failed to open main window:", err);
 		}
@@ -600,29 +647,29 @@ export function IslandApp() {
 	// Keyboard shortcut handling: Esc to collapse
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && isExpanded) {
-				void handleToggleExpand(false);
+			if (e.key === "Escape" && (animState === "expanded" || animState === "expanding")) {
+				void handleCollapse();
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [isExpanded, handleToggleExpand]);
+	}, [animState, handleCollapse]);
 
 	// Auto-collapse on blur when clicking outside (only when expanded)
 	const lastFocusedRef = useRef<number>(Date.now());
 	useEffect(() => {
-		if (isExpanded) {
+		if (animState === "expanded" || animState === "expanding") {
 			lastFocusedRef.current = Date.now();
 		}
-	}, [isExpanded]);
+	}, [animState]);
 
 	useEffect(() => {
 		const onFocus = () => {
 			lastFocusedRef.current = Date.now();
 		};
 		const onBlur = () => {
-			if (isExpanded && Date.now() - lastFocusedRef.current > 600) {
-				void handleToggleExpand(false);
+			if ((animState === "expanded" || animState === "expanding") && Date.now() - lastFocusedRef.current > 600) {
+				void handleCollapse();
 			}
 		};
 		window.addEventListener("focus", onFocus);
@@ -631,7 +678,7 @@ export function IslandApp() {
 			window.removeEventListener("focus", onFocus);
 			window.removeEventListener("blur", onBlur);
 		};
-	}, [isExpanded, handleToggleExpand]);
+	}, [animState, handleCollapse]);
 
 	// Derive display states
 	const rawModelName = conversation?.state?.model?.name || conversation?.state?.model?.id;
@@ -676,232 +723,224 @@ export function IslandApp() {
 		return buildIslandFeedItems(msgs, toolDurations);
 	}, [conversation?.messages, toolDurations]);
 
+	const isCardMounted = animState !== "collapsed";
+	const isCardVisible = animState === "expanded";
+
 	return (
 		<div className="island-root">
-			{!isExpanded ? (
-				/* ── 1. 胶囊静默/工作态 (The Pill — Hardware Top-Docked Notch Island) ── */
-				<div
-					onClick={() => handleToggleExpand(true)}
-					className={`island-pill ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}
-				>
-					{/* Status Dot & Title */}
-					<div className="island-pill-left">
-						<div className={`island-dot ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`} />
-						<span className="island-brand">OpenPI</span>
-					</div>
+			{/* Island — the persistent notch pill, always docked at the top */}
+			<div
+				className={`island-pill ${isExpanded ? "expanded" : ""} ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}
+				onClick={() => {
+					if (animStateRef.current === "collapsed") {
+						void handleExpand();
+					} else if (animStateRef.current === "expanded") {
+						void handleCollapse();
+					}
+				}}
+			>
+						{/* Status Dot & Title */}
+						<div className="island-pill-left">
+							<div className={`island-dot ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`} />
+							<span className="island-brand">OpenPI</span>
+						</div>
 
-					{/* Center Live Status */}
-					<div className={`island-pill-center ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}>
-						{isBusy && <Sparkles style={{ width: 12, height: 12 }} />}
-						{justCompleted && <span style={{ color: "#34c759", fontWeight: 700 }}>✓</span>}
-						<span>{statusLabel}</span>
-					</div>
+						{/* Center Live Status */}
+						<div className={`island-pill-center ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}>
+							{isBusy && <Sparkles style={{ width: 12, height: 12 }} />}
+							{justCompleted && <span style={{ color: "var(--ok)", fontWeight: 700 }}>✓</span>}
+							<span>{statusLabel}</span>
+						</div>
 
-					{/* Actions indicator: Dismiss button & Expand chevron */}
-					<div className="island-pill-right">
-						<button
-							type="button"
-							onClick={(e) => {
-								e.stopPropagation();
-								setJustCompleted(false);
-								void desktopApi.hideIslandWindow();
-							}}
-							title="隐藏灵动岛"
-							className="island-pill-dismiss-btn"
-						>
-							<X style={{ width: 11, height: 11 }} />
-						</button>
-						<ChevronDown style={{ width: 13, height: 13 }} />
-					</div>
-				</div>
-			) : (
-				/* ── 2. 展开交互小窗态 (The Expanded Card — Flowing Down From The Notch) ── */
-				<div className="island-card">
-					{/* Header — Seamless with Canvas */}
-					<div className="island-header">
-						<div className="island-header-left">
-							<div className={`island-dot ${isBusy ? "busy" : "idle"}`} />
-							<span className="island-header-title">
-								{conversationTitle}
-							</span>
-							{formattedModel && (
-								<span className="island-header-badge">
-									{formattedModel}
-								</span>
+						{/* Actions: open-main (expanded) · dismiss · collapse toggle */}
+						<div className="island-pill-right">
+							{isExpanded && (
+								<button
+									type="button"
+									onClick={(e) => {
+										e.stopPropagation();
+										void handleOpenMain();
+									}}
+									title="在完整工作台中打开"
+									className="island-pill-act-btn"
+								>
+									<span>大窗</span>
+									<ExternalLink style={{ width: 11, height: 11 }} />
+								</button>
 							)}
-						</div>
-
-						<div className="island-header-actions">
-							{/* Open in full workspace */}
 							<button
 								type="button"
-								onClick={handleOpenMain}
-								title="在完整工作台中打开"
-								className="island-action-btn"
+								onClick={(e) => {
+									e.stopPropagation();
+									setJustCompleted(false);
+									void desktopApi.hideIslandWindow();
+								}}
+								title="隐藏灵动岛"
+								className="island-pill-dismiss-btn"
 							>
-								<span>大窗</span>
-								<ExternalLink style={{ width: 12, height: 12 }} />
+								<X style={{ width: 11, height: 11 }} />
 							</button>
-
-							{/* Close / Collapse button */}
-							<button
-								type="button"
-								onClick={() => handleToggleExpand(false)}
-								title="收起灵动岛 (Esc)"
-								className="island-close-btn"
-							>
-								<X style={{ width: 14, height: 14 }} />
-							</button>
+							<ChevronDown
+								style={{
+									width: 13,
+									height: 13,
+									transition: "transform 260ms cubic-bezier(0.16, 1, 0.3, 1)",
+									transform: isExpanded ? "rotate(180deg)" : "none",
+								}}
+							/>
 						</div>
-					</div>
+			</div>
 
-					{/* Message & Execution Flow */}
-					<div className="island-body">
-						{feedItems.length === 0 && runningTools.length === 0 ? (
-							<div className="island-empty">
-								<Bot style={{ width: 32, height: 32, opacity: 0.6, color: "var(--accent)" }} />
-								<div className="island-empty-title">随时向 OpenPI 发送指令</div>
-								<div className="island-empty-desc">灵动岛将实时同步执行细节</div>
-								<div className="island-quick-chips">
-									{["总结当前代码变更", "执行 cargo check", "写一个快速测试"].map((prompt) => (
-										<button
-											type="button"
-											key={prompt}
-											onClick={() => setInput(prompt)}
-											className="island-chip"
-										>
-											{prompt}
-										</button>
-									))}
+			{/* Window — a separate dropdown panel floating below the island */}
+			{isCardMounted && (
+				<div className={`island-panel ${isCardVisible ? "visible" : "hidden"}`}>
+						{/* Message & Execution Flow */}
+						<div className="island-body">
+							{feedItems.length === 0 && runningTools.length === 0 ? (
+								<div className="island-empty">
+									<Bot style={{ width: 32, height: 32, opacity: 0.6, color: "var(--accent)" }} />
+									<div className="island-empty-title">随时向 OpenPI 发送指令</div>
+									<div className="island-empty-desc">灵动岛将实时同步执行细节</div>
+									<div className="island-quick-chips">
+										{["总结当前代码变更", "执行 cargo check", "写一个快速测试"].map((prompt) => (
+											<button
+												type="button"
+												key={prompt}
+												onClick={() => setInput(prompt)}
+												className="island-chip"
+											>
+												{prompt}
+											</button>
+										))}
+									</div>
 								</div>
-							</div>
-						) : (
-							feedItems.map((item, idx) => {
-								if (item.kind === "user") {
-									return (
-										<div key={item.id} className="island-msg-row user">
-											<div className="island-bubble-user">
-												{item.text}
-											</div>
-										</div>
-									);
-								}
-
-								if (item.kind === "actions") {
-									const isLast = idx === feedItems.length - 1;
-									return (
-										<div key={item.id} className="island-msg-row actions">
-											{item.reasoning && (
-												<ReasoningBlock
-													reasoning={item.reasoning}
-													isWorking={isBusy && isLast}
-												/>
-											)}
-											{(item.actions.length > 0 || (isLast && runningTools.length > 0)) && (
-												<AgentActionChain
-													actions={item.actions}
-													runningTools={isLast && isBusy ? runningTools : []}
-													isWorking={isBusy && isLast}
-													workspaceCwd={activeInstance?.cwd}
-												/>
-											)}
-										</div>
-									);
-								}
-
-								if (item.kind === "assistant") {
-									const isLast = idx === feedItems.length - 1;
-									return (
-										<div key={item.id} className="island-msg-row assistant">
-											{item.reasoning && (
-												<ReasoningBlock
-													reasoning={item.reasoning}
-													isWorking={isBusy && isLast}
-												/>
-											)}
-											{item.text && (
-												<div className="island-bubble-assistant">
-													<MarkdownText
-														text={item.text}
-														streaming={isStreaming && isLast}
-													/>
+							) : (
+								feedItems.map((item, idx) => {
+									if (item.kind === "user") {
+										return (
+											<div key={item.id} className="island-msg-row user">
+												<div className="island-bubble-user">
+													{item.text}
 												</div>
-											)}
-										</div>
-									);
-								}
+											</div>
+										);
+									}
 
-								return null;
-							})
-						)}
+									if (item.kind === "actions") {
+										const isLast = idx === feedItems.length - 1;
+										return (
+											<div key={item.id} className="island-msg-row actions">
+												{item.reasoning && (
+													<ReasoningBlock
+														reasoning={item.reasoning}
+														isWorking={isBusy && isLast}
+													/>
+												)}
+												{(item.actions.length > 0 || (isLast && runningTools.length > 0)) && (
+													<AgentActionChain
+														actions={item.actions}
+														runningTools={isLast && isBusy ? runningTools : []}
+														isWorking={isBusy && isLast}
+														workspaceCwd={activeInstance?.cwd}
+													/>
+												)}
+											</div>
+										);
+									}
 
-						{/* Standalone active running tools if actions block not yet flushed */}
-						{runningTools.length > 0 &&
-							!(feedItems.length > 0 && feedItems[feedItems.length - 1].kind === "actions") && (
-								<div className="island-msg-row actions">
-									<AgentActionChain
-										actions={[]}
-										runningTools={runningTools}
-										isWorking={isBusy}
-										workspaceCwd={activeInstance?.cwd}
-									/>
-								</div>
+									if (item.kind === "assistant") {
+										const isLast = idx === feedItems.length - 1;
+										return (
+											<div key={item.id} className="island-msg-row assistant">
+												{item.reasoning && (
+													<ReasoningBlock
+														reasoning={item.reasoning}
+														isWorking={isBusy && isLast}
+													/>
+												)}
+												{item.text && (
+													<div className="island-bubble-assistant">
+														<MarkdownText
+															text={item.text}
+															streaming={isStreaming && isLast}
+														/>
+													</div>
+												)}
+											</div>
+										);
+									}
+
+									return null;
+								})
 							)}
 
-						{/* Non-tool progress (thinking / responding), identical to main window */}
-						{isBusy && runningTools.length === 0 && (
-							<div className="island-turn-progress">
-								{turnProgress ? (
-									<TurnProgressRow progress={turnProgress} />
-								) : (
-									<div className="turn-progress" role="status">
-										<span className="turn-progress-dots" aria-hidden="true">
-											<span />
-											<span />
-											<span />
-										</span>
-										<span className="turn-progress-label">正在处理中…</span>
+							{/* Standalone active running tools if actions block not yet flushed */}
+							{runningTools.length > 0 &&
+								!(feedItems.length > 0 && feedItems[feedItems.length - 1].kind === "actions") && (
+									<div className="island-msg-row actions">
+										<AgentActionChain
+											actions={[]}
+											runningTools={runningTools}
+											isWorking={isBusy}
+											workspaceCwd={activeInstance?.cwd}
+										/>
 									</div>
 								)}
-							</div>
-						)}
-						<div ref={messagesEndRef} />
-					</div>
 
-					{/* Dialogue Input Floating Composer */}
-					<div className="island-footer">
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								handleSend();
-							}}
-							className="island-input-box"
-						>
-							<input
-								type="text"
-								value={input}
-								onChange={(e) => setInput(e.target.value)}
-								placeholder="输入消息或指令... (Enter 发送)"
-								disabled={isSending}
-								autoFocus
-								className="island-text-input"
-							/>
-							<button
-								type="submit"
-								disabled={!input.trim() || isSending}
-								className="island-send-btn"
-								title="发送 (Enter)"
+							{/* Non-tool progress (thinking / responding), identical to main window */}
+							{isBusy && runningTools.length === 0 && (
+								<div className="island-turn-progress">
+									{turnProgress ? (
+										<TurnProgressRow progress={turnProgress} />
+									) : (
+										<div className="turn-progress" role="status">
+											<span className="turn-progress-dots" aria-hidden="true">
+												<span />
+												<span />
+												<span />
+											</span>
+											<span className="turn-progress-label">正在处理中…</span>
+										</div>
+									)}
+								</div>
+							)}
+							<div ref={messagesEndRef} />
+						</div>
+
+						{/* Dialogue Input Floating Composer */}
+						<div className="island-footer">
+							<form
+								onSubmit={(e) => {
+									e.preventDefault();
+									handleSend();
+								}}
+								className="island-input-box"
 							>
-								<Send style={{ width: 13, height: 13 }} />
-							</button>
-						</form>
-						<div className="island-shortcuts-bar">
-							<span>按 Esc 收起</span>
-							<span>Enter 发送 · Shift+Enter 换行</span>
+								<input
+									type="text"
+									value={input}
+									onChange={(e) => setInput(e.target.value)}
+									placeholder="输入消息或指令... (Enter 发送)"
+									disabled={isSending}
+									autoFocus
+									className="island-text-input"
+								/>
+								<button
+									type="submit"
+									disabled={!input.trim() || isSending}
+									className="island-send-btn"
+									title="发送 (Enter)"
+								>
+									<Send style={{ width: 13, height: 13 }} />
+								</button>
+							</form>
+							<div className="island-shortcuts-bar">
+								<span>按 Esc 收起</span>
+								<span>Enter 发送 · Shift+Enter 换行</span>
+							</div>
 						</div>
 					</div>
-				</div>
-			)}
+				)}
 		</div>
 	);
 }

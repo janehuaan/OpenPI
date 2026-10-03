@@ -2290,14 +2290,19 @@ pub async fn handle_invoke(
         "set_island_expanded" => {
             let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
             let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded }));
-            if let Some(island) = app.get_webview_window("island") {
-                let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 25.0) };
-                crate::island_native::position_island_top_center(&island, w, h);
-                if expanded {
-                    let _ = island.show();
-                    let _ = island.set_focus();
+            // AppKit NSWindow mutations must happen on the main thread; async IPC
+            // handlers run on a tokio worker, so marshal the layout call over.
+            let app_island = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(island) = app_island.get_webview_window("island") {
+                    let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 25.0) };
+                    crate::island_native::position_island_top_center(&island, w, h);
+                    if expanded {
+                        let _ = island.show();
+                        let _ = island.set_focus();
+                    }
                 }
-            }
+            });
             Ok(json!(true))
         }
 
@@ -2311,24 +2316,39 @@ pub async fn handle_invoke(
         }
 
         "toggle_island_window" => {
-            if let Some(island) = app.get_webview_window("island") {
-                if let Ok(visible) = island.is_visible() {
-                    if visible {
-                        let _ = island.hide();
-                    } else {
-                        crate::island_native::position_island_top_center(&island, 280.0, 25.0);
-                        let _ = island.show();
+            let app_island = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(island) = app_island.get_webview_window("island") {
+                    if let Ok(visible) = island.is_visible() {
+                        if visible {
+                            let _ = island.hide();
+                        } else {
+                            crate::island_native::position_island_top_center(&island, 280.0, 25.0);
+                            let _ = island.show();
+                        }
                     }
                 }
-            }
+            });
             Ok(json!(true))
         }
 
         "show_island_window" => {
-            if let Some(island) = app.get_webview_window("island") {
-                crate::island_native::position_island_top_center(&island, 280.0, 25.0);
-                let _ = island.show();
-            }
+            let app_island = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(island) = app_island.get_webview_window("island") {
+                    if let Ok(size) = island.inner_size() {
+                        let scale = island.scale_factor().unwrap_or(1.0);
+                        let h = size.height as f64 / scale;
+                        if h > 100.0 {
+                            let _ = island.show();
+                            return;
+                        }
+                    }
+                    let _ = app_island.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
+                    crate::island_native::position_island_top_center(&island, 280.0, 25.0);
+                    let _ = island.show();
+                }
+            });
             Ok(json!(true))
         }
 
@@ -2341,9 +2361,12 @@ pub async fn handle_invoke(
 
         "set_island_mouse_ignore" => {
             let ignore = args.get("ignore").and_then(|v| v.as_bool()).unwrap_or(false);
-            if let Some(island) = app.get_webview_window("island") {
-                crate::island_native::set_island_mouse_ignore(&island, ignore);
-            }
+            let app_island = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(island) = app_island.get_webview_window("island") {
+                    crate::island_native::set_island_mouse_ignore(&island, ignore);
+                }
+            });
             Ok(json!(true))
         }
 
@@ -2614,10 +2637,18 @@ pub async fn handle_invoke(
                 let _ = fs::write(&s_path, serde_json::to_string_pretty(&core_settings).unwrap_or_default());
             }
 
+            if let Some(theme) = merged.get("theme").and_then(|v| v.as_str()) {
+                let flavor = merged.get("themeFlavor").and_then(|v| v.as_str());
+                let _ = app.emit("openpi:theme-sync", serde_json::json!({ "mode": theme, "flavor": flavor }));
+            }
+
             Ok(merged)
         }
 
         "set_native_theme" => {
+            let mode = args.get("theme").and_then(|v| v.as_str()).unwrap_or("system");
+            let flavor = args.get("flavor").and_then(|v| v.as_str());
+            let _ = app.emit("openpi:theme-sync", serde_json::json!({ "mode": mode, "flavor": flavor }));
             Ok(json!(true))
         }
 

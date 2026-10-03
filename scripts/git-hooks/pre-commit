@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# OpenPI pre-commit 钩子：静态扫描技能库安全风险，High/Critical 阻断提交。
+# 安装：git config core.hooksPath scripts/git-hooks
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+
+SKILLS_DIR="${OPENPI_SKILLS_DIR:-${OPENPI_DIR:-$HOME/.openpi}/memories/skills}"
+
+# 无技能库或改动与技能/扫描器无关 → 放行，保持提交轻快
+if [ ! -d "$SKILLS_DIR" ]; then exit 0; fi
+changed="$(git diff --cached --name-only || true)"
+if ! printf '%s\n' "$changed" | grep -qE '(^|/)SKILL\.md$|crates/openpi-security/'; then
+  exit 0
+fi
+
+command -v cargo >/dev/null 2>&1 || { echo "⚠️  pre-commit: 未找到 cargo，跳过技能安检" >&2; exit 0; }
+
+if ! cargo run -q -p openpi-security --bin skillscan -- --min high "$@"; then
+  echo "❌ pre-commit: 技能安全扫描发现 High/Critical 风险，已阻断提交。" >&2
+  echo "   修复后重试，或运行 skillscan 查看详情。" >&2
+  exit 1
+fi

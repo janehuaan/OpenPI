@@ -117,7 +117,10 @@ impl ManagedBash {
                 let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
 
                 if is_truncated {
-                    stdout.push_str("\n... [Output truncated: 50KB stream limit reached] ...\n");
+                    stdout.push_str(&format!(
+                        "\n... [Output truncated: {}KB stream limit reached] ...\n",
+                        cap_bytes / 1024
+                    ));
                 }
 
                 Ok(BashResult {

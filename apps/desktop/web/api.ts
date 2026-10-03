@@ -80,6 +80,7 @@ type OpenPiBridge = {
 	onSelectConversation?: (handler: (instanceId: string) => void) => () => void;
 	emitSelectConversation?: (instanceId: string) => void;
 	onIslandState?: (handler: (payload: { expanded: boolean }) => void) => () => void;
+	onThemeSync?: (handler: (payload: { mode: string; flavor?: string }) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -322,7 +323,8 @@ export const desktopApi = {
 	stopSpeechRecognition: (sessionId: string) => call<boolean>("stop_speech_recognition", { sessionId }),
 	notifyTaskCompleted: (opts?: { message?: string; title?: string; durationMs?: number; force?: boolean }) =>
 		call<boolean>("notify_task_completed", opts),
-	setNativeTheme: (theme: "system" | "dark" | "light") => call<boolean>("set_native_theme", { theme }),
+	setNativeTheme: (theme: "system" | "dark" | "light", flavor?: string) =>
+		call<boolean>("set_native_theme", { theme, flavor }),
 	getAppSettings: () => call<AppSettings>("get_app_settings"),
 	updateAppSettings: async (patch: Partial<AppSettings>) => {
 		const result = await call<AppSettings>("update_app_settings", patch);
@@ -449,6 +451,11 @@ export const desktopApi = {
 		const api = bridge();
 		if (!api?.onIslandState) return () => undefined;
 		return api.onIslandState(handler);
+	},
+	onThemeSync: (handler: (payload: { mode: string; flavor?: string }) => void) => {
+		const api = bridge();
+		if (!api?.onThemeSync) return () => undefined;
+		return api.onThemeSync(handler);
 	},
 
 	// ── Auto-Pilot Autonomous Delivery & Self-Healing Loop ──────────────────────────

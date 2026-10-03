@@ -136,5 +136,8 @@ if (typeof window !== "undefined") {
 		onIslandState: (handler: (payload: { expanded: boolean }) => void): (() => void) => {
 			return safeListen("openpi:island-state", handler);
 		},
+		onThemeSync: (handler: (payload: { mode: string; flavor?: string }) => void): (() => void) => {
+			return safeListen("openpi:theme-sync", handler);
+		},
 	};
 }

@@ -215,6 +215,12 @@ export function applyTheme(config: ThemeConfig): void {
 		flavor = defaultFlavorForMode(effectiveMode);
 	}
 
+	const currentTheme = html.getAttribute("data-theme");
+	const currentFlavor = html.getAttribute("data-theme-flavor");
+	if (currentTheme === effectiveMode && currentFlavor === flavor) {
+		return;
+	}
+
 	// 1. Set DOM attributes
 	html.setAttribute("data-theme", effectiveMode);
 	html.setAttribute("data-theme-flavor", flavor);
@@ -232,14 +238,7 @@ export function applyTheme(config: ThemeConfig): void {
 		window.localStorage.setItem(THEME_FLAVOR_STORAGE_KEY, flavor);
 	} catch {}
 
-	// 3. Inform Electron native theme if available
-	try {
-		if (desktopApi?.setNativeTheme) {
-			desktopApi.setNativeTheme(config.mode).catch(() => {});
-		}
-	} catch {}
-
-	// 4. Dispatch DOM event
+	// 3. Dispatch DOM event
 	try {
 		window.dispatchEvent(
 			new CustomEvent(THEME_CHANGED_EVENT, {
@@ -282,7 +281,7 @@ export function setThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
 	const nextConfig: ThemeConfig = { mode: nextMode, flavor: nextFlavor };
 	applyTheme(nextConfig);
 
-	// Persist to backend settings
+	// Persist to backend settings & broadcast across windows
 	try {
 		if (desktopApi?.updateAppSettings) {
 			desktopApi
@@ -291,6 +290,9 @@ export function setThemeConfig(patch: Partial<ThemeConfig>): ThemeConfig {
 					themeFlavor: nextConfig.flavor,
 				})
 				.catch(() => {});
+		}
+		if (desktopApi?.setNativeTheme) {
+			desktopApi.setNativeTheme(nextConfig.mode, nextConfig.flavor).catch(() => {});
 		}
 	} catch {}
 
@@ -344,6 +346,20 @@ export function initTheme(): void {
 			mediaQuery.addListener?.(handler);
 		}
 	}
+
+	// In desktop environment, align theme settings from app_settings.json on startup
+	try {
+		if (desktopApi?.getAppSettings) {
+			desktopApi.getAppSettings().then((settings) => {
+				if (settings?.theme || settings?.themeFlavor) {
+					const mode = (settings.theme as ThemeMode) || "system";
+					const effective = resolveEffectiveMode(mode);
+					const flavor = (settings.themeFlavor as ThemeFlavor) || defaultFlavorForMode(effective);
+					applyTheme({ mode, flavor });
+				}
+			}).catch(() => {});
+		}
+	} catch {}
 }
 
 /**
@@ -372,9 +388,58 @@ export function useTheme() {
 			}
 		};
 
+		// 1. In-window DOM event
 		window.addEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
+
+		// 2. Cross-window storage event
+		const handleStorage = (e: StorageEvent) => {
+			if (e.key === THEME_MODE_STORAGE_KEY || e.key === THEME_FLAVOR_STORAGE_KEY) {
+				const current = getStoredThemeConfig();
+				applyTheme(current);
+				setTheme(current);
+				setEffectiveMode(resolveEffectiveMode(current.mode));
+			}
+		};
+		window.addEventListener("storage", handleStorage);
+
+		// 3. Cross-window Tauri IPC event
+		const unlistenSync = desktopApi.onThemeSync?.((payload) => {
+			if (payload?.mode) {
+				const mode = payload.mode as ThemeMode;
+				const effective = resolveEffectiveMode(mode);
+				const flavor = (payload.flavor as ThemeFlavor) || defaultFlavorForMode(effective);
+				const current = getStoredThemeConfig();
+				if (current.mode === mode && current.flavor === flavor) {
+					return;
+				}
+				const nextConfig: ThemeConfig = { mode, flavor };
+				applyTheme(nextConfig);
+				setTheme(nextConfig);
+				setEffectiveMode(effective);
+			}
+		});
+
+		// 4. On mount, synchronize with app settings directly
+		try {
+			if (desktopApi?.getAppSettings) {
+				desktopApi.getAppSettings().then((settings) => {
+					if (settings?.theme || settings?.themeFlavor) {
+						const mode = (settings.theme as ThemeMode) || "system";
+						const effective = resolveEffectiveMode(mode);
+						const flavor = (settings.themeFlavor as ThemeFlavor) || defaultFlavorForMode(effective);
+						const nextConfig: ThemeConfig = { mode, flavor };
+						applyTheme(nextConfig);
+						setTheme(nextConfig);
+						setEffectiveMode(effective);
+					}
+				}).catch(() => {});
+			}
+		} catch {}
+
 		return () => {
 			window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
+			window.removeEventListener("storage", handleStorage);
+			unlistenSync?.();
 		};
 	}, []);
 

@@ -60,10 +60,13 @@ pub fn run() {
                         if let Some(event_obj) = event.as_object() {
                             if let Some(ev_type) = event_obj.get("type").and_then(|v| v.as_str()) {
                                 if ev_type == "agent_start" || ev_type == "turn_start" {
-                                    if let Some(island) = handle_events.get_webview_window("island") {
-                                        island_native::position_island_top_center(&island, 280.0, 25.0);
-                                        let _ = island.show();
-                                    }
+                                    let app_island = handle_events.clone();
+                                    let _ = handle_events.run_on_main_thread(move || {
+                                        if let Some(island) = app_island.get_webview_window("island") {
+                                            island_native::position_island_top_center(&island, 280.0, 25.0);
+                                            let _ = island.show();
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -143,29 +146,39 @@ pub fn run() {
                                     }
                                 }
                                 "island" => {
-                                    let arg = parts.get(1).unwrap_or(&"");
-                                    if *arg == "expand" || *arg == "open" {
+                                    let arg = parts.get(1).copied().unwrap_or("");
+                                    if arg == "expand" || arg == "open" {
                                         let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": true }));
-                                        if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 460.0, 540.0);
-                                            let _ = island.show();
-                                            let _ = island.set_focus();
-                                        }
-                                    } else if *arg == "collapse" || *arg == "close" {
+                                        let app_island = handle_cmd.clone();
+                                        let _ = handle_cmd.run_on_main_thread(move || {
+                                            if let Some(island) = app_island.get_webview_window("island") {
+                                                island_native::position_island_top_center(&island, 460.0, 540.0);
+                                                let _ = island.show();
+                                                let _ = island.set_focus();
+                                            }
+                                        });
+                                    } else if arg == "collapse" || arg == "close" {
                                         let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
-                                        if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 280.0, 25.0);
-                                            let _ = island.show();
-                                        }
-                                    } else if *arg == "hide" {
+                                        let app_island = handle_cmd.clone();
+                                        let _ = handle_cmd.run_on_main_thread(move || {
+                                            if let Some(island) = app_island.get_webview_window("island") {
+                                                island_native::position_island_top_center(&island, 280.0, 25.0);
+                                                let _ = island.show();
+                                            }
+                                        });
+                                    } else if arg == "hide" {
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
                                             let _ = island.hide();
                                         }
-                                    } else if *arg == "show" {
-                                        if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 280.0, 25.0);
-                                            let _ = island.show();
-                                        }
+                                    } else if arg == "show" {
+                                        let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
+                                        let app_island = handle_cmd.clone();
+                                        let _ = handle_cmd.run_on_main_thread(move || {
+                                            if let Some(island) = app_island.get_webview_window("island") {
+                                                island_native::position_island_top_center(&island, 280.0, 25.0);
+                                                let _ = island.show();
+                                            }
+                                        });
                                     }
                                 }
                                 _ => {}
