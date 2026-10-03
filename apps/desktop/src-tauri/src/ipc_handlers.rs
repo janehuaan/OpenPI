@@ -154,6 +154,136 @@ pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
     (is_vision, is_reasoning, ctx, max_tok)
 }
 
+pub fn is_chat_completion_model(model_id: &str) -> bool {
+    let lower = model_id.to_lowercase();
+    if lower.contains("embedding")
+        || lower.contains("embed")
+        || lower.contains("whisper")
+        || lower.contains("tts")
+        || lower.contains("dall-e")
+        || lower.contains("moderation")
+        || lower.contains("rerank")
+        || lower.contains("bge-")
+        || lower.contains("speech")
+        || lower.contains("audio")
+        || lower.contains("text-to-")
+    {
+        return false;
+    }
+    true
+}
+
+pub fn format_model_display_name(model_id: &str) -> String {
+    let raw = model_id.trim();
+    if raw.is_empty() {
+        return "Unknown Model".to_string();
+    }
+
+    let id_suffix = if let Some((_, suf)) = raw.split_once('/') {
+        suf
+    } else {
+        raw
+    };
+
+    let lower = id_suffix.to_lowercase();
+
+    if lower.contains("gemini-3.8-flash-high") {
+        return "Gemini 3.8 Flash (High)".to_string();
+    }
+    if lower.contains("gemini-3.7-flash-high") {
+        return "Gemini 3.7 Flash (High)".to_string();
+    }
+    if lower.contains("gemini-3.6-flash-high") {
+        return "Gemini 3.6 Flash (High)".to_string();
+    }
+    if lower.contains("gemini-3.5-flash-lite") {
+        return "Gemini 3.5 Flash Lite".to_string();
+    }
+    if lower.contains("gemini-3.1-flash-lite") {
+        return "Gemini 3.1 Flash Lite".to_string();
+    }
+    if lower.contains("gemini-3.1-pro-low") {
+        return "Gemini 3.1 Pro (Low)".to_string();
+    }
+    if lower.contains("gemini-3-flash") {
+        return "Gemini 3 Flash".to_string();
+    }
+    if lower.contains("gemini-3.1-flash-image") {
+        return "Gemini 3.1 Flash Image".to_string();
+    }
+    if lower.contains("gemini-pro-agent") {
+        return "Gemini Pro Agent".to_string();
+    }
+    if lower.contains("claude-opus-5-5") {
+        return "Claude Opus 5.5".to_string();
+    }
+    if lower.contains("claude-opus-4-8") {
+        return "Claude Opus 4.8".to_string();
+    }
+    if lower.contains("claude-opus-4-6-thinking") {
+        return "Claude Opus 4.6 (Thinking)".to_string();
+    }
+    if lower.contains("claude-sonnet-4-6") {
+        return "Claude Sonnet 4.6".to_string();
+    }
+    if lower.contains("claude-3-7-sonnet") {
+        return "Claude 3.7 Sonnet".to_string();
+    }
+    if lower.contains("claude-3-5-sonnet") {
+        return "Claude 3.5 Sonnet".to_string();
+    }
+    if lower.contains("deepseek-v4.1-flash") {
+        return "DeepSeek V4.1 Flash".to_string();
+    }
+    if lower.contains("deepseek-v4-flash") {
+        return "DeepSeek V4 Flash".to_string();
+    }
+    if lower.contains("deepseek-chat") || lower.contains("deepseek-v3") {
+        return "DeepSeek V3".to_string();
+    }
+    if lower.contains("deepseek-reasoner") || lower.contains("deepseek-r1") {
+        return "DeepSeek R1 (Reasoner)".to_string();
+    }
+    if lower.contains("gpt-6-astra") {
+        return "GPT-6 Astra".to_string();
+    }
+    if lower.contains("gpt-oss-120b-medium") {
+        return "GPT-OSS 120B Medium".to_string();
+    }
+    if lower.contains("gpt-4o-mini") {
+        return "GPT-4o Mini".to_string();
+    }
+    if lower.contains("gpt-4o") {
+        return "GPT-4o".to_string();
+    }
+    if lower.contains("qwen-2.5-72b") || lower.contains("qwen2.5-72b") {
+        return "Qwen 2.5 72B".to_string();
+    }
+    if lower.contains("glm-4-plus") {
+        return "GLM-4 Plus".to_string();
+    }
+    if lower.contains("moonshot-v1") {
+        return "Moonshot V1 (Kimi)".to_string();
+    }
+
+    let parts: Vec<String> = id_suffix
+        .split(['-', '_'])
+        .filter(|w| !w.is_empty())
+        .map(|word| {
+            let mut c = word.chars();
+            match c.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect();
+    if parts.is_empty() {
+        raw.to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 async fn execute_model_capability_probe(
     base_url: &str,
     api_key: &str,
@@ -165,7 +295,12 @@ async fn execute_model_capability_probe(
         return (false, 0, is_vision, is_reasoning, ctx, max_tok, Some("服务商未配置 Base URL".to_string()));
     }
 
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    let endpoint = if trimmed_base.ends_with("/chat/completions") {
+        trimmed_base.to_string()
+    } else {
+        format!("{}/chat/completions", trimmed_base)
+    };
 
     let payload = serde_json::json!({
         "model": model_id,
@@ -1319,6 +1454,12 @@ pub async fn handle_invoke(
                 let _ = fs::create_dir_all(agent_dir());
                 let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
             }
+
+            let _ = client.request_passive(ClientRequest::App {
+                id: Uuid::new_v4().to_string(),
+                op: json!({ "name": "reload_engine_config" }),
+            }).await;
+
             Ok(json!(true))
         }
 
@@ -1338,6 +1479,12 @@ pub async fn handle_invoke(
                     }
                 }
             }
+
+            let _ = client.request_passive(ClientRequest::App {
+                id: Uuid::new_v4().to_string(),
+                op: json!({ "name": "reload_engine_config" }),
+            }).await;
+
             Ok(json!(true))
         }
 
@@ -1355,8 +1502,13 @@ pub async fn handle_invoke(
                                     for m in m_arr {
                                         if let Some(m_obj) = m.as_object() {
                                             let m_id = m_obj.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                                            if m_id.is_empty() { continue; }
-                                            let m_name = m_obj.get("name").and_then(|v| v.as_str()).unwrap_or(m_id);
+                                            if m_id.is_empty() || !is_chat_completion_model(m_id) { continue; }
+                                            let raw_name = m_obj.get("name").and_then(|v| v.as_str()).unwrap_or(m_id);
+                                            let m_name = if raw_name == m_id || raw_name.is_empty() {
+                                                format_model_display_name(m_id)
+                                            } else {
+                                                raw_name.to_string()
+                                            };
                                             let (inf_vis, inf_rea, inf_ctx, inf_max) = infer_model_specs(m_id);
                                             let reasoning = m_obj.get("reasoning").and_then(|v| v.as_bool()).unwrap_or(inf_rea);
                                             let context_window = m_obj.get("contextWindow").and_then(|v| v.as_u64()).or(Some(inf_ctx));
@@ -1376,12 +1528,13 @@ pub async fn handle_invoke(
                                                 "isDefault": is_default
                                             }));
                                         } else if let Some(m_id) = m.as_str() {
+                                            if !is_chat_completion_model(m_id) { continue; }
                                             let (inf_vis, inf_rea, inf_ctx, inf_max) = infer_model_specs(m_id);
                                             let is_default = def_model_id.as_deref() == Some(m_id) && (def_provider.is_none() || def_provider.as_deref() == Some(p_name));
                                             list.push(json!({
                                                 "provider": p_name,
                                                 "id": m_id,
-                                                "name": m_id,
+                                                "name": format_model_display_name(m_id),
                                                 "reasoning": inf_rea,
                                                 "contextWindow": inf_ctx,
                                                 "maxTokens": inf_max,
@@ -1395,11 +1548,6 @@ pub async fn handle_invoke(
                         }
                     }
                 }
-            }
-            if list.is_empty() {
-                list.push(json!({ "provider": "anthropic", "id": "claude-3-7-sonnet", "name": "claude-3-7-sonnet", "reasoning": true, "isDefault": true }));
-                list.push(json!({ "provider": "openai", "id": "gpt-4o", "name": "gpt-4o", "reasoning": false, "isDefault": false }));
-                list.push(json!({ "provider": "deepseek", "id": "deepseek-reasoner", "name": "deepseek-r1", "reasoning": true, "isDefault": false }));
             }
             Ok(json!(list))
         }
@@ -2803,14 +2951,18 @@ pub async fn handle_invoke(
                     if let Some(data) = val.get("data").and_then(|d| d.as_array()) {
                         for item in data {
                             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                                if !is_chat_completion_model(id) {
+                                    continue;
+                                }
                                 let (is_vision, is_reasoning, ctx, max_tok) = infer_model_specs(id);
                                 let mut input = vec!["text".to_string()];
                                 if is_vision {
                                     input.push("image".to_string());
                                 }
+                                let display_name = format_model_display_name(id);
                                 models.push(json!({
                                     "id": id,
-                                    "name": id,
+                                    "name": display_name,
                                     "reasoning": is_reasoning,
                                     "input": input,
                                     "contextWindow": ctx,
@@ -2829,36 +2981,71 @@ pub async fn handle_invoke(
                     // Save and merge into models.json if providerId is present
                     if !provider_id.trim().is_empty() {
                         let models_path = agent_dir().join("models.json");
-                        if let Ok(content) = fs::read_to_string(&models_path) {
-                            if let Ok(mut root) = serde_json::from_str::<Value>(&content) {
-                                if let Some(providers_obj) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
-                                    if let Some(target_p) = providers_obj.get_mut(provider_id).and_then(|pr| pr.as_object_mut()) {
-                                        let existing_models = target_p.get("models").and_then(|m| m.as_array()).cloned().unwrap_or_default();
-                                        let mut existing_map: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-                                        for em in existing_models {
-                                            if let Some(em_id) = em.get("id").and_then(|v| v.as_str()) {
-                                                existing_map.insert(em_id.to_string(), em);
-                                            }
-                                        }
+                        let mut root = if models_path.exists() {
+                            fs::read_to_string(&models_path)
+                                .ok()
+                                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                                .unwrap_or(json!({ "providers": {} }))
+                        } else {
+                            json!({ "providers": {} })
+                        };
 
-                                        let mut synced_list: Vec<Value> = Vec::new();
-                                        for nm in &models {
-                                            if let Some(nm_id) = nm.get("id").and_then(|v| v.as_str()) {
-                                                if let Some(existing) = existing_map.remove(nm_id) {
-                                                    // Preserve existing custom attributes while syncing
-                                                    synced_list.push(existing);
-                                                } else {
-                                                    synced_list.push(nm.clone());
-                                                }
-                                            }
-                                        }
+                        if let Some(providers_obj) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
+                            let target_p = if let Some(p) = providers_obj.get_mut(provider_id) {
+                                p
+                            } else {
+                                providers_obj.insert(
+                                    provider_id.to_string(),
+                                    json!({
+                                        "name": provider_id,
+                                        "baseUrl": base_url,
+                                        "apiKey": api_key,
+                                        "api": "openai-completions",
+                                        "enabled": true,
+                                        "contextWindow": 1000000,
+                                        "models": []
+                                    }),
+                                );
+                                providers_obj.get_mut(provider_id).unwrap()
+                            };
 
-                                        target_p.insert("models".to_string(), json!(synced_list));
-                                        let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
-                                        let count = synced_list.len();
-                                        return Ok(json!({ "success": true, "count": count, "models": synced_list }));
+                            if let Some(target_p_obj) = target_p.as_object_mut() {
+                                let existing_models = target_p_obj.get("models").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+                                let mut existing_map: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+                                for em in existing_models {
+                                    if let Some(em_id) = em.get("id").and_then(|v| v.as_str()) {
+                                        existing_map.insert(em_id.to_string(), em);
                                     }
                                 }
+
+                                let mut synced_list: Vec<Value> = Vec::new();
+                                for nm in &models {
+                                    if let Some(nm_id) = nm.get("id").and_then(|v| v.as_str()) {
+                                        if let Some(mut existing) = existing_map.remove(nm_id) {
+                                            // Upgrade raw id to clean formatted name if needed
+                                            if existing.get("name").and_then(|n| n.as_str()) == Some(nm_id) {
+                                                if let Some(ex_obj) = existing.as_object_mut() {
+                                                    ex_obj.insert("name".to_string(), nm["name"].clone());
+                                                }
+                                            }
+                                            synced_list.push(existing);
+                                        } else {
+                                            synced_list.push(nm.clone());
+                                        }
+                                    }
+                                }
+
+                                target_p_obj.insert("models".to_string(), json!(synced_list));
+                                let _ = fs::create_dir_all(agent_dir());
+                                let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
+
+                                let _ = client.request_passive(ClientRequest::App {
+                                    id: Uuid::new_v4().to_string(),
+                                    op: json!({ "name": "reload_engine_config" }),
+                                }).await;
+
+                                let count = synced_list.len();
+                                return Ok(json!({ "success": true, "count": count, "models": synced_list }));
                             }
                         }
                     }

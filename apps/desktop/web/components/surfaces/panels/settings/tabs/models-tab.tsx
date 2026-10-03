@@ -50,6 +50,120 @@ function formatModelContext(context?: number): string {
 	return `${Math.round(context / 1024)}K 上下文`;
 }
 
+interface ProviderPreset {
+	name: string;
+	presetKey: string;
+	baseUrl: string;
+	api: string;
+	contextWindow: number;
+	placeholder: string;
+	models?: Array<{ id: string; name: string; reasoning: boolean; input: string[]; contextWindow: number; maxTokens: number }>;
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+	{
+		name: "DeepSeek (官方)",
+		presetKey: "deepseek",
+		baseUrl: "https://api.deepseek.com/v1",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "sk-...",
+		models: [
+			{ id: "deepseek-chat", name: "DeepSeek V3", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "deepseek-reasoner", name: "DeepSeek R1", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+		],
+	},
+	{
+		name: "硅基流动 (SiliconFlow)",
+		presetKey: "siliconflow",
+		baseUrl: "https://api.siliconflow.cn/v1",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "sk-...",
+		models: [
+			{ id: "deepseek-ai/DeepSeek-V3", name: "DeepSeek V3", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "deepseek-ai/DeepSeek-R1", name: "DeepSeek R1", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "Qwen/Qwen2.5-72B-Instruct", name: "Qwen 2.5 72B", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+		],
+	},
+	{
+		name: "OpenRouter",
+		presetKey: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		api: "openai-completions",
+		contextWindow: 1000000,
+		placeholder: "sk-or-v1-...",
+	},
+	{
+		name: "智谱清言 (GLM)",
+		presetKey: "zhipu",
+		baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "智谱 API Key",
+		models: [
+			{ id: "glm-4-plus", name: "GLM-4 Plus", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "glm-4-air", name: "GLM-4 Air", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "glm-4-flash", name: "GLM-4 Flash", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+		],
+	},
+	{
+		name: "月之暗面 (Kimi)",
+		presetKey: "moonshot",
+		baseUrl: "https://api.moonshot.cn/v1",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "sk-...",
+		models: [
+			{ id: "moonshot-v1-128k", name: "Moonshot V1 128K", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "moonshot-v1-32k", name: "Moonshot V1 32K", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+		],
+	},
+	{
+		name: "阿里通义千问 (DashScope)",
+		presetKey: "dashscope",
+		baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "sk-...",
+		models: [
+			{ id: "qwen-max", name: "Qwen Max", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "qwen-plus", name: "Qwen Plus", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+			{ id: "qwen-turbo", name: "Qwen Turbo", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 8192 },
+		],
+	},
+	{
+		name: "OpenAI (官方)",
+		presetKey: "openai",
+		baseUrl: "https://api.openai.com/v1",
+		api: "openai-completions",
+		contextWindow: 128000,
+		placeholder: "sk-proj-...",
+		models: [
+			{ id: "gpt-4o", name: "GPT-4o", reasoning: false, input: ["text", "image"], contextWindow: 128000, maxTokens: 16384 },
+			{ id: "gpt-4o-mini", name: "GPT-4o Mini", reasoning: false, input: ["text", "image"], contextWindow: 128000, maxTokens: 16384 },
+			{ id: "o1", name: "o1", reasoning: true, input: ["text", "image"], contextWindow: 200000, maxTokens: 65536 },
+			{ id: "o3-mini", name: "o3-mini", reasoning: true, input: ["text"], contextWindow: 200000, maxTokens: 65536 },
+		],
+	},
+	{
+		name: "Ollama (本地私有)",
+		presetKey: "ollama",
+		baseUrl: "http://localhost:11434/v1",
+		api: "openai-completions",
+		contextWindow: 32768,
+		placeholder: "无需 API Key (可留空)",
+	},
+	{
+		name: "自建中转 / OneAPI / NewAPI",
+		presetKey: "custom",
+		baseUrl: "https://huaan.space/v1",
+		api: "openai-completions",
+		contextWindow: 1000000,
+		placeholder: "sk-...",
+	},
+];
+
 export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 	const [providers, setProviders] = useState<Record<string, ModelProviderConfig>>({});
 	const [modelCatalog, setModelCatalog] = useState<AvailableModel[]>([]);
@@ -58,7 +172,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 
 	// Settings
 	const [appSettings, setAppSettings] = useState<AppSettings>({});
-	const [defaultProvider, setDefaultProvider] = useState<string>("自建");
+	const [defaultProvider, setDefaultProvider] = useState<string>("");
 	const [defaultModel, setDefaultModel] = useState<string>("");
 	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
 
@@ -77,7 +191,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 	const [modelFilterType, setModelFilterType] = useState<"all" | "reasoning" | "vision">("all");
 
 	// Expanded provider IDs
-	const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set(["自建"]));
+	const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set());
 
 	// Modals & Editing
 	const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
@@ -88,6 +202,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [editFormApi, setEditFormApi] = useState<string>("openai-completions");
 	const [editFormContextWindow, setEditFormContextWindow] = useState<number>(1000000);
+	const [editFormModels, setEditFormModels] = useState<any[]>([]);
 
 	// Batch Operations & Probing
 	const [batchMenuOpenId, setBatchMenuOpenId] = useState<string | null>(null);
@@ -123,9 +238,14 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 				desktopApi.getVisionFallback().catch(() => null),
 			]);
 			setProviders(provs);
+			const providerKeys = Object.keys(provs);
+			const activeProv = settings?.defaultProvider || (providerKeys.includes("自建") ? "自建" : providerKeys[0] || "");
+			if (activeProv) {
+				setDefaultProvider(activeProv);
+				setExpandedProviders((prev) => (prev.size === 0 ? new Set([activeProv]) : prev));
+			}
 			if (settings) {
 				setAppSettings(settings);
-				if (settings.defaultProvider) setDefaultProvider(settings.defaultProvider);
 				if (settings.defaultModel) setDefaultModel(settings.defaultModel);
 				if (settings.defaultThinkingLevel) setThinkingLevel(settings.defaultThinkingLevel);
 			}
@@ -137,6 +257,18 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 				}
 			}
 			setModelCatalog(catalog ?? []);
+
+			// Background health-check / ping for active providers so connection status is live
+			for (const pid of providerKeys) {
+				const p = provs[pid];
+				if (p && p.baseUrl && p.enabled !== false) {
+					desktopApi.pingModelProvider(pid, { baseUrl: p.baseUrl, apiKey: p.apiKey, api: p.api })
+						.then((res) => {
+							setPingResults((prev) => ({ ...prev, [pid]: res }));
+						})
+						.catch(() => {});
+				}
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		} finally {
@@ -243,12 +375,15 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 		setSyncingForm(true);
 		setFormNotice(null);
 		try {
-			const targetId = isNewProvider ? editFormName.trim().toLowerCase().replace(/\s+/g, "-") : editingProviderId;
+			const targetId = isNewProvider ? (editFormName.trim() || "custom") : editingProviderId;
 			const res = await desktopApi.fetchProviderRemoteModels({
 				providerId: targetId || undefined,
 				baseUrl: editFormBaseUrl.trim(),
 				apiKey: editFormApiKey.trim() || undefined,
 			});
+			if (Array.isArray(res.models) && res.models.length > 0) {
+				setEditFormModels(res.models);
+			}
 			await loadData();
 			setFormNotice({ text: `已成功从端点获取并同步 ${res.count} 个模型！`, ok: true });
 			setTimeout(() => setFormNotice(null), 4000);
@@ -358,10 +493,14 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 
 	// Save provider edit
 	const handleSaveProvider = async () => {
-		const id = isNewProvider ? editFormName.trim().toLowerCase().replace(/\s+/g, "-") : editingProviderId;
+		const id = isNewProvider ? (editFormName.trim().toLowerCase().replace(/\s+/g, "-") || "custom") : editingProviderId;
 		if (!id) return;
 		try {
 			const current = providers[id] || {};
+			const nextModels = editFormModels.length > 0
+				? editFormModels
+				: (Array.isArray(current.models) && current.models.length > 0 ? current.models : []);
+
 			const next: ModelProviderConfig = {
 				...current,
 				name: editFormName.trim() || id,
@@ -369,11 +508,13 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 				api: editFormApi,
 				enabled: true,
 				contextWindow: editFormContextWindow,
+				models: nextModels as any,
 			};
 			if (editFormApiKey.trim()) next.apiKey = editFormApiKey.trim();
 			await desktopApi.saveModelProvider(id, next);
 			setEditingProviderId(null);
 			setIsNewProvider(false);
+			setEditFormModels([]);
 			await loadData();
 			window.dispatchEvent(new Event("openpi:model-providers-changed"));
 		} catch (err) {
@@ -680,7 +821,9 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 							setEditFormBaseUrl("");
 							setEditFormApiKey("");
 							setEditFormApi("openai-completions");
-							setEditFormContextWindow(1000000);
+							setEditFormContextWindow(128000);
+							setEditFormModels([]);
+							setFormNotice(null);
 						}}
 					>
 						<Plus size={14} />
@@ -779,6 +922,8 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 														setEditFormApiKey("");
 														setEditFormApi(pCfg.api || "openai-completions");
 														setEditFormContextWindow(pCfg.contextWindow || 1000000);
+														setEditFormModels(Array.isArray(pCfg.models) ? pCfg.models : []);
+														setFormNotice(null);
 													}}
 												>
 													<Pencil size={14} />
@@ -1326,6 +1471,42 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 						</div>
 
 						<div className="settings-section-card-body" style={{ gap: "14px" }}>
+							{isNewProvider && (
+								<div style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "10px 12px", borderRadius: "10px", background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.1)" }}>
+									<span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)" }}>
+										⚡ 快速选择常用服务商预设
+									</span>
+									<div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+										{PROVIDER_PRESETS.map((preset) => (
+											<button
+												key={preset.presetKey}
+												type="button"
+												className="button secondary"
+												style={{
+													padding: "4px 8px",
+													fontSize: "11px",
+													borderRadius: "6px",
+													border: editFormName === preset.name ? "1px solid var(--accent-primary)" : "1px solid rgba(255, 255, 255, 0.12)",
+													background: editFormName === preset.name ? "rgba(99, 102, 241, 0.18)" : "transparent",
+													color: editFormName === preset.name ? "var(--accent-primary)" : "var(--text-primary)",
+												}}
+												onClick={() => {
+													setEditFormName(preset.name);
+													setEditFormBaseUrl(preset.baseUrl);
+													setEditFormApi(preset.api);
+													setEditFormContextWindow(preset.contextWindow);
+													if (preset.models && preset.models.length > 0) {
+														setEditFormModels(preset.models);
+													}
+												}}
+											>
+												{preset.name}
+											</button>
+										))}
+									</div>
+								</div>
+							)}
+
 							<label className="model-form-field">
 								<span>服务商显示名称</span>
 								<input
@@ -1408,6 +1589,19 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 									<span>{syncingForm ? "正在获取..." : "自动获取模型"}</span>
 								</button>
 							</div>
+
+							{editFormModels.length > 0 && (
+								<div style={{ padding: "8px 12px", borderRadius: "8px", background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.08)", display: "flex", flexDirection: "column", gap: "4px" }}>
+									<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
+										<strong style={{ color: "var(--accent-primary)" }}>✓ 已就绪模型 ({editFormModels.length} 个)</strong>
+										<span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>保存服务商时将自动写入模型池</span>
+									</div>
+									<div style={{ fontSize: "11px", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+										{editFormModels.map((m: any) => typeof m === "string" ? m : (m.name || m.id)).slice(0, 5).join(", ")}
+										{editFormModels.length > 5 ? ` 等共 ${editFormModels.length} 个` : ""}
+									</div>
+								</div>
+							)}
 
 							{formNotice && (
 								<div

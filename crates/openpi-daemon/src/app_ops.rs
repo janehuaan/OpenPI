@@ -21,6 +21,13 @@ pub async fn handle_app_op(
     };
 
     match name {
+        "reload_engine_config" | "reload_models" => {
+            if let Err(e) = supervisor.reload_engine_config() {
+                return Ok(ServerMessage::err(id, format!("Failed to reload engine config: {}", e)));
+            }
+            Ok(ServerMessage::ok(id, serde_json::json!({ "reloaded": true })))
+        }
+
         // --- Tasks ops ---
         "list_tasks" => {
             let tasks = storage.list_tasks()?;

@@ -296,6 +296,7 @@ impl Supervisor {
             default_model: None,
             max_steps: 200,
             models: HashMap::new(),
+            providers: HashMap::new(),
         });
         let tool_reg = openpi_engine::ToolRegistry::new(jev.clone(), memory.clone());
         let engine = Arc::new(openpi_engine::EngineSessionManager::new(
@@ -493,6 +494,10 @@ impl Supervisor {
 
     pub async fn get_pi_cli_path(&self) -> String {
         self.pi_cli_path.read().await.clone()
+    }
+
+    pub fn reload_engine_config(&self) -> anyhow::Result<()> {
+        self.engine.reload_config()
     }
 
     pub async fn run_ephemeral_subagent(

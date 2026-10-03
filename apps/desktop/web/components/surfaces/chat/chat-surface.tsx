@@ -161,6 +161,34 @@ import type { AppMode } from "../workspace/mode-tab-bar";
 import { TurnProgressRow } from "../workspace/turn-progress-row";
 import { MessageItem } from "./message-item";
 
+function formatModelContext(context?: number): string {
+	if (!context) return "";
+	if (context >= 1_000_000) {
+		const m = Math.round(context / 1_000_000);
+		return `${m}M 上下文`;
+	}
+	if (context >= 190_000 && context <= 210_000) return "200K 上下文";
+	if (context >= 240_000 && context <= 270_000) return "256K 上下文";
+	if (context >= 120_000 && context <= 135_000) return "128K 上下文";
+	if (context >= 60_000 && context <= 70_000) return "64K 上下文";
+	if (context >= 30_000 && context <= 35_000) return "32K 上下文";
+	return `${Math.round(context / 1024)}K 上下文`;
+}
+
+function inferModelFamily(modelId: string, modelName: string): string {
+	const s = `${modelId} ${modelName}`.toLowerCase();
+	if (s.includes("gemini")) return "Google Gemini";
+	if (s.includes("claude")) return "Anthropic Claude";
+	if (s.includes("deepseek")) return "DeepSeek";
+	if (s.includes("gpt") || s.includes("o1") || s.includes("o3") || s.includes("o4") || s.includes("openai")) return "OpenAI";
+	if (s.includes("qwen")) return "阿里通义千问";
+	if (s.includes("glm")) return "智谱清言";
+	if (s.includes("moonshot") || s.includes("kimi")) return "月之暗面 Kimi";
+	if (s.includes("minimax")) return "MiniMax";
+	if (s.includes("agnes") || s.includes("mimo")) return "Agnes 原生架构";
+	return "通用模型";
+}
+
 export function ChatSurface({
 	mode,
 	workspace,
@@ -383,14 +411,27 @@ export function ChatSurface({
 		const currentProvider = (currentModel?.provider ?? conversation?.state?.model?.provider ?? "").toLowerCase();
 		const currentId = currentModel?.id ?? conversation?.state?.model?.id ?? "";
 
-		const groups = new Map<string, ConversationModelOption[]>();
+		// Detect if a single provider hosts models from multiple families (e.g. 自建, custom, oneapi)
+		const providerFamilyCounts = new Map<string, Set<string>>();
 		for (const model of modelOptions) {
-			const providerModels = groups.get(model.provider) ?? [];
-			providerModels.push(model);
-			groups.set(model.provider, providerModels);
+			const fam = inferModelFamily(model.id, model.name);
+			const set = providerFamilyCounts.get(model.provider) ?? new Set();
+			set.add(fam);
+			providerFamilyCounts.set(model.provider, set);
 		}
 
-		// Sort models within each provider:
+		const groups = new Map<string, ConversationModelOption[]>();
+		for (const model of modelOptions) {
+			const multiFamily = (providerFamilyCounts.get(model.provider)?.size ?? 0) > 1;
+			const groupKey = multiFamily
+				? `${model.provider} · ${inferModelFamily(model.id, model.name)}`
+				: model.provider;
+			const list = groups.get(groupKey) ?? [];
+			list.push(model);
+			groups.set(groupKey, list);
+		}
+
+		// Sort models within each group:
 		// Active model first, then reasoning models, then natural alphabetized
 		for (const [_, list] of groups.entries()) {
 			list.sort((a, b) => {
@@ -408,23 +449,16 @@ export function ChatSurface({
 		}
 
 		const entries = [...groups.entries()];
-		const priority = ["agnes", "agnes-cn", "anthropic", "openai", "google", "deepseek", "qwen", "zhipu", "sensenova", "商汤"];
 
-		entries.sort(([pA], [pB]) => {
-			const lowerA = pA.toLowerCase();
-			const lowerB = pB.toLowerCase();
-			// 1. Current active provider is ALWAYS first!
-			if (lowerA === currentProvider) return -1;
-			if (lowerB === currentProvider) return 1;
+		entries.sort(([gA], [gB]) => {
+			const lowerA = gA.toLowerCase();
+			const lowerB = gB.toLowerCase();
+			const aHasCurrent = lowerA.startsWith(currentProvider);
+			const bHasCurrent = lowerB.startsWith(currentProvider);
+			if (aHasCurrent && !bHasCurrent) return -1;
+			if (!aHasCurrent && bHasCurrent) return 1;
 
-			// 2. Known priority providers
-			const idxA = priority.indexOf(lowerA);
-			const idxB = priority.indexOf(lowerB);
-			if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-			if (idxA !== -1) return -1;
-			if (idxB !== -1) return 1;
-
-			return pA.localeCompare(pB, "zh-CN");
+			return gA.localeCompare(gB, "zh-CN");
 		});
 
 		return entries;
@@ -1769,7 +1803,7 @@ export function ChatSurface({
 																	<CommandItem
 																		className={`ui-command-item ${selected ? "model-item-current selected active" : ""}`}
 																		data-active-model={selected ? "true" : undefined}
-																		value={`${model.provider}/${model.id}`}
+																		value={`${model.provider}/${model.id} ${model.name}`}
 																		keywords={[model.name, model.provider, model.id]}
 																		key={`${model.provider}/${model.id}`}
 																		onSelect={() => {
@@ -1778,7 +1812,19 @@ export function ChatSurface({
 																		}}
 																	>
 																		<span className="model-option-main">
-																			<strong>{model.name}</strong>
+																			<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+																				<strong>{model.name}</strong>
+																				{modelSupportsReasoning(model) && (
+																					<span style={{ fontSize: "10px", padding: "1px 5px", borderRadius: "4px", background: "rgba(99, 102, 241, 0.15)", color: "var(--accent-primary)", fontWeight: 600 }}>
+																						🧠 思考
+																					</span>
+																				)}
+																				{model.contextWindow ? (
+																					<span style={{ fontSize: "10px", opacity: 0.65 }}>
+																						{formatModelContext(model.contextWindow)}
+																					</span>
+																				) : null}
+																			</div>
 																			<small>{model.id}</small>
 																		</span>
 																		<span className="model-option-actions">
