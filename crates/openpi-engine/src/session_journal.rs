@@ -45,7 +45,121 @@ impl SessionJournal {
         }
     }
 
+    pub fn prune_history_messages(mut raw_messages: Vec<ChatMessage>, max_turns: usize) -> Vec<ChatMessage> {
+        if raw_messages.is_empty() {
+            return raw_messages;
+        }
+
+        // 1. Identify turn boundaries (indices where role == "user")
+        let user_indices: Vec<usize> = raw_messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.role == "user")
+            .map(|(i, _)| i)
+            .collect();
+
+        let num_user_turns = user_indices.len();
+        if num_user_turns == 0 {
+            return raw_messages;
+        }
+
+        // 2. Slice to the most recent `max_turns` (default 5 turns)
+        let retained_start = if num_user_turns > max_turns {
+            user_indices[num_user_turns - max_turns]
+        } else {
+            0
+        };
+
+        let mut sliced: Vec<ChatMessage> = raw_messages.drain(retained_start..).collect();
+
+        // 3. Compact older toolResult outputs
+        // Identify the last user turn index in `sliced`
+        let sliced_user_indices: Vec<usize> = sliced
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.role == "user")
+            .map(|(i, _)| i)
+            .collect();
+
+        let last_user_turn_idx = sliced_user_indices.last().copied().unwrap_or(0);
+
+        for (idx, msg) in sliced.iter_mut().enumerate() {
+            if msg.role == "tool" {
+                if let Some(crate::protocol::ChatContent::Text(ref mut txt)) = msg.content {
+                    let total_chars = txt.chars().count();
+                    // Tools from older turns: aggressively truncate to ~400 chars if > 600 chars
+                    if idx < last_user_turn_idx {
+                        if total_chars > 600 {
+                            let head: String = txt.chars().take(250).collect();
+                            let tail: String = txt.chars().skip(total_chars.saturating_sub(150)).collect();
+                            *txt = format!(
+                                "{}\n... [历史工具执行结果已自动截断，已省略 {} 字符以节省上下文] ...\n{}",
+                                head,
+                                total_chars.saturating_sub(400),
+                                tail
+                            );
+                        }
+                    } else {
+                        // Even in the most recent turn from history, cap massive outputs (> 3,500 chars)
+                        if total_chars > 3500 {
+                            let head: String = txt.chars().take(1500).collect();
+                            let tail: String = txt.chars().skip(total_chars.saturating_sub(600)).collect();
+                            *txt = format!(
+                                "{}\n... [单步执行结果过大已保护性截断，已省略 {} 字符] ...\n{}",
+                                head,
+                                total_chars.saturating_sub(2100),
+                                tail
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Global character budget enforcement (max 48,000 chars ~ 12,000 tokens)
+        // If sliced history exceeds 48,000 characters, drop the oldest user turn until within budget
+        let max_total_chars = 48000;
+        let mut total_chars: usize = sliced.iter().map(|m| {
+            match &m.content {
+                Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
+                _ => 0,
+            }
+        }).sum();
+
+        while total_chars > max_total_chars {
+            let u_indices: Vec<usize> = sliced
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == "user")
+                .map(|(i, _)| i)
+                .collect();
+
+            // If only 1 turn left, break to preserve at least the immediate turn
+            if u_indices.len() <= 1 {
+                break;
+            }
+
+            // Drop from 0 up to u_indices[1]
+            let drop_count = u_indices[1];
+            let dropped: Vec<ChatMessage> = sliced.drain(0..drop_count).collect();
+            let dropped_chars: usize = dropped.iter().map(|m| {
+                match &m.content {
+                    Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
+                    _ => 0,
+                }
+            }).sum();
+            total_chars = total_chars.saturating_sub(dropped_chars);
+        }
+
+        sliced
+    }
+
     pub fn load_history_messages(&self) -> Vec<ChatMessage> {
+        let raw = self.load_raw_history_messages();
+        Self::prune_history_messages(raw, 5)
+    }
+
+    pub fn load_raw_history_messages(&self) -> Vec<ChatMessage> {
         let mut messages = Vec::new();
         if !self.file_path.exists() {
             return messages;
@@ -298,5 +412,86 @@ impl SessionJournal {
 
         self.append_entry(&entry)?;
         Ok(entry_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prune_history_messages_turn_slicing() {
+        let mut raw = Vec::new();
+        // Create 10 user turns, each with an assistant tool call and tool result
+        for i in 1..=10 {
+            raw.push(ChatMessage::user(format!("User turn {}", i)));
+            let mut asst = ChatMessage::assistant(format!("Assistant step {}", i));
+            asst.tool_calls = Some(vec![ToolCall {
+                id: format!("call_{}", i),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "read".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]);
+            raw.push(asst);
+            raw.push(ChatMessage::tool_result(format!("call_{}", i), format!("Output {}", i)));
+        }
+
+        assert_eq!(raw.len(), 30);
+        let pruned = SessionJournal::prune_history_messages(raw, 4);
+
+        // Retains 4 turns: turns 7, 8, 9, 10 => 12 messages
+        assert_eq!(pruned.len(), 12);
+        assert_eq!(pruned[0].role, "user");
+        if let Some(crate::protocol::ChatContent::Text(ref txt)) = pruned[0].content {
+            assert_eq!(txt, "User turn 7");
+        } else {
+            panic!("Expected text content");
+        }
+    }
+
+    #[test]
+    fn test_prune_history_messages_tool_truncation() {
+        let mut raw = Vec::new();
+        let giant_output = "A".repeat(3000);
+
+        // Turn 1: has giant tool output
+        raw.push(ChatMessage::user("Turn 1"));
+        raw.push(ChatMessage::assistant("Running tool"));
+        raw.push(ChatMessage::tool_result("call_1", &giant_output));
+
+        // Turn 2: has giant tool output
+        raw.push(ChatMessage::user("Turn 2"));
+        raw.push(ChatMessage::assistant("Running tool"));
+        raw.push(ChatMessage::tool_result("call_2", &giant_output));
+
+        // Turn 3 (recent turn): has giant tool output
+        raw.push(ChatMessage::user("Turn 3"));
+        raw.push(ChatMessage::assistant("Running tool"));
+        raw.push(ChatMessage::tool_result("call_3", &giant_output));
+
+        // Turn 4 (most recent turn): has giant tool output
+        raw.push(ChatMessage::user("Turn 4"));
+        raw.push(ChatMessage::assistant("Running tool"));
+        raw.push(ChatMessage::tool_result("call_4", &giant_output));
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        assert_eq!(pruned.len(), 12);
+
+        // Turn 1 tool result (idx 2) is older than the last 2 turns, should be truncated
+        if let Some(crate::protocol::ChatContent::Text(ref txt)) = pruned[2].content {
+            assert!(txt.len() < 3000);
+            assert!(txt.contains("已自动截断"));
+        } else {
+            panic!("Expected text content");
+        }
+
+        // Turn 4 tool result (idx 11, most recent turn) should retain full output
+        if let Some(crate::protocol::ChatContent::Text(ref txt)) = pruned[11].content {
+            assert_eq!(txt.len(), 3000);
+        } else {
+            panic!("Expected text content");
+        }
     }
 }

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
@@ -13,12 +13,14 @@ use crate::tool_registry::ToolRegistry;
 struct ActiveSessionState {
     cancel_token: CancellationToken,
     model: Option<String>,
+    turn_id: u64,
 }
 
 #[derive(Clone)]
 pub struct EngineSessionManager {
     agent_loop: Arc<AgentLoop>,
     active_sessions: Arc<Mutex<HashMap<String, ActiveSessionState>>>,
+    turn_counter: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl EngineSessionManager {
@@ -31,6 +33,7 @@ impl EngineSessionManager {
         Self {
             agent_loop,
             active_sessions: Arc::new(Mutex::new(HashMap::new())),
+            turn_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
 
@@ -40,14 +43,12 @@ impl EngineSessionManager {
     }
 
     pub async fn abort(&self, session_id: &str) -> Result<()> {
-        let mut active = self.active_sessions.lock().await;
-        if let Some(state) = active.remove(session_id) {
+        let active = self.active_sessions.lock().await;
+        if let Some(state) = active.get(session_id) {
             info!("Aborting native engine execution for session {}", session_id);
             state.cancel_token.cancel();
-            Ok(())
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 
     pub async fn set_model(&self, session_id: &str, model: &str) {
@@ -65,17 +66,19 @@ impl EngineSessionManager {
         model_override: Option<&str>,
     ) -> Result<()> {
         let cancel_token = CancellationToken::new();
+        let turn_id = self.turn_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         {
             let mut active = self.active_sessions.lock().await;
-            if active.contains_key(session_id) {
-                bail!("Session {} is already processing a prompt", session_id);
+            if let Some(existing) = active.get(session_id) {
+                existing.cancel_token.cancel();
             }
             active.insert(
                 session_id.to_string(),
                 ActiveSessionState {
                     cancel_token: cancel_token.clone(),
                     model: model_override.map(|s| s.to_string()),
+                    turn_id,
                 },
             );
         }
@@ -98,10 +101,16 @@ impl EngineSessionManager {
 
             if let Err(e) = res {
                 warn!("Native engine error during turn for {}: {}", sid, e);
+                let _ = loop_runner.event_tx.send((sid.clone(), serde_json::json!({ "type": "turn_end" })));
+                let _ = loop_runner.event_tx.send((sid.clone(), serde_json::json!({ "type": "agent_settled" })));
             }
 
             let mut active = active_map.lock().await;
-            active.remove(&sid);
+            if let Some(current) = active.get(&sid) {
+                if current.turn_id == turn_id {
+                    active.remove(&sid);
+                }
+            }
         });
 
         Ok(())

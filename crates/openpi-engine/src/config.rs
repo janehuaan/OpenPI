@@ -39,6 +39,7 @@ pub struct ModelConfig {
 pub struct EngineConfig {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
+    pub max_steps: usize,
     pub models: HashMap<String, ModelConfig>,
 }
 
@@ -51,6 +52,10 @@ impl EngineConfig {
 
         let mut default_model = None;
         let mut default_provider = None;
+        let mut max_steps = std::env::var("OPENPI_MAX_STEPS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(200);
 
         if settings_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&settings_path) {
@@ -60,6 +65,9 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
+                        max_steps = s as usize;
                     }
                 }
             }
@@ -73,6 +81,9 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
+                        max_steps = s as usize;
                     }
                 }
             }
@@ -145,6 +156,7 @@ impl EngineConfig {
         Ok(Self {
             default_provider,
             default_model,
+            max_steps,
             models,
         })
     }
@@ -347,4 +359,88 @@ impl PersonaConfig {
         )
     }
 }
+
+/// Validates whether a directory is forbidden from being used as a project/workspace root
+/// (e.g. system root '/', user home '$HOME', '/Users', system libraries, etc.).
+pub fn is_forbidden_workspace_dir(path: &std::path::Path) -> std::result::Result<(), &'static str> {
+    let clean = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => path.to_path_buf(),
+    };
+
+    if clean.parent().is_none() || clean == std::path::Path::new("/") {
+        return Err("系统根目录 (/) 禁止直接作为单一工程项目目录。");
+    }
+
+    if let Ok(home_str) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+        let home_path = std::path::PathBuf::from(&home_str);
+        let canonical_home = home_path.canonicalize().unwrap_or(home_path);
+        if clean == canonical_home {
+            return Err("用户家目录 ($HOME) 包含全局个人隐私文件与系统配置，禁止直接作为单一项目目录。请选择具体工程子目录（如 ~/Projects/xxx 或 ~/openpi-next）。");
+        }
+    }
+
+    let path_str = clean.to_string_lossy();
+    if path_str == "/Users" || path_str == "/home" || path_str == "/root" {
+        return Err("多用户公共根目录禁止直接作为项目工作区。");
+    }
+
+    let forbidden_exact = [
+        "/System", "/Applications", "/Library", "/usr", "/bin", "/sbin", "/etc", "/var", "/private"
+    ];
+    for p in &forbidden_exact {
+        if path_str == *p {
+            return Err("系统核心保护目录禁止作为项目工作区。");
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns a safe default project workspace directory (never $HOME or root).
+pub fn default_project_workspace() -> std::path::PathBuf {
+    if let Ok(w) = std::env::var("OPENPI_WORKSPACE") {
+        let p = std::path::PathBuf::from(w);
+        if is_forbidden_workspace_dir(&p).is_ok() {
+            return p;
+        }
+    }
+
+    let home_str = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
+    let home = std::path::Path::new(&home_str);
+
+    let candidates = [
+        home.join("openpi-next"),
+        home.join("Projects"),
+        home.join("Developer"),
+        home.join("workspace"),
+        home.join("openpi-workspace"),
+    ];
+
+    for c in &candidates {
+        if c.is_dir() && is_forbidden_workspace_dir(c).is_ok() {
+            return c.clone();
+        }
+    }
+
+    let fallback = home.join("openpi-workspace");
+    let _ = std::fs::create_dir_all(&fallback);
+    fallback
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    use super::*;
+
+    #[test]
+    fn test_forbidden_home_and_root() {
+        assert!(is_forbidden_workspace_dir(std::path::Path::new("/")).is_err());
+        if let Ok(home) = std::env::var("HOME") {
+            assert!(is_forbidden_workspace_dir(std::path::Path::new(&home)).is_err());
+        }
+        let project_dir = default_project_workspace();
+        assert!(is_forbidden_workspace_dir(&project_dir).is_ok());
+    }
+}
+
 

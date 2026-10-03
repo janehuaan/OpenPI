@@ -39,6 +39,19 @@ pub struct TaskRunRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStepRunRecord {
+    pub id: String,
+    pub run_id: String,
+    pub step_id: String,
+    pub status: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryRecord {
     pub id: String,
     pub cwd: String,
@@ -119,6 +132,18 @@ impl Storage {
                 error TEXT,
                 attempt INTEGER DEFAULT 1,
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS task_step_runs (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                exit_code INTEGER,
+                error TEXT,
+                FOREIGN KEY (run_id) REFERENCES task_runs(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS memory_entries (
@@ -343,6 +368,142 @@ impl Storage {
         }
     }
 
+    pub fn get_due_tasks(&self, now: &str) -> anyhow::Result<Vec<TaskRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, prompt, cwd, schedule, status, next_run_at, created_at, updated_at, model, steps
+             FROM tasks
+             WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?1
+             ORDER BY next_run_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now], |row| {
+            Ok(TaskRecord {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                prompt: row.get(2)?,
+                cwd: row.get(3)?,
+                schedule: row.get(4)?,
+                status: row.get(5)?,
+                next_run_at: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+                model: row.get(9)?,
+                steps: row.get(10)?,
+            })
+        })?;
+
+        let mut tasks = Vec::new();
+        for r in rows {
+            tasks.push(r?);
+        }
+        Ok(tasks)
+    }
+
+    pub fn update_task_next_run(
+        &self,
+        task_id: &str,
+        next_run: Option<&str>,
+        status: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        if let Some(st) = status {
+            conn.execute(
+                "UPDATE tasks SET next_run_at = ?1, status = ?2, updated_at = ?3 WHERE id = ?4",
+                params![next_run, st, now, task_id],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE tasks SET next_run_at = ?1, updated_at = ?2 WHERE id = ?3",
+                params![next_run, now, task_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn update_run_finish(
+        &self,
+        run_id: &str,
+        status: &str,
+        exit_code: i32,
+        result: Option<&str>,
+        error: Option<&str>,
+        finished_at: &str,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE task_runs
+             SET status = ?1, exit_code = ?2, result = ?3, error = ?4, finished_at = ?5
+             WHERE id = ?6",
+            params![status, exit_code, result, error, finished_at, run_id],
+        )?;
+        Ok(())
+    }
+
+    // --- Task Step Runs ---
+    pub fn insert_step_run(&self, step_run: &TaskStepRunRecord) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO task_step_runs (id, run_id, step_id, status, started_at, finished_at, exit_code, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                step_run.id,
+                step_run.run_id,
+                step_run.step_id,
+                step_run.status,
+                step_run.started_at,
+                step_run.finished_at,
+                step_run.exit_code,
+                step_run.error,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_step_run_finish(
+        &self,
+        id: &str,
+        status: &str,
+        exit_code: i32,
+        error: Option<&str>,
+        finished_at: &str,
+    ) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE task_step_runs
+             SET status = ?1, exit_code = ?2, error = ?3, finished_at = ?4
+             WHERE id = ?5",
+            params![status, exit_code, error, finished_at, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_step_runs_for_run(&self, run_id: &str) -> anyhow::Result<Vec<TaskStepRunRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, step_id, status, started_at, finished_at, exit_code, error
+             FROM task_step_runs WHERE run_id = ?1 ORDER BY started_at ASC",
+        )?;
+        let rows = stmt.query_map(params![run_id], |row| {
+            Ok(TaskStepRunRecord {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                step_id: row.get(2)?,
+                status: row.get(3)?,
+                started_at: row.get(4)?,
+                finished_at: row.get(5)?,
+                exit_code: row.get(6)?,
+                error: row.get(7)?,
+            })
+        })?;
+
+        let mut steps = Vec::new();
+        for r in rows {
+            steps.push(r?);
+        }
+        Ok(steps)
+    }
+
     // --- Memory Operations ---
     pub fn upsert_memory(&self, rec: &MemoryRecord) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -502,5 +663,90 @@ mod tests {
 
         storage.delete_task("t1").unwrap();
         assert!(storage.get_task("t1").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_storage_due_tasks_and_runs() {
+        let storage = Storage::in_memory().unwrap();
+        let now = chrono::Utc::now();
+        let past = (now - chrono::Duration::minutes(5)).to_rfc3339();
+        let future = (now + chrono::Duration::minutes(5)).to_rfc3339();
+
+        let task1 = TaskRecord {
+            id: "t-due".into(),
+            title: "Due Task".into(),
+            prompt: "Run due".into(),
+            cwd: None,
+            schedule: r#"{"kind":"once"}"#.into(),
+            status: "active".into(),
+            next_run_at: Some(past.clone()),
+            created_at: past.clone(),
+            updated_at: past.clone(),
+            model: None,
+            steps: None,
+        };
+        let task2 = TaskRecord {
+            id: "t-future".into(),
+            title: "Future Task".into(),
+            prompt: "Run future".into(),
+            cwd: None,
+            schedule: r#"{"kind":"once"}"#.into(),
+            status: "active".into(),
+            next_run_at: Some(future),
+            created_at: past.clone(),
+            updated_at: past.clone(),
+            model: None,
+            steps: None,
+        };
+        storage.insert_task(&task1).unwrap();
+        storage.insert_task(&task2).unwrap();
+
+        let due = storage.get_due_tasks(&now.to_rfc3339()).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, "t-due");
+
+        // Test update next run
+        storage.update_task_next_run("t-due", None, Some("completed")).unwrap();
+        let updated = storage.get_task("t-due").unwrap().unwrap();
+        assert_eq!(updated.status, "completed");
+        assert!(updated.next_run_at.is_none());
+
+        // Test run update finish
+        let run = TaskRunRecord {
+            id: "r1".into(),
+            task_id: "t-due".into(),
+            status: "running".into(),
+            trigger: "cron".into(),
+            created_at: past.clone(),
+            started_at: Some(past.clone()),
+            finished_at: None,
+            exit_code: None,
+            result: None,
+            error: None,
+            attempt: Some(1),
+        };
+        storage.insert_run(&run).unwrap();
+        storage.update_run_finish("r1", "succeeded", 0, Some("done output"), None, &now.to_rfc3339()).unwrap();
+        let fetched_run = storage.get_run("r1").unwrap().unwrap();
+        assert_eq!(fetched_run.status, "succeeded");
+        assert_eq!(fetched_run.exit_code, Some(0));
+        assert_eq!(fetched_run.result.as_deref(), Some("done output"));
+
+        // Test step run
+        let step_run = TaskStepRunRecord {
+            id: "sr1".into(),
+            run_id: "r1".into(),
+            step_id: "step-1".into(),
+            status: "running".into(),
+            started_at: Some(past),
+            finished_at: None,
+            exit_code: None,
+            error: None,
+        };
+        storage.insert_step_run(&step_run).unwrap();
+        storage.update_step_run_finish("sr1", "succeeded", 0, None, &now.to_rfc3339()).unwrap();
+        let step_runs = storage.list_step_runs_for_run("r1").unwrap();
+        assert_eq!(step_runs.len(), 1);
+        assert_eq!(step_runs[0].status, "succeeded");
     }
 }

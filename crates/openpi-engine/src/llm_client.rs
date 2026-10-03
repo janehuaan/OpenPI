@@ -88,21 +88,50 @@ impl LlmClient {
 
         debug!("Posting chat completion request to: {}", url);
 
-        let response = tokio::select! {
-            _ = cancel_token.cancelled() => {
-                bail!("LLM request cancelled by user");
-            }
-            res = self.client.post(&url).headers(headers).json(&req_body).send() => {
-                res.with_context(|| format!("Failed to connect to LLM provider at {}", url))?
-            }
-        };
+        let mut attempts = 0;
+        let max_attempts = 3;
+        let mut response_opt = None;
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            error!("LLM API returned error {}: {}", status, error_text);
-            bail!("LLM API error ({}): {}", status, error_text);
+        while attempts < max_attempts {
+            attempts += 1;
+            let req_future = self.client.post(&url).headers(headers.clone()).json(&req_body).send();
+            let res = tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    bail!("LLM request cancelled by user");
+                }
+                res = req_future => res
+            };
+
+            match res {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        response_opt = Some(resp);
+                        break;
+                    } else if (status.as_u16() == 502 || status.as_u16() == 503 || status.as_u16() == 504 || status.as_u16() == 429) && attempts < max_attempts {
+                        let err_body = resp.text().await.unwrap_or_default();
+                        warn!("LLM API transient error {} (attempt {}/{}): {}, retrying in {}ms...", status, attempts, max_attempts, err_body, attempts * 1500);
+                        tokio::time::sleep(Duration::from_millis(1500 * attempts as u64)).await;
+                        continue;
+                    } else {
+                        let error_text = resp.text().await.unwrap_or_default();
+                        error!("LLM API returned error {}: {}", status, error_text);
+                        bail!("LLM API error ({}): {}", status, error_text);
+                    }
+                }
+                Err(err) => {
+                    if attempts < max_attempts && (err.is_timeout() || err.is_connect()) {
+                        warn!("LLM network error (attempt {}/{}): {}, retrying in {}ms...", attempts, max_attempts, err, attempts * 1500);
+                        tokio::time::sleep(Duration::from_millis(1500 * attempts as u64)).await;
+                        continue;
+                    } else {
+                        bail!("Failed to connect to LLM provider at {}: {}", url, err);
+                    }
+                }
+            }
         }
+
+        let response = response_opt.ok_or_else(|| anyhow::anyhow!("LLM request failed after {} attempts", max_attempts))?;
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
@@ -115,12 +144,21 @@ impl LlmClient {
 
         let mut in_reasoning = false;
         let mut in_text = false;
+        let mut stream_done = false;
 
-        while let Some(chunk_res) = tokio::select! {
+        'stream_loop: while let Some(chunk_res) = tokio::select! {
             _ = cancel_token.cancelled() => {
                 bail!("LLM stream cancelled by user");
             }
-            next = stream.next() => next
+            res = tokio::time::timeout(Duration::from_secs(45), stream.next()) => {
+                match res {
+                    Ok(next) => next,
+                    Err(_) => {
+                        warn!("LLM stream inactive for 45s, terminating stream gracefully");
+                        None
+                    }
+                }
+            }
         } {
             let chunk = chunk_res.context("Error reading response stream chunk from LLM")?;
             let chunk_str = String::from_utf8_lossy(&chunk);
@@ -138,6 +176,7 @@ impl LlmClient {
                 if let Some(data) = trimmed.strip_prefix("data: ") {
                     let data = data.trim();
                     if data == "[DONE]" {
+                        stream_done = true;
                         break;
                     }
 
@@ -149,6 +188,9 @@ impl LlmClient {
 
                             for choice in chunk.choices {
                                 if let Some(fr) = choice.finish_reason {
+                                    if fr == "stop" || fr == "length" || fr == "tool_calls" || fr == "function_call" {
+                                        stream_done = true;
+                                    }
                                     finish_reason = Some(fr);
                                 }
 
@@ -237,6 +279,10 @@ impl LlmClient {
                         }
                     }
                 }
+            }
+
+            if stream_done {
+                break 'stream_loop;
             }
         }
 
