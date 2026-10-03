@@ -1,5 +1,6 @@
 pub mod daemon_client;
 pub mod ipc_handlers;
+pub mod island_native;
 pub mod oauth_listener;
 pub mod tray;
 
@@ -60,15 +61,7 @@ pub fn run() {
                             if let Some(ev_type) = event_obj.get("type").and_then(|v| v.as_str()) {
                                 if ev_type == "agent_start" || ev_type == "turn_start" {
                                     if let Some(island) = handle_events.get_webview_window("island") {
-                                        if let Ok(Some(monitor)) = island.current_monitor() {
-                                            let scale = monitor.scale_factor();
-                                            let screen_w = monitor.size().width as f64 / scale;
-                                            let (w, h) = (280.0, 42.0);
-                                            let x = (screen_w - w) / 2.0;
-                                            let y = 0.0;
-                                            let _ = island.set_size(tauri::LogicalSize::new(w, h));
-                                            let _ = island.set_position(tauri::LogicalPosition::new(x, y));
-                                        }
+                                        island_native::position_island_top_center(&island, 280.0, 42.0);
                                         let _ = island.show();
                                     }
                                 }
@@ -87,17 +80,7 @@ pub fn run() {
 
             // Configure OpenPI Island window at top-center of screen (starts hidden)
             if let Some(island) = handle.get_webview_window("island") {
-                let _ = island.set_always_on_top(true);
-                if let Ok(Some(monitor)) = island.current_monitor() {
-                    let scale = monitor.scale_factor();
-                    let screen_w = monitor.size().width as f64 / scale;
-                    let pill_w = 280.0;
-                    let pill_h = 42.0;
-                    let x = (screen_w - pill_w) / 2.0;
-                    let y = 0.0;
-                    let _ = island.set_size(tauri::LogicalSize::new(pill_w, pill_h));
-                    let _ = island.set_position(tauri::LogicalPosition::new(x, y));
-                }
+                island_native::position_island_top_center(&island, 280.0, 42.0);
                 let _ = island.hide();
             }
 
@@ -164,25 +147,15 @@ pub fn run() {
                                     if *arg == "expand" || *arg == "open" {
                                         let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": true }));
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            if let Ok(Some(monitor)) = island.current_monitor() {
-                                                let scale = monitor.scale_factor();
-                                                let screen_w = monitor.size().width as f64 / scale;
-                                                let _ = island.set_size(tauri::LogicalSize::new(460.0, 540.0));
-                                                let _ = island.set_position(tauri::LogicalPosition::new((screen_w - 460.0) / 2.0, 0.0));
-                                                let _ = island.show();
-                                                let _ = island.set_focus();
-                                            }
+                                            island_native::position_island_top_center(&island, 460.0, 540.0);
+                                            let _ = island.show();
+                                            let _ = island.set_focus();
                                         }
                                     } else if *arg == "collapse" || *arg == "close" {
                                         let _ = handle_cmd.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            if let Ok(Some(monitor)) = island.current_monitor() {
-                                                let scale = monitor.scale_factor();
-                                                let screen_w = monitor.size().width as f64 / scale;
-                                                let _ = island.set_size(tauri::LogicalSize::new(280.0, 42.0));
-                                                let _ = island.set_position(tauri::LogicalPosition::new((screen_w - 280.0) / 2.0, 0.0));
-                                                let _ = island.show();
-                                            }
+                                            island_native::position_island_top_center(&island, 280.0, 42.0);
+                                            let _ = island.show();
                                         }
                                     } else if *arg == "hide" {
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
@@ -190,12 +163,7 @@ pub fn run() {
                                         }
                                     } else if *arg == "show" {
                                         if let Some(island) = handle_cmd.get_webview_window("island") {
-                                            if let Ok(Some(monitor)) = island.current_monitor() {
-                                                let scale = monitor.scale_factor();
-                                                let screen_w = monitor.size().width as f64 / scale;
-                                                let _ = island.set_size(tauri::LogicalSize::new(280.0, 42.0));
-                                                let _ = island.set_position(tauri::LogicalPosition::new((screen_w - 280.0) / 2.0, 0.0));
-                                            }
+                                            island_native::position_island_top_center(&island, 280.0, 42.0);
                                             let _ = island.show();
                                         }
                                     }

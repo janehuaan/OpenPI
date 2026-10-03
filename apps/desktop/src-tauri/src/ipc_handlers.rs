@@ -2291,18 +2291,11 @@ pub async fn handle_invoke(
             let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
             let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded }));
             if let Some(island) = app.get_webview_window("island") {
-                if let Ok(Some(monitor)) = island.current_monitor() {
-                    let scale = monitor.scale_factor();
-                    let screen_w = monitor.size().width as f64 / scale;
-                    let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 42.0) };
-                    let x = (screen_w - w) / 2.0;
-                    let y = 0.0;
-                    let _ = island.set_size(tauri::LogicalSize::new(w, h));
-                    let _ = island.set_position(tauri::LogicalPosition::new(x, y));
-                    if expanded {
-                        let _ = island.show();
-                        let _ = island.set_focus();
-                    }
+                let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 42.0) };
+                crate::island_native::position_island_top_center(&island, w, h);
+                if expanded {
+                    let _ = island.show();
+                    let _ = island.set_focus();
                 }
             }
             Ok(json!(true))
@@ -2323,15 +2316,7 @@ pub async fn handle_invoke(
                     if visible {
                         let _ = island.hide();
                     } else {
-                        if let Ok(Some(monitor)) = island.current_monitor() {
-                            let scale = monitor.scale_factor();
-                            let screen_w = monitor.size().width as f64 / scale;
-                            let (w, h) = (280.0, 42.0);
-                            let x = (screen_w - w) / 2.0;
-                            let y = 0.0;
-                            let _ = island.set_size(tauri::LogicalSize::new(w, h));
-                            let _ = island.set_position(tauri::LogicalPosition::new(x, y));
-                        }
+                        crate::island_native::position_island_top_center(&island, 280.0, 42.0);
                         let _ = island.show();
                     }
                 }
@@ -2341,15 +2326,7 @@ pub async fn handle_invoke(
 
         "show_island_window" => {
             if let Some(island) = app.get_webview_window("island") {
-                if let Ok(Some(monitor)) = island.current_monitor() {
-                    let scale = monitor.scale_factor();
-                    let screen_w = monitor.size().width as f64 / scale;
-                    let (w, h) = (280.0, 42.0);
-                    let x = (screen_w - w) / 2.0;
-                    let y = 0.0;
-                    let _ = island.set_size(tauri::LogicalSize::new(w, h));
-                    let _ = island.set_position(tauri::LogicalPosition::new(x, y));
-                }
+                crate::island_native::position_island_top_center(&island, 280.0, 42.0);
                 let _ = island.show();
             }
             Ok(json!(true))
@@ -2358,6 +2335,14 @@ pub async fn handle_invoke(
         "hide_island_window" => {
             if let Some(island) = app.get_webview_window("island") {
                 let _ = island.hide();
+            }
+            Ok(json!(true))
+        }
+
+        "set_island_mouse_ignore" => {
+            let ignore = args.get("ignore").and_then(|v| v.as_bool()).unwrap_or(false);
+            if let Some(island) = app.get_webview_window("island") {
+                crate::island_native::set_island_mouse_ignore(&island, ignore);
             }
             Ok(json!(true))
         }

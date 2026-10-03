@@ -34,3 +34,8 @@ openpi-memory = { path = "../../../crates/openpi-memory" }
 openpi-tools = { path = "../../../crates/openpi-tools" }
 openpi-daemon = { path = "../../../crates/openpi-daemon" }
 openpi-engine = { path = "../../../crates/openpi-engine" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSScreen", "NSColor", "NSView", "NSPanel", "NSApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSArray"] }

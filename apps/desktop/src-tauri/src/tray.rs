@@ -35,6 +35,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                             if visible {
                                 let _ = island.hide();
                             } else {
+                                crate::island_native::position_island_top_center(&island, 280.0, 42.0);
                                 let _ = island.show();
                             }
                         }

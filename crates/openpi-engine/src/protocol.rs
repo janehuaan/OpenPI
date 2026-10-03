@@ -150,14 +150,15 @@ pub struct TokenUsage {
     pub reasoning_tokens: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChunkFunctionCall {
     pub name: Option<String>,
     pub arguments: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChunkToolCall {
+    #[serde(default)]
     pub index: usize,
     pub id: Option<String>,
     pub r#type: Option<String>,
@@ -174,9 +175,11 @@ pub struct ChunkDelta {
     pub tool_calls: Option<Vec<ChunkToolCall>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChunkChoice {
+    #[serde(default)]
     pub index: usize,
+    #[serde(default)]
     pub delta: ChunkDelta,
     pub finish_reason: Option<String>,
 }

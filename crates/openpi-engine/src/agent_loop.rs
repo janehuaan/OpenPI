@@ -279,6 +279,11 @@ impl AgentLoop {
         };
         let mut last_assistant_text = String::new();
         let mut finished_normally = false;
+        // Consecutive completions that produced neither visible text nor tool calls
+        // (e.g. reasoning-only / truncated responses). Those must never be mistaken
+        // for a finished turn, or the agent silently stops mid-task.
+        let mut empty_streak: usize = 0;
+        const MAX_EMPTY_RETRIES: usize = 2;
 
         while step < max_steps {
             if cancel_token.is_cancelled() {
@@ -368,6 +373,11 @@ impl AgentLoop {
                 )?;
 
                 let mut asst_msg = ChatMessage::assistant(&llm_res.text);
+                if llm_res.text.trim().is_empty() {
+                    // OpenAI-compatible APIs expect `content: null` (not "") on an
+                    // assistant message that only carries tool calls.
+                    asst_msg.content = None;
+                }
                 asst_msg.tool_calls = Some(llm_res.tool_calls.clone());
                 active_messages.push(asst_msg);
 
@@ -429,7 +439,63 @@ impl AgentLoop {
 
                     active_messages.push(ChatMessage::tool_result(&tc.id, &exec_result.output));
                 }
+            } else if llm_res.text.trim().is_empty() {
+                // The provider produced neither tool calls nor visible text. This is
+                // what happens with reasoning-only / truncated completions, and it
+                // must NOT be treated as a finished answer (otherwise the agent
+                // silently stops mid-task with an empty "stop").
+                empty_streak += 1;
+                warn!(
+                    "Session {} step {}: empty completion (no text, no tool calls; reasoning {} chars, finish_reason {:?}), attempt {}/{}",
+                    session_id,
+                    step,
+                    llm_res.reasoning.chars().count(),
+                    llm_res.finish_reason,
+                    empty_streak,
+                    MAX_EMPTY_RETRIES
+                );
+
+                if empty_streak <= MAX_EMPTY_RETRIES {
+                    active_messages.push(ChatMessage::assistant(
+                        "<上一条回复只包含思考内容，未产生任何正文或工具调用>",
+                    ));
+                    active_messages.push(ChatMessage::user(
+                        "你刚才只输出了思考内容，没有给出任何面向用户的回答，也没有调用任何工具。请停止内部推理，立即给出结论，或调用工具继续执行任务。",
+                    ));
+                    continue;
+                }
+
+                let msg = "⚠️ 模型连续多次只返回思考内容、未产生任何回答或工具调用，本轮已中止。请重试，或在设置中更换为更稳定的模型。";
+                journal.append_assistant_message(
+                    msg,
+                    "",
+                    &[],
+                    &model_cfg.provider,
+                    &model_cfg.id,
+                    in_tok,
+                    out_tok,
+                    "error",
+                )?;
+                let asst_now = chrono::Utc::now().timestamp_millis();
+                let _ = self.event_tx.send((
+                    session_id.to_string(),
+                    json!({
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": msg }],
+                            "timestamp": asst_now
+                        }
+                    }),
+                ));
+                let _ = self.event_tx.send((
+                    session_id.to_string(),
+                    json!({ "type": "stream_error", "error": msg }),
+                ));
+                finished_normally = true;
+                break;
             } else {
+                empty_streak = 0;
                 // Final textual response (no further tool calls)
                 journal.append_assistant_message(
                     &llm_res.text,
@@ -488,12 +554,20 @@ impl AgentLoop {
 
             match synthesis_res {
                 Ok(res) => {
-                    last_assistant_text = res.text.clone();
+                    let synth_text = if res.text.trim().is_empty() {
+                        format!(
+                            "⚠️ 本轮执行已达到最大步数限制（已执行 {} 步），且模型未返回总结内容。你可以发送“继续”指令让助手接着处理。",
+                            max_steps
+                        )
+                    } else {
+                        res.text.clone()
+                    };
+                    last_assistant_text = synth_text.clone();
                     let in_tok = res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
                     let out_tok = res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
 
                     let _ = journal.append_assistant_message(
-                        &res.text,
+                        &synth_text,
                         &res.reasoning,
                         &[],
                         &model_cfg.provider,
@@ -510,7 +584,7 @@ impl AgentLoop {
                             "type": "message_end",
                             "message": {
                                 "role": "assistant",
-                                "content": [{ "type": "text", "text": res.text }],
+                                "content": [{ "type": "text", "text": synth_text }],
                                 "timestamp": asst_now
                             }
                         }),
