@@ -638,7 +638,7 @@ export function MemorySurface({
 														overflow: "hidden",
 													}}
 												>
-													{item.content.split("## Extracted Raw Memories")[0].replace(/#.*\n/, "").trim()}
+													{((item?.content || "").split("## Extracted Raw Memories")[0] ?? "").replace(/#.*\n/, "").trim()}
 												</p>
 											)}
 										</div>
@@ -664,12 +664,42 @@ export function MemorySurface({
 							className="glass-card"
 							style={{
 								padding: "16px 20px",
+								display: "flex",
+								justifyContent: "space-between",
+								alignItems: "center",
+								gap: 16,
 							}}
 						>
-							<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>自进化技能库 (Synthesized Skills)</h3>
-							<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
-								从重复排障与执行成功经验中提炼的标准可执行规约（存储在 <code>~/.openpi/memories/skills/</code>），从静态记忆蜕变为生产力。
-							</p>
+							<div>
+								<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>自进化技能库 (Synthesized Skills)</h3>
+								<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+									从重复排障与执行成功经验中提炼的标准可执行规约（存储在 <code>~/.openpi/memories/skills/</code>），从静态记忆蜕变为生产力。
+								</p>
+							</div>
+							<button
+								type="button"
+								onClick={handleConsolidateNow}
+								disabled={consolidating}
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: 6,
+									padding: "7px 14px",
+									borderRadius: 6,
+									fontSize: 12.5,
+									fontWeight: 500,
+									cursor: consolidating ? "not-allowed" : "pointer",
+									background: "var(--accent)",
+									color: "#fff",
+									border: "none",
+									whiteSpace: "nowrap",
+									boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+									transition: "all 0.2s ease",
+								}}
+							>
+								<Sparkles size={14} />
+								<span>{consolidating ? "正在提炼技能中…" : "一键提炼自进化技能"}</span>
+							</button>
 						</div>
 
 						{hubData?.skills && hubData.skills.length > 0 ? (
@@ -682,15 +712,22 @@ export function MemorySurface({
 											padding: "18px 22px",
 										}}
 									>
-										<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-											<Zap size={15} style={{ color: "var(--accent)" }} />
-											<strong style={{ fontSize: 14 }}>{skill.name}</strong>
-											<span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-												skills/{skill.name}/SKILL.md
-											</span>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
+											<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+												<Zap size={15} style={{ color: "var(--accent)" }} />
+												<strong style={{ fontSize: 14 }}>{skill.name}</strong>
+												<span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+													skills/{skill.name}/SKILL.md
+												</span>
+											</div>
+											{skill.description && (
+												<span style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: "55%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+													{skill.description}
+												</span>
+											)}
 										</div>
-										<div style={{ padding: 12, borderRadius: 6, background: "var(--bg-muted)" }}>
-											<MarkdownText text={skill.content} />
+										<div style={{ padding: 14, borderRadius: 8, background: "var(--bg-muted)", fontSize: 13, lineHeight: 1.6 }}>
+											<MarkdownText text={skill.content ? (skill.content.trim().startsWith("---") && skill.content.split("---").length >= 3 ? skill.content.split("---").slice(2).join("---").trim() : skill.content) : (skill.description || "暂无具体正文规约")} />
 										</div>
 									</div>
 								))}
@@ -725,7 +762,9 @@ export function MemorySurface({
 									onChange={(e) => setFilter(e.target.value)}
 									placeholder="搜索条目键名或内容..."
 									style={{
-										padding: "7px 12px",
+										padding: "0 12px",
+										height: 32,
+										boxSizing: "border-box",
 										borderRadius: 6,
 										border: "1px solid var(--border)",
 										background: "var(--bg-card)",
@@ -735,14 +774,14 @@ export function MemorySurface({
 									}}
 								/>
 								<Select value={typeFilter} onValueChange={setTypeFilter}>
-									<SelectTrigger style={{ width: 130 }}>
+									<SelectTrigger style={{ width: 120, height: 32, boxSizing: "border-box" }}>
 										<SelectValue placeholder="所有分类" />
 									</SelectTrigger>
 									<SelectContent>
 										<SelectItem value="all">所有分类</SelectItem>
 										<SelectItem value="user">用户偏好</SelectItem>
 										<SelectItem value="feedback">纠错反馈</SelectItem>
-										<SelectItem value="project">项目决策</SelectItem>
+										<SelectItem value="project">项目规范</SelectItem>
 										<SelectItem value="lesson">排障经验</SelectItem>
 									</SelectContent>
 								</Select>
@@ -755,7 +794,7 @@ export function MemorySurface({
 										setShowArchive(!showArchive);
 										if (!showArchive) void loadArchive();
 									}}
-									style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+									style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 32, boxSizing: "border-box" }}
 								>
 									<Archive size={13} />
 									<span>归档库 ({archivedEntries.length})</span>

@@ -164,6 +164,19 @@ impl ToolRegistry {
                     "properties": {}
                 }),
             ),
+            ToolDefinition::new(
+                "save_skill",
+                "Persist a newly discovered troubleshooting resolution, framework workflow, or engineering SOP as a reusable Skill in the Synthesized Skills Hub (~/.openpi/memories/skills/). This skill will automatically guide future tasks.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Short identifier/slug for the skill (e.g. 'tauri-sqlite-build', 'macports-node22-env')" },
+                        "description": { "type": "string", "description": "Clear 1-2 sentence description of when this skill applies and what it solves" },
+                        "content": { "type": "string", "description": "Complete SKILL.md Markdown content detailing root cause, anti-patterns, and step-by-step SOP" }
+                    },
+                    "required": ["name", "description", "content"]
+                }),
+            ),
         ]
     }
 
@@ -485,6 +498,34 @@ impl ToolRegistry {
                     output: serde_json::to_string_pretty(&stats).unwrap_or_default(),
                     is_error: false,
                 })
+            }
+
+            "save_skill" => {
+                let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let desc = args.get("description").and_then(|v| v.as_str()).unwrap_or("").trim();
+                let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").trim();
+
+                if name.is_empty() || content.is_empty() {
+                    return Ok(ToolExecutionResult {
+                        output: "Failed: 'name' and 'content' must not be empty when saving a skill.".to_string(),
+                        is_error: true,
+                    });
+                }
+
+                match crate::skill_synthesizer::save_synthesized_skill(name, desc, content) {
+                    Ok(path) => Ok(ToolExecutionResult {
+                        output: format!(
+                            "Successfully synthesized and persisted skill '{}' to '{}'.\nThis skill is now active in the Synthesized Skills Hub and will automatically guide future tasks.",
+                            name,
+                            path.display()
+                        ),
+                        is_error: false,
+                    }),
+                    Err(e) => Ok(ToolExecutionResult {
+                        output: format!("Failed to persist skill: {}", e),
+                        is_error: true,
+                    }),
+                }
             }
 
             other => Ok(ToolExecutionResult {

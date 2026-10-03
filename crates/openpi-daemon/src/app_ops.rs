@@ -109,6 +109,9 @@ pub async fn handle_app_op(
             let task_id = op.get("taskId").and_then(|t| t.as_str()).unwrap_or_default();
             let paused = op.get("paused").and_then(|p| p.as_bool()).unwrap_or(false);
             let _ = storage.set_task_paused(task_id, paused)?;
+            if !paused {
+                let _ = scheduler.advance_task_schedule(task_id);
+            }
             let task_opt = storage.get_task(task_id)?;
             match task_opt {
                 Some(task) => {
@@ -140,15 +143,37 @@ pub async fn handle_app_op(
 
         "run_task" => {
             let task_id = op.get("taskId").and_then(|t| t.as_str()).unwrap_or_default();
+            let task = match storage.get_task(task_id)? {
+                Some(t) => t,
+                None => return Ok(ServerMessage::err(id, format!("Task not found: {}", task_id))),
+            };
             match scheduler.trigger_task(task_id, "manual") {
-                Ok(run) => Ok(ServerMessage::ok(id, serde_json::json!(run))),
+                Ok(run) => {
+                    let task_clone = task.clone();
+                    let run_clone = run.clone();
+                    let sched_clone = scheduler.clone();
+                    let sup_clone = supervisor.clone();
+                    let stor_clone = storage.clone();
+                    let cli_path = std::env::var("OPENPI_PI_CLI_PATH").unwrap_or_default();
+                    tokio::spawn(async move {
+                        crate::task_runner::execute_task_run(
+                            task_clone,
+                            run_clone,
+                            sched_clone,
+                            sup_clone,
+                            stor_clone,
+                            cli_path,
+                        ).await;
+                    });
+                    Ok(ServerMessage::ok(id, serde_json::json!(run)))
+                }
                 Err(e) => Ok(ServerMessage::err(id, e.to_string())),
             }
         }
 
         "cancel_run" => {
             let run_id = op.get("runId").and_then(|r| r.as_str()).unwrap_or_default();
-            let updated = storage.cancel_run(run_id)?;
+            let updated = scheduler.cancel_run(run_id).await?;
             Ok(ServerMessage::ok(id, serde_json::json!(updated)))
         }
 
@@ -176,7 +201,9 @@ pub async fn handle_app_op(
         }
 
         "step_runs" => {
-            Ok(ServerMessage::ok(id, serde_json::json!({ "stepRuns": [] })))
+            let run_id = op.get("runId").and_then(|r| r.as_str()).unwrap_or_default();
+            let step_runs = storage.list_step_runs_for_run(run_id)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "stepRuns": step_runs })))
         }
 
         // --- Memory ops ---
@@ -346,30 +373,122 @@ pub async fn handle_app_op(
             let openpi_dir_str = std::env::var("OPENPI_DIR").unwrap_or_else(|_| format!("{}/.openpi", home));
             let openpi_path = std::path::Path::new(&openpi_dir_str);
             let agent_dir = openpi_path.join("agent");
-            let handbook_file = agent_dir.join("HANDBOOK.md");
-            let handbook = if handbook_file.exists() {
-                std::fs::read_to_string(&handbook_file).unwrap_or_default()
+            let memories_dir = openpi_engine::memory_worker::memories_dir();
+            let rollout_dir = openpi_engine::memory_worker::rollout_summaries_dir();
+
+            let handbook_file_mem = memories_dir.join("MEMORY.md");
+            let handbook_file_agent = agent_dir.join("HANDBOOK.md");
+            let mut handbook = if handbook_file_mem.exists() {
+                std::fs::read_to_string(&handbook_file_mem).unwrap_or_default()
+            } else if handbook_file_agent.exists() {
+                std::fs::read_to_string(&handbook_file_agent).unwrap_or_default()
             } else {
                 storage.get_kv("memory_handbook")?.unwrap_or_default()
             };
-            let summary_file = agent_dir.join("MEMORY.md");
-            let summary = if summary_file.exists() {
-                std::fs::read_to_string(&summary_file).unwrap_or_default()
+
+            let summary_file_mem = memories_dir.join("memory_summary.md");
+            let summary_file_agent = agent_dir.join("MEMORY.md");
+            let mut summary = if summary_file_mem.exists() {
+                std::fs::read_to_string(&summary_file_mem).unwrap_or_default()
+            } else if summary_file_agent.exists() {
+                std::fs::read_to_string(&summary_file_agent).unwrap_or_default()
             } else {
                 storage.get_kv("memory_summary")?.unwrap_or_default()
             };
+
+            // Seed memory files if empty
+            if handbook.trim().is_empty() || summary.trim().is_empty() {
+                let _ = openpi_engine::memory_worker::consolidate_memories_internal();
+                if handbook.trim().is_empty() {
+                    handbook = std::fs::read_to_string(&handbook_file_mem)
+                        .or_else(|_| std::fs::read_to_string(&handbook_file_agent))
+                        .unwrap_or_default();
+                }
+                if summary.trim().is_empty() {
+                    summary = std::fs::read_to_string(&summary_file_mem)
+                        .or_else(|_| std::fs::read_to_string(&summary_file_agent))
+                        .unwrap_or_default();
+                }
+            }
+
+            // Read real rolloutSummaries
+            let mut rollout_summaries = Vec::new();
+            if rollout_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&rollout_dir) {
+                    let mut files: Vec<std::path::PathBuf> = entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.path())
+                        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("md"))
+                        .collect();
+                    files.sort();
+                    files.reverse();
+
+                    for f in files {
+                        if let Ok(content) = std::fs::read_to_string(&f) {
+                            let file_name = f.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+                            let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+                            let date = if stem.len() >= 10 {
+                                stem[..10].to_string()
+                            } else {
+                                chrono::Local::now().format("%Y-%m-%d").to_string()
+                            };
+                            let slug = if stem.len() > 11 {
+                                stem[11..].to_string()
+                            } else {
+                                stem.clone()
+                            };
+                            rollout_summaries.push(serde_json::json!({
+                                "slug": slug,
+                                "fileName": file_name,
+                                "date": date,
+                                "content": content
+                            }));
+                        }
+                    }
+                }
+            }
+
+            // Also check project .pi/memory/*.md if available
+            let proj_mem_dir = std::path::Path::new(".").join(".pi").join("memory");
+            if proj_mem_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&proj_mem_dir) {
+                    for e in entries.flatten() {
+                        let p = e.path();
+                        if p.extension().and_then(|s| s.to_str()) == Some("md") {
+                            let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+                            if fname != "MEMORY.md" && fname != "memory_summary.md" {
+                                if !rollout_summaries.iter().any(|item| item.get("fileName").and_then(|v| v.as_str()) == Some(&fname)) {
+                                    if let Ok(content) = std::fs::read_to_string(&p) {
+                                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
+                                        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+                                        rollout_summaries.push(serde_json::json!({
+                                            "slug": stem,
+                                            "fileName": fname,
+                                            "date": date,
+                                            "content": content
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let skills = scan_skills(&agent_dir, openpi_path);
             let proj_entries = storage.list_memory(".", Some("project")).unwrap_or_default();
             let glob_entries = storage.list_memory(".", Some("global")).unwrap_or_default();
+            let total_completed = rollout_summaries.len() + proj_entries.len() + glob_entries.len();
+
             Ok(ServerMessage::ok(id, serde_json::json!({
                 "summary": summary,
                 "handbook": handbook,
-                "rolloutSummaries": [],
+                "rolloutSummaries": rollout_summaries,
                 "skills": skills,
                 "stats": {
                     "pending": 0,
                     "running": 0,
-                    "completed": proj_entries.len() + glob_entries.len(),
+                    "completed": total_completed,
                     "failed": 0,
                     "unconsolidatedStage1": 0
                 },
@@ -381,15 +500,31 @@ pub async fn handle_app_op(
             let content = op.get("content").and_then(|v| v.as_str()).unwrap_or_default();
             let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
             let openpi_dir_str = std::env::var("OPENPI_DIR").unwrap_or_else(|_| format!("{}/.openpi", home));
-            let handbook_file = std::path::Path::new(&openpi_dir_str).join("agent").join("HANDBOOK.md");
-            let _ = std::fs::create_dir_all(handbook_file.parent().unwrap_or(std::path::Path::new(".")));
-            let _ = std::fs::write(&handbook_file, content);
+            let openpi_path = std::path::Path::new(&openpi_dir_str);
+            let agent_dir = openpi_path.join("agent");
+            let memories_dir = openpi_engine::memory_worker::memories_dir();
+
+            let _ = std::fs::create_dir_all(&memories_dir);
+            let _ = std::fs::create_dir_all(&agent_dir);
+
+            let _ = std::fs::write(memories_dir.join("MEMORY.md"), content);
+            let _ = std::fs::write(agent_dir.join("HANDBOOK.md"), content);
             storage.set_kv("memory_handbook", content)?;
             Ok(ServerMessage::ok(id, serde_json::json!({ "ok": true })))
         }
 
         "trigger_memory_consolidation" => {
+            let _ = openpi_engine::memory_worker::reconcile_all_session_memories();
+            let _ = openpi_engine::memory_worker::consolidate_memories_internal();
             Ok(ServerMessage::ok(id, serde_json::json!({ "ok": true, "consolidated": true })))
+        }
+
+        "synthesize_skill" => {
+            let name = op.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+            let desc = op.get("description").and_then(|v| v.as_str()).unwrap_or_default();
+            let content = op.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+            let path = openpi_engine::skill_synthesizer::save_synthesized_skill(name, desc, content)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "ok": true, "filePath": path.to_string_lossy() })))
         }
 
         // --- Model & Auth ops ---
@@ -858,7 +993,9 @@ fn scan_skills(agent_dir: &std::path::Path, openpi_dir: &std::path::Path) -> Vec
                 seen.insert(name.clone());
 
                 let mut description = String::new();
+                let mut skill_content = String::new();
                 if let Ok(content) = std::fs::read_to_string(&skill_file) {
+                    skill_content = content.clone();
                     for line in content.lines().take(20) {
                         if line.starts_with("description:") {
                             description = line
@@ -883,7 +1020,8 @@ fn scan_skills(agent_dir: &std::path::Path, openpi_dir: &std::path::Path) -> Vec
                 skills.push(serde_json::json!({
                     "name": name,
                     "description": description,
-                    "filePath": skill_file.to_string_lossy().to_string()
+                    "filePath": skill_file.to_string_lossy().to_string(),
+                    "content": skill_content
                 }));
             }
         }

@@ -139,6 +139,40 @@ impl AgentLoop {
         }
     }
 
+    fn compact_inflight_messages(messages: &mut [ChatMessage]) {
+        let tool_indices: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.role == "tool")
+            .map(|(i, _)| i)
+            .collect();
+
+        let total_tools = tool_indices.len();
+        if total_tools <= 2 {
+            return;
+        }
+
+        let recent_cutoff = tool_indices[total_tools - 2];
+
+        for &idx in &tool_indices {
+            if idx < recent_cutoff {
+                if let Some(crate::protocol::ChatContent::Text(ref mut txt)) = messages[idx].content {
+                    let total_chars = txt.chars().count();
+                    if total_chars > 1000 {
+                        let head: String = txt.chars().take(350).collect();
+                        let tail: String = txt.chars().skip(total_chars.saturating_sub(150)).collect();
+                        *txt = format!(
+                            "{}\n... [前序步骤工具执行结果已折叠，已省略 {} 字符以节省上下文] ...\n{}",
+                            head,
+                            total_chars.saturating_sub(500),
+                            tail
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn run_turn(
         &self,
         session_id: &str,
@@ -156,6 +190,19 @@ impl AgentLoop {
         // 2. Append current user prompt to journal
         journal.append_user_message(user_prompt)?;
 
+        let user_now = chrono::Utc::now().timestamp_millis();
+        let _ = self.event_tx.send((
+            session_id.to_string(),
+            json!({
+                "type": "message_end",
+                "message": {
+                    "role": "user",
+                    "content": [{ "type": "text", "text": user_prompt }],
+                    "timestamp": user_now
+                }
+            }),
+        ));
+
         // 3. Assemble full prompt messages
         let mut active_messages = Vec::new();
 
@@ -172,16 +219,18 @@ impl AgentLoop {
         let beta = self.tool_registry.jev.contextual_beta(ctx_key).await;
         let persona = crate::config::PersonaConfig::load();
         let persona_directive = persona.to_prompt_directive();
+        let all_skills = crate::skill_synthesizer::scan_all_skills();
+        let skills_directive = crate::skill_synthesizer::format_skills_prompt_directive(&all_skills);
 
         let system_prompt = format!(
             "You are OpenPI, an autonomous AI software engineer running on the native Rust engine (openpi-engine).\n\
              Workspace: {}\n\
              Principles:\n\
              1. Fast, surgical execution: use read to inspect files, edit/search_replace to perform minimal atomic updates, and bash to test or run commands.\n\
-             2. Always inspect files or run safe commands rather than guessing.\n\
+             2. Be decisive and efficient: avoid redundant repeated searches, excessive read cycles, or unnecessary multiple rounds of verification. When the target code or root cause is clear, make the edit directly.\n\
              3. Never run broad recursive searches across the home directory; use targeted grep or find instead.\n\
-             4. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.{}",
-            cwd, ctx_label, beta, persona_directive
+             4. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.{}{}",
+            cwd, ctx_label, beta, persona_directive, skills_directive
         );
 
         active_messages.push(ChatMessage::system(system_prompt));
@@ -200,7 +249,10 @@ impl AgentLoop {
         });
 
         let mut step = 0;
-        let max_steps = 25;
+        let is_unlimited = self.config.max_steps == 0;
+        let max_steps = if is_unlimited { usize::MAX } else { self.config.max_steps.max(25) };
+        let mut last_assistant_text = String::new();
+        let mut finished_normally = false;
 
         while step < max_steps {
             if cancel_token.is_cancelled() {
@@ -209,9 +261,23 @@ impl AgentLoop {
             }
 
             step += 1;
-            info!("Cognitive turn step {}/{} for session {}", step, max_steps, session_id);
+            if is_unlimited {
+                info!("Cognitive turn step {}/unlimited for session {}", step, session_id);
+            } else {
+                info!("Cognitive turn step {}/{} for session {}", step, max_steps, session_id);
+            }
 
-            // Announce assistant message start
+            // Announce turn start and assistant message start
+            let _ = self.event_tx.send((
+                session_id.to_string(),
+                json!({
+                    "type": "turn_start",
+                    "step": step,
+                    "maxSteps": if is_unlimited { 0 } else { max_steps },
+                    "model": model_cfg.id,
+                    "provider": model_cfg.provider
+                }),
+            ));
             let _ = self.event_tx.send((
                 session_id.to_string(),
                 json!({
@@ -219,6 +285,9 @@ impl AgentLoop {
                     "message": { "role": "assistant" }
                 }),
             ));
+
+            // Compact older tool results in active_messages to preserve lean context and fast TTFT
+            Self::compact_inflight_messages(&mut active_messages);
 
             let llm_res = match self.llm_client.stream_chat_completion(
                 &model_cfg,
@@ -230,6 +299,17 @@ impl AgentLoop {
                 Ok(res) => res,
                 Err(e) => {
                     warn!("LLM execution error at step {}: {}", step, e);
+                    let err_display = format!("⚠️ 请求模型失败：{}", e);
+                    let _ = journal.append_assistant_message(
+                        &err_display,
+                        "",
+                        &[],
+                        &model_cfg.provider,
+                        &model_cfg.id,
+                        0,
+                        0,
+                        "error",
+                    );
                     let _ = self.event_tx.send((
                         session_id.to_string(),
                         json!({
@@ -237,9 +317,13 @@ impl AgentLoop {
                             "error": e.to_string()
                         }),
                     ));
+                    let _ = self.event_tx.send((session_id.to_string(), json!({ "type": "turn_end" })));
+                    let _ = self.event_tx.send((session_id.to_string(), json!({ "type": "agent_settled" })));
                     return Err(e);
                 }
             };
+
+            last_assistant_text = llm_res.text.clone();
 
             let in_tok = llm_res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
             let out_tok = llm_res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
@@ -282,11 +366,20 @@ impl AgentLoop {
                     ));
 
                     // Execute tool natively in Rust
-                    let exec_result = self.tool_registry.execute(
+                    let exec_result = match self.tool_registry.execute(
                         &tc.function.name,
                         &parsed_args,
                         cwd,
-                    ).await?;
+                    ).await {
+                        Ok(res) => res,
+                        Err(e) => {
+                            warn!("Tool execution error for {}: {}", tc.function.name, e);
+                            crate::tool_registry::ToolExecutionResult {
+                                output: format!("Tool error: {}", e),
+                                is_error: true,
+                            }
+                        }
+                    };
 
                     // Emit tool_execution_end
                     let _ = self.event_tx.send((
@@ -322,11 +415,116 @@ impl AgentLoop {
                     out_tok,
                     "stop",
                 )?;
+
+                let asst_now = chrono::Utc::now().timestamp_millis();
+                let _ = self.event_tx.send((
+                    session_id.to_string(),
+                    json!({
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": llm_res.text }],
+                            "timestamp": asst_now
+                        }
+                    }),
+                ));
+                finished_normally = true;
                 break;
             }
         }
 
-        // 5. Emit agent_settled
+        // If the turn reached max_steps without returning a final textual response,
+        // request a final synthesis step from the LLM with tools disabled so the user
+        // receives a complete summary instead of an abrupt silent stop.
+        if !finished_normally && !cancel_token.is_cancelled() && step >= max_steps {
+            warn!("Session {} reached max steps ({}), requesting final synthesis", session_id, max_steps);
+            let _ = self.event_tx.send((
+                session_id.to_string(),
+                json!({
+                    "type": "message_start",
+                    "message": { "role": "assistant" }
+                }),
+            ));
+
+            active_messages.push(ChatMessage::user(
+                "⚠️ [系统提示]：本轮连续工具调用已达最大步数上限。工具现已关闭，请根据上方已经执行的所有工具调用和探索结果，向用户详细总结汇报当前进展、发现的核心内容、结论以及后续建议。"
+            ));
+
+            Self::compact_inflight_messages(&mut active_messages);
+
+            let synthesis_res = self.llm_client.stream_chat_completion(
+                &model_cfg,
+                active_messages.clone(),
+                None, // Tools disabled to force a textual summary
+                cancel_token.clone(),
+                bridge.as_ref(),
+            ).await;
+
+            match synthesis_res {
+                Ok(res) => {
+                    last_assistant_text = res.text.clone();
+                    let in_tok = res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+                    let out_tok = res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+
+                    let _ = journal.append_assistant_message(
+                        &res.text,
+                        &res.reasoning,
+                        &[],
+                        &model_cfg.provider,
+                        &model_cfg.id,
+                        in_tok,
+                        out_tok,
+                        "stop",
+                    );
+
+                    let asst_now = chrono::Utc::now().timestamp_millis();
+                    let _ = self.event_tx.send((
+                        session_id.to_string(),
+                        json!({
+                            "type": "message_end",
+                            "message": {
+                                "role": "assistant",
+                                "content": [{ "type": "text", "text": res.text }],
+                                "timestamp": asst_now
+                            }
+                        }),
+                    ));
+                }
+                Err(e) => {
+                    warn!("Failed to stream final synthesis at max steps: {}", e);
+                    let fallback_text = format!(
+                        "⚠️ 本轮执行已达到最大步数限制（已执行 {} 步）。以上为已完成的阶段性探索，你可以发送“继续”指令让助手接着处理。",
+                        max_steps
+                    );
+                    last_assistant_text = fallback_text.clone();
+                    let _ = journal.append_assistant_message(
+                        &fallback_text,
+                        "",
+                        &[],
+                        &model_cfg.provider,
+                        &model_cfg.id,
+                        0,
+                        0,
+                        "stop",
+                    );
+                    let asst_now = chrono::Utc::now().timestamp_millis();
+                    let _ = self.event_tx.send((
+                        session_id.to_string(),
+                        json!({
+                            "type": "message_end",
+                            "message": {
+                                "role": "assistant",
+                                "content": [{ "type": "text", "text": fallback_text }],
+                                "timestamp": asst_now
+                            }
+                        }),
+                    ));
+                }
+            }
+        }
+
+        // 5. Emit turn_end and agent_settled
+        let _ = self.event_tx.send((session_id.to_string(), json!({ "type": "turn_end" })));
         let _ = self.event_tx.send((session_id.to_string(), json!({ "type": "agent_settled" })));
 
         // 6. Trigger offline Jev dreaming in background
@@ -335,6 +533,42 @@ impl AgentLoop {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let _ = jev_bg.trigger_offline_dreaming(&s_dir).await;
+        });
+
+        // 7. Trigger Autonomous Memory Stage 1 thread extraction
+        let sid = session_id.to_string();
+        let cwd_str = cwd.to_string();
+        let prompt_str = user_prompt.to_string();
+        let answer_for_mem = last_assistant_text.clone();
+        let llm_client_mem = self.llm_client.clone();
+        let model_cfg_mem = model_cfg.clone();
+        tokio::spawn(async move {
+            let _ = crate::memory_worker::autonomous_memory_extract(
+                &sid,
+                &cwd_str,
+                &prompt_str,
+                &answer_for_mem,
+                Some((&llm_client_mem, &model_cfg_mem)),
+            ).await;
+        });
+
+        // 8. Trigger Autonomous Title Summarization and broadcast if refined
+        let event_tx_title = self.event_tx.clone();
+        let sid_title = session_id.to_string();
+        let prompt_title = user_prompt.to_string();
+        let answer_title = last_assistant_text;
+        let llm_client = self.llm_client.clone();
+        let model_for_title = model_cfg.clone();
+        tokio::spawn(async move {
+            if let Ok(refined_title) = crate::title_summarizer::summarize_title_llm(&llm_client, &model_for_title, &prompt_title, &answer_title).await {
+                if !refined_title.is_empty() && refined_title != "新对话" {
+                    let _ = event_tx_title.send((sid_title.clone(), serde_json::json!({
+                        "type": "session_renamed",
+                        "sessionId": sid_title,
+                        "name": refined_title,
+                    })));
+                }
+            }
         });
 
         Ok(())

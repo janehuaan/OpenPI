@@ -5,12 +5,16 @@ pub mod protocol;
 pub mod session_journal;
 pub mod session_manager;
 pub mod tool_registry;
+pub mod memory_worker;
+pub mod title_summarizer;
+pub mod skill_synthesizer;
 
 pub use agent_loop::AgentLoop;
 pub use config::{EngineConfig, ModelConfig, PersonaConfig};
 pub use llm_client::LlmClient;
 pub use session_manager::EngineSessionManager;
 pub use tool_registry::ToolRegistry;
+pub use skill_synthesizer::{SynthesizedSkill, save_synthesized_skill, scan_all_skills, format_skills_prompt_directive};
 
 pub fn engine_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -104,6 +108,15 @@ mod tests {
         let res = registry.execute("bash", &json!({"command": "grep -rn 'hello' ~"}), cwd).await.unwrap();
         assert!(res.is_error);
         assert!(res.output.contains("SafetyGate"));
+
+        // 5. Test save_skill
+        let res = registry.execute("save_skill", &json!({
+            "name": "test-auto-synth-skill",
+            "description": "测试自动合成技能",
+            "content": "# Test Auto Synth\n\n- step 1: test\n- step 2: done"
+        }), cwd).await.unwrap();
+        assert!(!res.is_error);
+        assert!(res.output.contains("test-auto-synth-skill"));
     }
 
     #[test]
