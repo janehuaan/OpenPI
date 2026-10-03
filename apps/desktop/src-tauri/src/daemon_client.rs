@@ -68,11 +68,7 @@ static DEFAULT_WS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn default_workspace() -> &'static str {
     DEFAULT_WS.get_or_init(|| {
-        if let Ok(w) = std::env::var("OPENPI_WORKSPACE") {
-            w
-        } else {
-            std::env::var("HOME").unwrap_or_else(|_| ".".into())
-        }
+        openpi_engine::config::default_project_workspace().to_string_lossy().to_string()
     })
 }
 
@@ -149,8 +145,10 @@ impl DaemonClient {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(parent) = exe.parent() {
                 candidates.push(parent.join("openpi-daemon"));
+                candidates.push(parent.join("../Resources/openpi/bin/openpi-daemon"));
             }
         }
+        candidates.push(PathBuf::from("/Applications/OpenPI.app/Contents/Resources/openpi/bin/openpi-daemon"));
         candidates.push(PathBuf::from("/Users/huaan/openpi-next/target/release/openpi-daemon"));
         candidates.push(PathBuf::from("/Users/huaan/openpi-next/dist/OpenPI-Tauri.app/Contents/MacOS/openpi-daemon"));
         candidates.push(PathBuf::from("openpi-daemon"));
@@ -289,6 +287,77 @@ impl DaemonClient {
                 let mut p = self.pending.lock().await;
                 p.remove(&id);
                 Err("Request to daemon timed out".to_string())
+            }
+        }
+    }
+
+    pub async fn try_connect_passive(&self) -> Result<()> {
+        let mut lock = self.write_half.lock().await;
+        if lock.is_some() {
+            return Ok(());
+        }
+
+        let sock = socket_path();
+        if !sock.exists() {
+            return Err(anyhow!("Daemon socket does not exist (daemon sleeping)"));
+        }
+
+        if let Ok(stream) = UnixStream::connect(&sock).await {
+            let (read_half, write) = stream.into_split();
+            *lock = Some(write);
+
+            let pending = self.pending.clone();
+            let event_tx = self.event_tx.clone();
+            let write_slot = self.write_half.clone();
+
+            tauri::async_runtime::spawn(async move {
+                Self::reader_loop(read_half, pending, event_tx, write_slot).await;
+            });
+
+            Ok(())
+        } else {
+            Err(anyhow!("Daemon socket not responding (daemon sleeping)"))
+        }
+    }
+
+    pub async fn request_passive(&self, req: ClientRequest) -> Result<Value, String> {
+        let id = req.id().to_string();
+        self.try_connect_passive()
+            .await
+            .map_err(|e| format!("Daemon not running: {}", e))?;
+
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut p = self.pending.lock().await;
+            p.insert(id.clone(), tx);
+        }
+
+        let mut json = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        json.push('\n');
+
+        {
+            let mut lock = self.write_half.lock().await;
+            if let Some(w) = lock.as_mut() {
+                if let Err(e) = w.write_all(json.as_bytes()).await {
+                    let mut p = self.pending.lock().await;
+                    p.remove(&id);
+                    return Err(format!("Socket write error: {}", e));
+                }
+                let _ = w.flush().await;
+            } else {
+                let mut p = self.pending.lock().await;
+                p.remove(&id);
+                return Err("Daemon write stream unavailable".to_string());
+            }
+        }
+
+        match tokio::time::timeout(Duration::from_secs(5), rx).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(_)) => Err("Response channel canceled".to_string()),
+            Err(_) => {
+                let mut p = self.pending.lock().await;
+                p.remove(&id);
+                Err("Passive request timed out".to_string())
             }
         }
     }

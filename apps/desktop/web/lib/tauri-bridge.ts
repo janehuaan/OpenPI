@@ -4,7 +4,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
 
 function safeListen(eventName: string, handler: (payload: any) => void): () => void {
 	let isDisposed = false;
@@ -100,8 +100,13 @@ if (typeof window !== "undefined") {
 
 		onSelectConversation: (handler: (instanceId: string) => void): (() => void) => {
 			return safeListen("openpi:select-conversation", (payload: any) => {
-				if (payload?.instanceId) handler(payload.instanceId);
+				const id = typeof payload === "string" ? payload : payload?.instanceId;
+				if (id) handler(id);
 			});
+		},
+
+		emitSelectConversation: (instanceId: string): void => {
+			void emit("openpi:select-conversation", { instanceId });
 		},
 
 		onNewConversation: (handler: () => void): (() => void) => {
@@ -126,6 +131,10 @@ if (typeof window !== "undefined") {
 
 		onOAuthCallback: (handler: (payload: { hash: string }) => void): (() => void) => {
 			return safeListen("openpi:oauth-callback", handler);
+		},
+
+		onIslandState: (handler: (payload: { expanded: boolean }) => void): (() => void) => {
+			return safeListen("openpi:island-state", handler);
 		},
 	};
 }

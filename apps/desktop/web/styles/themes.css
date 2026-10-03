@@ -299,25 +299,25 @@
 	-webkit-backdrop-filter: none !important;
 }
 
-/* Ensure 100% solid, non-transparent surfaces so wallpaper vibrancy never bleeds through */
-:root[data-theme-flavor="dark-warm"],
-:root[data-theme-flavor="dark-oled"],
-:root[data-theme-flavor="dark-tokyo"],
-:root[data-theme-flavor="dark-cyberpunk"],
-:root[data-theme-flavor="light-warm"],
-:root[data-theme-flavor="light-nord"],
-:root[data-theme-flavor="dark-warm"] body,
-:root[data-theme-flavor="dark-oled"] body,
-:root[data-theme-flavor="dark-tokyo"] body,
-:root[data-theme-flavor="dark-cyberpunk"] body,
-:root[data-theme-flavor="light-warm"] body,
-:root[data-theme-flavor="light-nord"] body,
-:root[data-theme-flavor="dark-warm"] #root,
-:root[data-theme-flavor="dark-oled"] #root,
-:root[data-theme-flavor="dark-tokyo"] #root,
-:root[data-theme-flavor="dark-cyberpunk"] #root,
-:root[data-theme-flavor="light-warm"] #root,
-:root[data-theme-flavor="light-nord"] #root,
+/* Ensure 100% solid, non-transparent surfaces so wallpaper vibrancy never bleeds through (main window only) */
+:root[data-theme-flavor="dark-warm"]:not(.island-mode),
+:root[data-theme-flavor="dark-oled"]:not(.island-mode),
+:root[data-theme-flavor="dark-tokyo"]:not(.island-mode),
+:root[data-theme-flavor="dark-cyberpunk"]:not(.island-mode),
+:root[data-theme-flavor="light-warm"]:not(.island-mode),
+:root[data-theme-flavor="light-nord"]:not(.island-mode),
+:root[data-theme-flavor="dark-warm"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="dark-oled"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="dark-tokyo"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="dark-cyberpunk"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="light-warm"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="light-nord"]:not(.island-mode) body:not(.island-mode),
+:root[data-theme-flavor="dark-warm"]:not(.island-mode) #root:not(.island-mode),
+:root[data-theme-flavor="dark-oled"]:not(.island-mode) #root:not(.island-mode),
+:root[data-theme-flavor="dark-tokyo"]:not(.island-mode) #root:not(.island-mode),
+:root[data-theme-flavor="dark-cyberpunk"]:not(.island-mode) #root:not(.island-mode),
+:root[data-theme-flavor="light-warm"]:not(.island-mode) #root:not(.island-mode),
+:root[data-theme-flavor="light-nord"]:not(.island-mode) #root:not(.island-mode),
 :root[data-theme-flavor="dark-warm"] .reference-workspace,
 :root[data-theme-flavor="dark-oled"] .reference-workspace,
 :root[data-theme-flavor="dark-tokyo"] .reference-workspace,
@@ -332,7 +332,7 @@
    ========================================================================== */
 
 /* ── 4.1 Base Shell & Canvas ── */
-html, body, #root {
+html:not(.island-mode), body:not(.island-mode), #root:not(.island-mode) {
 	background: var(--bg);
 	color: var(--text);
 }
@@ -1380,6 +1380,17 @@ html, body, #root {
 	border: 1px solid var(--border-strong) !important;
 	box-shadow: var(--shadow) !important;
 	color: var(--text) !important;
+}
+
+.ui-select-trigger {
+	background: var(--bg-card) !important;
+	border: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.ui-select-trigger:hover {
+	background: var(--bg-muted) !important;
+	border-color: var(--border-hover, var(--border)) !important;
 }
 
 .reference-slash-menu button,

@@ -424,6 +424,54 @@
 		transform: scale(1) translateY(0);
 	}
 }
+
+/* ── Select Trigger ── */
+.ui-select-trigger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	height: 32px;
+	padding: 0 10px;
+	border-radius: var(--radius-sm, 6px);
+	border: 1px solid var(--border);
+	background: var(--bg-card);
+	color: var(--text);
+	font-size: 12.5px;
+	font-family: inherit;
+	cursor: pointer;
+	outline: none;
+	user-select: none;
+	transition: all 140ms ease;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.ui-select-trigger:hover {
+	border-color: var(--border-hover, var(--border));
+	background: var(--bg-muted);
+}
+
+.ui-select-trigger:focus-visible,
+.ui-select-trigger[data-state="open"] {
+	border-color: var(--focus, var(--primary));
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus, var(--primary)) 15%, transparent);
+}
+
+.ui-select-trigger:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.ui-select-trigger svg {
+	color: var(--text-muted);
+	flex-shrink: 0;
+	transition: transform 140ms ease;
+}
+
+.ui-select-trigger[data-state="open"] svg {
+	transform: rotate(180deg);
+}
+
 .ui-select-viewport { padding: 4px; }
 .ui-select-item,
 .ui-command-item {

@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let open_main = MenuItem::with_id(app, "open_main", "打开主界面", true, None::<&str>)?;
+    let toggle_island = MenuItem::with_id(app, "toggle_island", "显示/隐藏 灵动岛", true, None::<&str>)?;
     let new_conv = MenuItem::with_id(app, "new_conv", "新建会话 (⌘N)", true, None::<&str>)?;
     let open_git = MenuItem::with_id(app, "open_git", "版本管理 (Git)", true, None::<&str>)?;
     let open_memory = MenuItem::with_id(app, "open_memory", "长期记忆 (Memory)", true, None::<&str>)?;
@@ -14,6 +15,7 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         app,
         &[
             &open_main,
+            &toggle_island,
             &new_conv,
             &open_git,
             &open_memory,
@@ -27,6 +29,17 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         let _ = tray.set_show_menu_on_left_click(true);
         tray.on_menu_event(move |app, event| {
             match event.id.as_ref() {
+                "toggle_island" => {
+                    if let Some(island) = app.get_webview_window("island") {
+                        if let Ok(visible) = island.is_visible() {
+                            if visible {
+                                let _ = island.hide();
+                            } else {
+                                let _ = island.show();
+                            }
+                        }
+                    }
+                }
                 "open_main" => {
                     if let Some(main) = app.get_webview_window("main") {
                         let _ = main.show();

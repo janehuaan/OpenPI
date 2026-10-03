@@ -290,7 +290,9 @@ export function ChatSurface({
 	const speechErrorHandler = useRef(onError);
 	speechErrorHandler.current = onError;
 	const isStreaming = conversation?.state?.isStreaming ?? false;
-	const isWorking = isStreaming || optimisticMessage !== undefined;
+	const lastMessage = conversation?.messages?.[conversation.messages.length - 1];
+	const isAssistantSettled = lastMessage?.role === "assistant";
+	const isWorking = isStreaming || (!isAssistantSettled && optimisticMessage !== undefined && (!((optimisticMessage as any).instanceId) || (optimisticMessage as any).instanceId === conversation?.instance?.id));
 
 	const workingStartedAtRef = useRef<number>(0);
 	useEffect(() => {

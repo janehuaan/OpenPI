@@ -33,3 +33,4 @@ openpi-scheduler = { path = "../../../crates/openpi-scheduler" }
 openpi-memory = { path = "../../../crates/openpi-memory" }
 openpi-tools = { path = "../../../crates/openpi-tools" }
 openpi-daemon = { path = "../../../crates/openpi-daemon" }
+openpi-engine = { path = "../../../crates/openpi-engine" }

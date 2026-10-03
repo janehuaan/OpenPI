@@ -8,5 +8,36 @@
 @import "./styles/workspace.css";
 @import "./styles/git.css";
 @import "./styles/themes.css";
+@import "./styles/island.css";
+
+/* OpenPI Dynamic Island Overlay Mode — Pure Transparency & Zero Nesting */
+:root.island-mode,
+:root.island-mode body,
+:root.island-mode #root,
+:root[data-theme-flavor].island-mode,
+:root[data-theme-flavor].island-mode body,
+:root[data-theme-flavor].island-mode #root,
+:root[data-theme].island-mode,
+:root[data-theme].island-mode body,
+:root[data-theme].island-mode #root,
+html.island-mode,
+html.island-mode body,
+html.island-mode #root,
+body.island-mode,
+#root.island-mode {
+	background: transparent !important;
+	background-color: transparent !important;
+	border: none !important;
+	box-shadow: none !important;
+	outline: none !important;
+	overflow: hidden !important;
+	user-select: none !important;
+	-webkit-user-select: none !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	margin: 0 !important;
+	padding: 0 !important;
+}
+
 
 

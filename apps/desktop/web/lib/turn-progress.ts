@@ -5,6 +5,9 @@ export interface TurnProgress {
 	stage: TurnProgressStage;
 	label: string;
 	startedAt: number;
+	step?: number;
+	maxSteps?: number;
+	model?: string;
 	toolName?: string;
 	toolCount?: number;
 	lastToolName?: string;
@@ -16,6 +19,9 @@ export type TurnProgressEvent = {
 	assistantMessageEvent?: { type?: string };
 	toolName?: unknown;
 	toolCallId?: unknown;
+	step?: number;
+	maxSteps?: number;
+	model?: string;
 	error?: unknown;
 };
 
@@ -63,7 +69,29 @@ export function reduceTurnProgress(
 	if (!current || current.instanceId !== instanceId) return current;
 	const type = event.type;
 	if (type === "agent_start") return { ...current, stage: "starting", label: "代理已启动，准备处理中…" };
-	if (type === "turn_start") return { ...current, stage: "thinking", label: "正在思考…", toolCount: 0 };
+	if (type === "turn_start") {
+		const step = typeof event.step === "number" ? event.step : current.step;
+		const maxSteps = typeof event.maxSteps === "number" ? event.maxSteps : current.maxSteps;
+		const model = typeof event.model === "string" ? event.model : current.model;
+		const isInitial = !step || step <= 1;
+		return {
+			...current,
+			stage: "thinking",
+			label: isInitial ? "正在思考…" : `第 ${step} 步思考与规划中…`,
+			step,
+			maxSteps,
+			model,
+			toolCount: isInitial ? 0 : current.toolCount,
+		};
+	}
+	if (type === "message_start") {
+		const hasExecutedTools = (current.toolCount ?? 0) > 0;
+		return {
+			...current,
+			stage: "thinking",
+			label: hasExecutedTools ? "已完成工具调用，正在分析结果并规划下一步…" : (current.label === "代理已启动，准备处理中…" ? "正在思考…" : (current.label || "正在思考…")),
+		};
+	}
 	if (type === "tool_execution_start" || type === "tool_execution_update") {
 		const name = typeof event.toolName === "string" ? event.toolName : undefined;
 		const isSubagent = name === "subagent";
@@ -86,7 +114,7 @@ export function reduceTurnProgress(
 			toolCount: count,
 		};
 	}
-	if (type === "message_update" || type === "message_start") {
+	if (type === "message_update") {
 		const messageType = event.assistantMessageEvent?.type;
 		if (
 			messageType === "thinking_delta" ||

@@ -77,6 +77,9 @@ type OpenPiBridge = {
 	onAutoPilotEvent?: (handler: (payload: { task: AutoPilotTask }) => void) => () => void;
 	onRuntimeUpdateProgress?: (handler: (progress: RuntimeUpdateProgress) => void) => () => void;
 	onOAuthCallback?: (handler: (payload: { hash: string }) => void) => () => void;
+	onSelectConversation?: (handler: (instanceId: string) => void) => () => void;
+	emitSelectConversation?: (instanceId: string) => void;
+	onIslandState?: (handler: (payload: { expanded: boolean }) => void) => () => void;
 };
 
 function bridge(): OpenPiBridge | undefined {
@@ -155,7 +158,10 @@ export const desktopApi = {
 			mode: input.mode,
 			inMemory: input.inMemory,
 		}),
-	selectWorkspace: (defaultPath?: string) => call<string | undefined>("select_workspace", { defaultPath }),
+	selectWorkspace: async (defaultPath?: string): Promise<string | undefined> => {
+		const res = await call<string | null | undefined>("select_workspace", { defaultPath });
+		return typeof res === "string" && res.trim().length > 0 ? res : undefined;
+	},
 	getWorkspaceSummary: (cwd: string) => call<WorkspaceSummary>("get_workspace_summary", { cwd }),
 	readWorkspaceFile: (cwd: string, path: string) => call<WorkspaceFileContent>("read_workspace_file", { cwd, path }),
 	openFileInEditor: (filePath: string, cwd?: string) =>
@@ -422,6 +428,20 @@ export const desktopApi = {
 		if (!api?.onOAuthCallback) return () => undefined;
 		return api.onOAuthCallback(handler);
 	},
+	onSelectConversation: (handler: (instanceId: string) => void) => {
+		const api = bridge();
+		if (!api?.onSelectConversation) return () => undefined;
+		return api.onSelectConversation(handler);
+	},
+	emitSelectConversation: (instanceId: string) => {
+		const api = bridge();
+		api?.emitSelectConversation?.(instanceId);
+	},
+	onIslandState: (handler: (payload: { expanded: boolean }) => void) => {
+		const api = bridge();
+		if (!api?.onIslandState) return () => undefined;
+		return api.onIslandState(handler);
+	},
 
 	// ── Auto-Pilot Autonomous Delivery & Self-Healing Loop ──────────────────────────
 	startAutoPilotTask: (opts: { cwd?: string; prompt: string; testCommand?: string; maxIterations?: number }) =>
@@ -440,6 +460,11 @@ export const desktopApi = {
 		return api.onAutoPilotEvent(handler);
 	},
 	focusMainWindow: () => call<boolean>("focus_main_window"),
+	setIslandExpanded: (expanded: boolean) => call<boolean>("set_island_expanded", { expanded }),
+	openMainFromIsland: () => call<boolean>("open_main_from_island"),
+	toggleIslandWindow: () => call<boolean>("toggle_island_window"),
+	showIslandWindow: () => call<boolean>("show_island_window"),
+	hideIslandWindow: () => call<boolean>("hide_island_window"),
 	runTerminalCommand: (opts: { cwd?: string; command: string; timeoutMs?: number }) =>
 		call<{ exitCode: number; stdout: string; stderr: string }>("run_terminal_command", opts),
 

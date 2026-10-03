@@ -147,22 +147,24 @@ function StaticMarkdown({ text }: { text: string }) {
 
 /** Lightweight markdown for chat (no raw HTML). */
 export const MarkdownText = memo(function MarkdownText({
-	text,
+	text = "",
 	streaming = false,
 }: {
-	text: string;
+	text?: string | null;
 	streaming?: boolean;
 }) {
+	const safeText = typeof text === "string" ? text : "";
 	if (streaming) {
-		return <StreamingMarkdown text={text} />;
+		return <StreamingMarkdown text={safeText} />;
 	}
-	return <StaticMarkdown text={text} />;
+	return <StaticMarkdown text={safeText} />;
 });
 
 function useSmoothText(text: string): { displayedText: string; rootRef: RefObject<HTMLDivElement | null> } {
-	const [displayedText, setDisplayedText] = useState(text);
-	const displayedTextRef = useRef(text);
-	const targetTextRef = useRef(text);
+	const safeText = typeof text === "string" ? text : "";
+	const [displayedText, setDisplayedText] = useState(safeText);
+	const displayedTextRef = useRef(safeText);
+	const targetTextRef = useRef(safeText);
 	const frameRef = useRef<number | undefined>(undefined);
 	const lastFrameTimeRef = useRef(0);
 	const shouldFollowRef = useRef(false);
@@ -239,8 +241,9 @@ type Block =
 	| { type: "quote"; lines: string[] }
 	| { type: "table"; headers: string[]; rows: string[][] };
 
-function splitBlocks(text: string): Block[] {
-	const lines = text.replace(/\r\n/g, "\n").split("\n");
+function splitBlocks(text?: string | null): Block[] {
+	const safeText = typeof text === "string" ? text : "";
+	const lines = safeText.replace(/\r\n/g, "\n").split("\n");
 	const blocks: Block[] = [];
 	let i = 0;
 	while (i < lines.length) {
@@ -354,7 +357,7 @@ function splitBlocks(text: string): Block[] {
 		}
 		blocks.push({ type: "paragraph", value: para.join("\n") });
 	}
-	return blocks.length > 0 ? blocks : [{ type: "paragraph", value: text }];
+	return blocks.length > 0 ? blocks : [{ type: "paragraph", value: safeText }];
 }
 
 function isTableRow(trimmed: string): boolean {
@@ -414,15 +417,16 @@ function FileLinkPill({ label, fileLink }: { label: string; fileLink: ParsedFile
 	);
 }
 
-function renderInline(text: string): ReactNode[] {
+function renderInline(text?: string | null): ReactNode[] {
+	const safeText = typeof text === "string" ? text : "";
 	const nodes: ReactNode[] = [];
 	// links [text](url), then code / bold / italic
 	const pattern = /(\[[^\]]+\]\([^)\s]+\)|`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)/g;
 	let last = 0;
 	let key = 0;
-	for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+	for (let match = pattern.exec(safeText); match !== null; match = pattern.exec(safeText)) {
 		if (match.index > last) {
-			nodes.push(text.slice(last, match.index));
+			nodes.push(safeText.slice(last, match.index));
 		}
 		const token = match[0];
 		const linkMatch = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
@@ -463,6 +467,6 @@ function renderInline(text: string): ReactNode[] {
 		}
 		last = match.index + token.length;
 	}
-	if (last < text.length) nodes.push(text.slice(last));
+	if (last < safeText.length) nodes.push(safeText.slice(last));
 	return nodes;
 }

@@ -132,6 +132,8 @@ pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
         || m.contains("minimax")
         || m.contains("mimo")
         || m.contains("agnes")
+        || m.contains("deepseek-v4")
+        || m.contains("deepseek")
         || m.contains("qwen3.7")
         || m.contains("qwen3.8")
         || m.contains("qwen-3.7")
@@ -141,7 +143,7 @@ pub fn infer_model_specs(model_id: &str) -> (bool, bool, u64, u64) {
         262144
     } else if m.contains("claude") {
         200000
-    } else if m.contains("deepseek") || m.contains("qwen") || m.contains("glm") || m.contains("seed") {
+    } else if m.contains("qwen") || m.contains("glm") || m.contains("seed") {
         131072
     } else {
         128000
@@ -402,7 +404,7 @@ pub async fn handle_invoke(
             let mut tasks = Vec::new();
             let mut runs = Vec::new();
 
-            let h_res = client.request(ClientRequest::Health { id: Uuid::new_v4().to_string() }).await;
+            let h_res = client.request_passive(ClientRequest::Health { id: Uuid::new_v4().to_string() }).await;
             if let Ok(h) = h_res {
                 daemon_running = true;
                 health = json!({
@@ -412,7 +414,7 @@ pub async fn handle_invoke(
                     "sessionsIndexed": true
                 });
 
-                if let Ok(s_val) = client.request(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
+                if let Ok(s_val) = client.request_passive(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
                     if let Some(s_list) = s_val.get("sessions").and_then(|s| s.as_array()) {
                         for s in s_list {
                         let sid = s.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
@@ -422,15 +424,21 @@ pub async fn handle_invoke(
                         let running = s.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
                         let created_at = s.get("createdAt").and_then(|v| v.as_str()).unwrap_or("");
                         let updated_at = s.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
+                        let s_file = find_session_file(sid);
+
+                        let label = match name {
+                            Some(n) if !n.trim().is_empty() && n != "新对话" => Some(n.to_string()),
+                            _ => openpi_engine::title_summarizer::extract_title_from_jsonl(&s_file, cwd.unwrap_or("")),
+                        };
 
                         instances.push(json!({
                             "id": sid,
                             "status": if running { "online" } else { "stopped" },
                             "mode": if mode == "code" { "code" } else { "work" },
                             "cwd": cwd,
-                            "label": name,
+                            "label": label,
                             "sessionId": sid,
-                            "sessionFile": find_session_file(sid).to_string_lossy().to_string(),
+                            "sessionFile": s_file.to_string_lossy().to_string(),
                             "createdAt": created_at,
                             "lastSeenAt": updated_at
                         }));
@@ -438,7 +446,7 @@ pub async fn handle_invoke(
                 }
             }
 
-                if let Ok(t_val) = client.request(ClientRequest::App {
+                if let Ok(t_val) = client.request_passive(ClientRequest::App {
                     id: Uuid::new_v4().to_string(),
                     op: json!({ "name": "list_tasks" }),
                 }).await {
@@ -451,6 +459,35 @@ pub async fn handle_invoke(
                                 for r in r_arr {
                                     runs.push(r.clone());
                                 }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Daemon is sleeping (Scale-to-Zero): load sessions cleanly from ~/.openpi/instances.json
+                let instances_path = openpi_dir().join("instances.json");
+                if instances_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&instances_path) {
+                        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+                            for s in arr {
+                                let sid = s.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
+                                let name = s.get("name").and_then(|v| v.as_str());
+                                let cwd = s.get("cwd").and_then(|v| v.as_str());
+                                let mode = s.get("mode").and_then(|v| v.as_str()).unwrap_or("code");
+                                let created_at = s.get("createdAt").and_then(|v| v.as_str()).unwrap_or("");
+                                let updated_at = s.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
+
+                                instances.push(json!({
+                                    "id": sid,
+                                    "status": "stopped",
+                                    "mode": if mode == "code" { "code" } else { "work" },
+                                    "cwd": cwd,
+                                    "label": name,
+                                    "sessionId": sid,
+                                    "sessionFile": find_session_file(sid).to_string_lossy().to_string(),
+                                    "createdAt": created_at,
+                                    "lastSeenAt": updated_at
+                                }));
                             }
                         }
                     }
@@ -494,7 +531,7 @@ pub async fn handle_invoke(
 
         "prune_stopped_instances" => {
             let mut deleted = 0;
-            if let Ok(s_val) = client.request(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
+            if let Ok(s_val) = client.request_passive(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
                 if let Some(s_list) = s_val.get("sessions").and_then(|s| s.as_array()) {
                     for s in s_list {
                         let sid = s.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
@@ -515,7 +552,12 @@ pub async fn handle_invoke(
         // ── Conversations & Chat ───────────────────────────────────────────
         "create_conversation" => {
             let label = args.get("label").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
+            let raw_cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+            let cwd = if raw_cwd.is_empty() || openpi_engine::config::is_forbidden_workspace_dir(std::path::Path::new(raw_cwd)).is_err() {
+                default_workspace()
+            } else {
+                raw_cwd
+            };
             let mode_str = args.get("mode").and_then(|v| v.as_str()).unwrap_or("code");
             let in_memory = args.get("inMemory").and_then(|v| v.as_bool()).unwrap_or(false);
 
@@ -556,7 +598,7 @@ pub async fn handle_invoke(
                 return Err("Missing instanceId".to_string());
             }
 
-            let _ = client.request(ClientRequest::Subscribe {
+            let _ = client.request_passive(ClientRequest::Subscribe {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
             }).await;
@@ -690,7 +732,7 @@ pub async fn handle_invoke(
             let mut label = session_name.clone();
             let mut created_at = "".to_string();
 
-            if let Ok(s_val) = client.request(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
+            if let Ok(s_val) = client.request_passive(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
                 if let Some(s_list) = s_val.get("sessions").and_then(|s| s.as_array()) {
                     for s in s_list {
                         if s.get("sessionId").and_then(|v| v.as_str()) == Some(sid) {
@@ -704,6 +746,27 @@ pub async fn handle_invoke(
                             running = s.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
                             created_at = s.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             break;
+                        }
+                    }
+                }
+            } else {
+                let instances_path = openpi_dir().join("instances.json");
+                if instances_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&instances_path) {
+                        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+                            for s in arr {
+                                if s.get("sessionId").and_then(|v| v.as_str()) == Some(sid) {
+                                    if label.is_none() {
+                                        label = s.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    }
+                                    cwd = s.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    if let Some(m) = s.get("mode").and_then(|v| v.as_str()) {
+                                        mode = m.to_string();
+                                    }
+                                    created_at = s.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -739,6 +802,18 @@ pub async fn handle_invoke(
             let msg = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
             let images = args.get("images");
             let streaming_behavior = args.get("streamingBehavior").and_then(|v| v.as_str());
+            let session_name = args.get("sessionName").and_then(|v| v.as_str());
+
+            if let Some(sn) = session_name {
+                let sn_clean = sn.trim();
+                if !sn_clean.is_empty() && sn_clean != "新对话" {
+                    let _ = client.request(ClientRequest::RenameSession {
+                        id: Uuid::new_v4().to_string(),
+                        session_id: sid.to_string(),
+                        name: sn_clean.to_string(),
+                    }).await;
+                }
+            }
 
             if !sid.is_empty() {
                 let _ = client.request(ClientRequest::Subscribe {
@@ -852,6 +927,9 @@ pub async fn handle_invoke(
         "set_conversation_workspace" => {
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
             let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(err) = openpi_engine::config::is_forbidden_workspace_dir(std::path::Path::new(cwd)) {
+                return Err(err.to_string());
+            }
             client.request(ClientRequest::UpdateSessionWorkspace {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_string(),
@@ -1143,20 +1221,38 @@ pub async fn handle_invoke(
         "get_session_todo" => {
             let sid = args.get("instanceId").and_then(|v| v.as_str()).unwrap_or("");
             if !sid.is_empty() {
-                if let Ok(s_val) = client.request(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
+                let mut session_cwd = None;
+                if let Ok(s_val) = client.request_passive(ClientRequest::ListSessions { id: Uuid::new_v4().to_string() }).await {
                     if let Some(s_list) = s_val.get("sessions").and_then(|s| s.as_array()) {
                         for s in s_list {
                             if s.get("sessionId").and_then(|v| v.as_str()) == Some(sid) {
-                                if let Some(cwd) = s.get("cwd").and_then(|v| v.as_str()) {
-                                    let task_file = Path::new(cwd).join(".pi").join("tasks").join(format!("{}.json", sid));
-                                    if task_file.exists() {
-                                        if let Ok(raw) = fs::read_to_string(&task_file) {
-                                            if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
-                                                return Ok(parsed);
-                                            }
-                                        }
+                                session_cwd = s.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    let instances_path = openpi_dir().join("instances.json");
+                    if instances_path.exists() {
+                        if let Ok(content) = std::fs::read_to_string(&instances_path) {
+                            if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+                                for s in arr {
+                                    if s.get("sessionId").and_then(|v| v.as_str()) == Some(sid) {
+                                        session_cwd = s.get("cwd").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                        break;
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(cwd) = session_cwd {
+                    let task_file = Path::new(&cwd).join(".pi").join("tasks").join(format!("{}.json", sid));
+                    if task_file.exists() {
+                        if let Ok(raw) = fs::read_to_string(&task_file) {
+                            if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+                                return Ok(parsed);
                             }
                         }
                     }
@@ -1975,6 +2071,81 @@ pub async fn handle_invoke(
             Ok(json!(true))
         }
 
+        "set_island_expanded" => {
+            let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
+            let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded }));
+            if let Some(island) = app.get_webview_window("island") {
+                if let Ok(Some(monitor)) = island.current_monitor() {
+                    let scale = monitor.scale_factor();
+                    let screen_w = monitor.size().width as f64 / scale;
+                    let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 42.0) };
+                    let x = (screen_w - w) / 2.0;
+                    let y = 0.0;
+                    let _ = island.set_size(tauri::LogicalSize::new(w, h));
+                    let _ = island.set_position(tauri::LogicalPosition::new(x, y));
+                    if expanded {
+                        let _ = island.show();
+                        let _ = island.set_focus();
+                    }
+                }
+            }
+            Ok(json!(true))
+        }
+
+        "open_main_from_island" => {
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.unminimize();
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
+            Ok(json!(true))
+        }
+
+        "toggle_island_window" => {
+            if let Some(island) = app.get_webview_window("island") {
+                if let Ok(visible) = island.is_visible() {
+                    if visible {
+                        let _ = island.hide();
+                    } else {
+                        if let Ok(Some(monitor)) = island.current_monitor() {
+                            let scale = monitor.scale_factor();
+                            let screen_w = monitor.size().width as f64 / scale;
+                            let (w, h) = (280.0, 42.0);
+                            let x = (screen_w - w) / 2.0;
+                            let y = 0.0;
+                            let _ = island.set_size(tauri::LogicalSize::new(w, h));
+                            let _ = island.set_position(tauri::LogicalPosition::new(x, y));
+                        }
+                        let _ = island.show();
+                    }
+                }
+            }
+            Ok(json!(true))
+        }
+
+        "show_island_window" => {
+            if let Some(island) = app.get_webview_window("island") {
+                if let Ok(Some(monitor)) = island.current_monitor() {
+                    let scale = monitor.scale_factor();
+                    let screen_w = monitor.size().width as f64 / scale;
+                    let (w, h) = (280.0, 42.0);
+                    let x = (screen_w - w) / 2.0;
+                    let y = 0.0;
+                    let _ = island.set_size(tauri::LogicalSize::new(w, h));
+                    let _ = island.set_position(tauri::LogicalPosition::new(x, y));
+                }
+                let _ = island.show();
+            }
+            Ok(json!(true))
+        }
+
+        "hide_island_window" => {
+            if let Some(island) = app.get_webview_window("island") {
+                let _ = island.hide();
+            }
+            Ok(json!(true))
+        }
+
         // ── Jev Decision Engine ────────────────────────────────────────────
         "jev_decide" => {
             let _context = args.get("context").and_then(|v| v.as_str()).unwrap_or("");
@@ -2663,29 +2834,29 @@ pub async fn handle_invoke(
                                 if let Some(providers_obj) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
                                     if let Some(target_p) = providers_obj.get_mut(provider_id).and_then(|pr| pr.as_object_mut()) {
                                         let existing_models = target_p.get("models").and_then(|m| m.as_array()).cloned().unwrap_or_default();
-                                        let mut merged_list: Vec<Value> = Vec::new();
-                                        let mut seen_ids = std::collections::HashSet::new();
-
+                                        let mut existing_map: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
                                         for em in existing_models {
                                             if let Some(em_id) = em.get("id").and_then(|v| v.as_str()) {
-                                                seen_ids.insert(em_id.to_string());
-                                                merged_list.push(em);
+                                                existing_map.insert(em_id.to_string(), em);
                                             }
                                         }
 
+                                        let mut synced_list: Vec<Value> = Vec::new();
                                         for nm in &models {
                                             if let Some(nm_id) = nm.get("id").and_then(|v| v.as_str()) {
-                                                if !seen_ids.contains(nm_id) {
-                                                    seen_ids.insert(nm_id.to_string());
-                                                    merged_list.push(nm.clone());
+                                                if let Some(existing) = existing_map.remove(nm_id) {
+                                                    // Preserve existing custom attributes while syncing
+                                                    synced_list.push(existing);
+                                                } else {
+                                                    synced_list.push(nm.clone());
                                                 }
                                             }
                                         }
 
-                                        target_p.insert("models".to_string(), json!(merged_list));
+                                        target_p.insert("models".to_string(), json!(synced_list));
                                         let _ = fs::write(&models_path, serde_json::to_string_pretty(&root).unwrap_or_default());
-                                        let count = merged_list.len();
-                                        return Ok(json!({ "success": true, "count": count, "models": merged_list }));
+                                        let count = synced_list.len();
+                                        return Ok(json!({ "success": true, "count": count, "models": synced_list }));
                                     }
                                 }
                             }
@@ -2887,13 +3058,22 @@ pub async fn handle_invoke(
         }
 
         "select_workspace" => {
-            let script = r#"POSIX path of (choose folder with prompt "Select Project Folder")"#;
+            let script = r#"POSIX path of (choose folder with prompt "选择项目工作区 (禁止选择用户个人根目录)")"#;
             let output = Command::new("osascript").arg("-e").arg(script).output().ok();
             if let Some(out) = output {
                 if out.status.success() {
-                    let path = String::from_utf8_lossy(&out.stdout).trim().trim_end_matches('/').to_string();
-                    if !path.is_empty() {
-                        return Ok(json!(path));
+                    let path_str = String::from_utf8_lossy(&out.stdout).trim().trim_end_matches('/').to_string();
+                    if !path_str.is_empty() {
+                        let path = std::path::Path::new(&path_str);
+                        if let Err(err_msg) = openpi_engine::config::is_forbidden_workspace_dir(path) {
+                            let alert_script = format!(
+                                r#"display alert "无法选择该目录" message "{}" as critical"#,
+                                err_msg.replace('"', "\\\"")
+                            );
+                            let _ = Command::new("osascript").arg("-e").arg(&alert_script).output();
+                            return Ok(json!(null));
+                        }
+                        return Ok(json!(path_str));
                     }
                 }
             }

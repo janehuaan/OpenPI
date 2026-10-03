@@ -222,7 +222,6 @@ export function App() {
 		};
 	}>({});
 	const [includeStopped, setIncludeStopped] = useState(true);
-	const [showAllConversations, setShowAllConversations] = useState(false);
 	const [userProfile, setUserProfile] = useState<{ nickname?: string; avatarEmoji?: string; avatarUrl?: string; updatedAt?: string }>({});
 	const [editingProfile, setEditingProfile] = useState(false);
 	const [accountDialogOpen, setAccountDialogOpen] = useState(false);
@@ -267,6 +266,7 @@ export function App() {
 	const routeInitializedRef = useRef(false);
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
 	const turnStartTimesRef = useRef<Record<string, number>>({});
+	const lastStreamActivityRef = useRef<Record<string, number>>({});
 	selectedInstanceIdRef.current = selectedInstanceId;
 	const clearRunningTools = useCallback((instanceId?: string): void => {
 		if (instanceId !== undefined && runningToolsInstanceIdRef.current !== instanceId) return;
@@ -312,6 +312,19 @@ export function App() {
 			try {
 				const next = await desktopApi.getSnapshot({ includeStopped });
 				setSnapshot(next);
+				if (next.instances) {
+					setConversationTitles((current) => {
+						let changed = false;
+						const updated = { ...current };
+						for (const inst of next.instances) {
+							if (inst.label && inst.label !== "新对话" && updated[inst.id] !== inst.label) {
+								updated[inst.id] = inst.label;
+								changed = true;
+							}
+						}
+						return changed ? updated : current;
+					});
+				}
 				try {
 					window.localStorage.setItem(SNAPSHOT_CACHE_KEY, JSON.stringify(next));
 				} catch {}
@@ -445,8 +458,12 @@ export function App() {
 	// on the project you were working on instead of falling back to the
 	// first online instance.
 	useEffect(() => {
-		if (selectedInstanceId) window.localStorage.setItem(SELECTED_INSTANCE_KEY, selectedInstanceId);
-		else window.localStorage.removeItem(SELECTED_INSTANCE_KEY);
+		if (selectedInstanceId) {
+			window.localStorage.setItem(SELECTED_INSTANCE_KEY, selectedInstanceId);
+			desktopApi.emitSelectConversation(selectedInstanceId);
+		} else {
+			window.localStorage.removeItem(SELECTED_INSTANCE_KEY);
+		}
 	}, [selectedInstanceId]);
 
 	useEffect(() => {
@@ -588,6 +605,10 @@ export function App() {
 		let disposed = false;
 		const unlisten = desktopApi.onConversationEvent((payload) => {
 			if (disposed || !isRecord(payload.event)) return;
+			if (payload.instanceId === "task-scheduler") {
+				void refresh();
+				return;
+			}
 			const currentId = selectedInstanceIdRef.current;
 			const isMatch = currentId && (payload.instanceId === currentId || payload.instanceId.includes(currentId) || currentId.includes(payload.instanceId));
 			if (!isMatch) return;
@@ -607,9 +628,30 @@ export function App() {
 					type: eventType,
 					assistantMessageEvent,
 					toolName: event.toolName,
+					step: typeof event.step === "number" ? event.step : undefined,
+					maxSteps: typeof event.maxSteps === "number" ? event.maxSteps : undefined,
+					model: typeof event.model === "string" ? event.model : undefined,
 					error: event.error,
 				}),
 			);
+			if (payload.instanceId) {
+				if (
+					eventType === "agent_start" ||
+					eventType === "message_update" ||
+					eventType === "message_start" ||
+					eventType === "tool_execution_start" ||
+					eventType === "tool_execution_update"
+				) {
+					lastStreamActivityRef.current[payload.instanceId] = Date.now();
+				} else if (
+					eventType === "agent_settled" ||
+					eventType === "turn_end" ||
+					eventType === "stream_closed" ||
+					eventType === "stream_error"
+				) {
+					delete lastStreamActivityRef.current[payload.instanceId];
+				}
+			}
 			if (eventType === "extension_ui_request") {
 				if (payload.event.method === "auth" && typeof payload.event.provider === "string") {
 					setAuthDialog({
@@ -722,13 +764,39 @@ export function App() {
 				);
 				return;
 			}
-			if (eventType === "agent_settled") {
+			const anyEvent = payload.event as Record<string, any> | undefined;
+			if ((payload as any).type === "session_renamed" || anyEvent?.type === "session_renamed" || eventType === "session_renamed") {
+				const sid = (payload as any).sessionId || payload.instanceId || anyEvent?.sessionId;
+				const name = (payload as any).name || anyEvent?.name;
+				if (sid && name) {
+					setConversationTitles((current) => ({ ...current, [sid]: name }));
+					setSnapshot((current) => ({
+						...current,
+						instances: current.instances.map((inst) =>
+							inst.id === sid ? { ...inst, label: name } : inst,
+						),
+					}));
+					setConversation((current) => {
+						if (!current || current.instance.id !== sid) return current;
+						return {
+							...current,
+							instance: { ...current.instance, label: name },
+							state: { ...current.state, sessionName: name },
+						};
+					});
+				}
+				return;
+			}
+			if (eventType === "agent_settled" || eventType === "turn_end") {
 				clearRunningTools(payload.instanceId);
 				setStreamingInstances((prev) => {
 					const next = new Set(prev);
 					next.delete(payload.instanceId);
 					return next;
 				});
+				setOptimisticMessage((current) =>
+					current?.instanceId === payload.instanceId || !current?.instanceId ? undefined : current,
+				);
 				setConversation((current) =>
 					current?.instance?.id === payload.instanceId
 						? { ...current, state: { ...current.state, isStreaming: false } }
@@ -755,6 +823,7 @@ export function App() {
 				void desktopApi.getConversationStats(payload.instanceId).then((stats) => {
 					if (!disposed && selectedInstanceIdRef.current === payload.instanceId) setConversationStats(stats);
 				});
+				void refresh(false);
 				return;
 			}
 			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
@@ -912,9 +981,18 @@ export function App() {
 			setConversation((current) => {
 				if (!current || current.instance.id !== payload.instanceId) return current;
 				const messages = mergeConversationMessage(current.messages, incoming);
+				const isAsstEnd = eventType === "message_end" && incoming.role === "assistant";
 				return {
 					...current,
-					state: { ...current.state, isStreaming: true, messageCount: messages.length },
+					state: {
+						...current.state,
+						isStreaming: isAsstEnd
+							? false
+							: eventType === "message_start"
+								? true
+								: Boolean(current.state?.isStreaming),
+						messageCount: messages.length,
+					},
 					messages,
 				};
 			});
@@ -924,6 +1002,52 @@ export function App() {
 			unlisten();
 		};
 	}, []);
+
+	// Inactivity Watchdog: If an instance is marked as streaming, but has been completely silent
+	// for > 4.5 seconds, has no active tools running, and the assistant message has completed text,
+	// automatically recover to settled/idle state.
+	useEffect(() => {
+		const interval = setInterval(() => {
+			if (streamingInstances.size === 0 && !conversation?.state?.isStreaming) return;
+			const now = Date.now();
+			const activeId = selectedInstanceIdRef.current ?? selectedInstanceId;
+			if (!activeId) return;
+
+			const isMarkedStreaming = streamingInstances.has(activeId) || Boolean(conversation?.state?.isStreaming);
+			if (!isMarkedStreaming) return;
+
+			// If tools are running or user message is being sent, don't interrupt
+			if (runningTools.length > 0 || busy === "send-message") return;
+
+			const lastActivity = lastStreamActivityRef.current[activeId];
+			if (lastActivity && now - lastActivity > 4500) {
+				const lastMsg = conversation?.messages?.[conversation.messages.length - 1];
+				// If the last message is an assistant message with content
+				if (lastMsg?.role === "assistant" && Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
+					delete lastStreamActivityRef.current[activeId];
+					setStreamingInstances((prev) => {
+						const next = new Set(prev);
+						next.delete(activeId);
+						return next;
+					});
+					clearRunningTools(activeId);
+					setTurnProgress(undefined);
+					setConversation((curr) => {
+						if (curr?.instance?.id !== activeId) return curr;
+						return { ...curr, state: { ...curr.state, isStreaming: false } };
+					});
+					void desktopApi.getConversation(activeId).then((next) => {
+						setConversation({
+							...next,
+							state: { ...next.state, isStreaming: false },
+						});
+					}).catch(() => {});
+				}
+			}
+		}, 1500);
+
+		return () => clearInterval(interval);
+	}, [streamingInstances, conversation, runningTools.length, busy, selectedInstanceId, clearRunningTools]);
 
 	useEffect(() => {
 		if (!activeConversationUiRequest) return;
@@ -1008,9 +1132,8 @@ export function App() {
 							return next;
 						}
 						const isActivelyStreaming = Boolean(
-							current.state?.isStreaming ||
-							next.state?.isStreaming ||
-							streamingInstances.has(instanceId),
+							streamingInstances.has(instanceId) ||
+							Boolean(next.state?.isStreaming),
 						);
 						if (isActivelyStreaming) {
 							if (current.messages.length > next.messages.length) {
@@ -1066,6 +1189,9 @@ export function App() {
 					});
 					if (!next.state?.isStreaming && !streamingInstances.has(instanceId)) {
 						clearRunningTools(instanceId);
+						setOptimisticMessage((current) =>
+							current?.instanceId === instanceId || !current?.instanceId ? undefined : current,
+						);
 						next.messages = next.messages.map((m) => {
 							if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
 							return {
@@ -1195,7 +1321,6 @@ export function App() {
 		});
 	}, [snapshot.tasks, taskFilter, taskQuery]);
 
-	const SIDEBAR_LIMIT = 15;
 	// Register any new instances so their position is fixed once and for all
 	const knownIds = new Set(Object.keys(conversationOrder));
 	const newIds = snapshot.instances.filter((i) => !knownIds.has(i.id));
@@ -1222,24 +1347,14 @@ export function App() {
 			(conversationOrder[a.id] ?? Infinity) - (conversationOrder[b.id] ?? Infinity);
 		const rankedProjects = projectFiltered.slice().sort(sortByOrder);
 		const rankedChat = chatFiltered.slice().sort(sortByOrder);
-		const searching = Boolean(normalized);
 		const totalAll = rankedProjects.length + rankedChat.length;
-		const truncateList = (list: AgentInstance[]) => {
-			if (showAllConversations || searching || list.length <= SIDEBAR_LIMIT) return list;
-			const head = list.slice(0, SIDEBAR_LIMIT);
-			if (selectedInstanceId && !head.some((i) => i.id === selectedInstanceId)) {
-				const selected = list.find((i) => i.id === selectedInstanceId);
-				if (selected) return [selected, ...head.slice(0, SIDEBAR_LIMIT - 1)];
-			}
-			return head;
-		};
 		return {
-			conversations: truncateList(rankedChat),
-			projects: truncateList(rankedProjects),
+			conversations: rankedChat,
+			projects: rankedProjects,
 			totalCount: totalAll,
-			truncated: totalAll > SIDEBAR_LIMIT && !searching,
+			truncated: false,
 		};
-	}, [snapshot.instances, conversationTitles, chatQuery, showAllConversations, selectedInstanceId, conversationOrder]);
+	}, [snapshot.instances, conversationTitles, chatQuery, conversationOrder]);
 	const conversations = conversationList.conversations;
 
 	const selectedTask = snapshot.tasks.find((task) => task.id === selectedTaskId);

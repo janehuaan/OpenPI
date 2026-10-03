@@ -40,7 +40,8 @@ DAEMON="$DIR/target/release/openpi-daemon"
 
 echo "🔗 3. Embedding pure Rust openpi-daemon binary..."
 mkdir -p "$RUNTIME/bin"
-cp "$DAEMON" "$RUNTIME/bin/openpi-daemon"
+rm -f "$RUNTIME/bin/openpi-daemon"
+cp -f "$DAEMON" "$RUNTIME/bin/openpi-daemon"
 chmod +x "$RUNTIME/bin/openpi-daemon"
 
 echo "📝 4. Generating daemon launcher..."

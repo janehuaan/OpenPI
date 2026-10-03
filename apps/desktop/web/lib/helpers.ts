@@ -343,7 +343,15 @@ export function assistantToolsHaveResults(messages: ConversationMessage[], assis
 /** Short human title for sidebar — not a raw dump of the first prompt. */
 export function instanceTitle(instance: AgentInstance, sessionName?: string): string {
 	const raw = (sessionName || instance.label || "").trim();
-	if (!raw) return "新对话";
+	if (!raw || raw === "新对话") {
+		if (instance.cwd) {
+			const shortPath = shortWorkspacePath(instance.cwd);
+			if (shortPath && !["huaan", "Users", "."].includes(shortPath)) {
+				return `${shortPath} 会话`;
+			}
+		}
+		return "新对话";
+	}
 	let title = raw.replace(/\s+/g, " ");
 	// Test / demos often store the full prompt as the label
 	if (/^(reply|write|say|respond|exactly|ok)\b/i.test(title) && title.length > 28) {
