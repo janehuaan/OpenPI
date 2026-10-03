@@ -360,6 +360,7 @@ impl AgentLoop {
             let out_tok = llm_res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
 
             if !llm_res.tool_calls.is_empty() {
+                empty_streak = 0;
                 // Assistant issued tool calls
                 journal.append_assistant_message(
                     &llm_res.text,
@@ -495,7 +496,6 @@ impl AgentLoop {
                 finished_normally = true;
                 break;
             } else {
-                empty_streak = 0;
                 // Final textual response (no further tool calls)
                 journal.append_assistant_message(
                     &llm_res.text,
