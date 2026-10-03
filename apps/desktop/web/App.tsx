@@ -1358,9 +1358,14 @@ export function App() {
 	const conversations = conversationList.conversations;
 
 	const selectedTask = snapshot.tasks.find((task) => task.id === selectedTaskId);
-	const taskRuns = snapshot.runs
-		.filter((run) => run.taskId === selectedTaskId)
-		.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+	const taskRuns = (selectedTaskId
+		? snapshot.runs.filter((run) => (run.taskId || (run as any).task_id) === selectedTaskId)
+		: []
+	).sort((left, right) => {
+		const leftTime = left.createdAt || (left as any).created_at || "";
+		const rightTime = right.createdAt || (right as any).created_at || "";
+		return rightTime.localeCompare(leftTime);
+	});
 	const selectedRun = snapshot.runs.find((run) => run.id === selectedRunId) ?? taskRuns[0];
 	const activeConversation = conversation?.instance?.id === selectedInstanceId ? conversation : undefined;
 	const selectedAgentInstance =

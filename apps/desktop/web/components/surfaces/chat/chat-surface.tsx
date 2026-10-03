@@ -444,21 +444,21 @@ export function ChatSurface({
 				const bReasoning = modelSupportsReasoning(b);
 				if (aReasoning !== bReasoning) return aReasoning ? -1 : 1;
 
-				return a.name.localeCompare(b.name, "zh-CN", { numeric: true, sensitivity: "base" });
+				return (a.name || "").localeCompare(b.name || "", "zh-CN", { numeric: true, sensitivity: "base" });
 			});
 		}
 
 		const entries = [...groups.entries()];
 
 		entries.sort(([gA], [gB]) => {
-			const lowerA = gA.toLowerCase();
-			const lowerB = gB.toLowerCase();
+			const lowerA = (gA || "").toLowerCase();
+			const lowerB = (gB || "").toLowerCase();
 			const aHasCurrent = lowerA.startsWith(currentProvider);
 			const bHasCurrent = lowerB.startsWith(currentProvider);
 			if (aHasCurrent && !bHasCurrent) return -1;
 			if (!aHasCurrent && bHasCurrent) return 1;
 
-			return gA.localeCompare(gB, "zh-CN");
+			return (gA || "").localeCompare(gB || "", "zh-CN");
 		});
 
 		return entries;

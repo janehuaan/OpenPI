@@ -592,7 +592,25 @@ pub async fn handle_invoke(
                             }
                             if let Some(r_arr) = item.get("runs").and_then(|r| r.as_array()) {
                                 for r in r_arr {
-                                    runs.push(r.clone());
+                                    let mut r_obj = r.clone();
+                                    if let Some(map) = r_obj.as_object_mut() {
+                                        if let Some(tid) = map.get("task_id").cloned() {
+                                            map.entry("taskId").or_insert(tid);
+                                        }
+                                        if let Some(ca) = map.get("created_at").cloned() {
+                                            map.entry("createdAt").or_insert(ca);
+                                        }
+                                        if let Some(sa) = map.get("started_at").cloned() {
+                                            map.entry("startedAt").or_insert(sa);
+                                        }
+                                        if let Some(fa) = map.get("finished_at").cloned() {
+                                            map.entry("finishedAt").or_insert(fa);
+                                        }
+                                        if let Some(ec) = map.get("exit_code").cloned() {
+                                            map.entry("exitCode").or_insert(ec);
+                                        }
+                                    }
+                                    runs.push(r_obj);
                                 }
                             }
                         }

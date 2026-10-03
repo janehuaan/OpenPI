@@ -9,6 +9,7 @@ pub struct Storage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskRecord {
     pub id: String,
     pub title: String,
@@ -24,6 +25,7 @@ pub struct TaskRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskRunRecord {
     pub id: String,
     pub task_id: String,

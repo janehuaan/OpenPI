@@ -243,7 +243,7 @@ export function TasksSurface({
 												<span>
 													<strong>{statusLabel(run.status)}</strong>
 													<small>
-														{formatDate(run.startedAt ?? run.createdAt)} ·{" "}
+														{formatDate(run.startedAt ?? run.createdAt ?? (run as any).started_at ?? (run as any).created_at)} ·{" "}
 														{run.trigger === "manual" ? "手动" : "定时"}
 													</small>
 												</span>
