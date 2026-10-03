@@ -853,6 +853,21 @@ pub async fn handle_app_op(
             cloud.clear_auth().await;
             Ok(ServerMessage::ok(id, serde_json::json!({ "signedIn": false })))
         }
+        "cloud_set_passphrase" => {
+            let pass = op.get("passphrase").and_then(|v| v.as_str()).unwrap_or_default();
+            if let Err(e) = cloud.set_passphrase(pass) {
+                return Ok(ServerMessage::err(id, &e.to_string()));
+            }
+            let _ = cloud.sync_now().await;
+            let st = cloud.status().await;
+            Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
+        }
+        "cloud_clear_passphrase" => {
+            let _ = cloud.clear_passphrase();
+            let _ = cloud.sync_now().await;
+            let st = cloud.status().await;
+            Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
+        }
         "cloud_sync_now" => {
             let st = cloud.sync_now().await?;
             Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))

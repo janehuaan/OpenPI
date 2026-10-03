@@ -130,6 +130,7 @@ export interface CloudSyncStatus {
 	lastError?: string | null;
 	pushed: number;
 	pulled: number;
+	passphraseSet: boolean;
 }
 
 export const desktopApi = {
@@ -502,6 +503,9 @@ export const desktopApi = {
 		expiresAt: number;
 	}) => call<CloudSyncStatus>("cloud_set_auth", input),
 	cloudClearAuth: () => call<{ signedIn: boolean }>("cloud_clear_auth"),
+	cloudSetPassphrase: (passphrase: string) =>
+		call<CloudSyncStatus>("cloud_set_passphrase", { passphrase }),
+	cloudClearPassphrase: () => call<CloudSyncStatus>("cloud_clear_passphrase"),
 	cloudSyncNow: () => call<CloudSyncStatus>("cloud_sync_now"),
 	cloudStatus: () => call<CloudSyncStatus>("cloud_status"),
 

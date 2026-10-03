@@ -48,6 +48,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
 	const [cloudSync, setCloudSync] = useState<CloudSyncStatus | null>(null);
 	const [syncing, setSyncing] = useState(false);
+	const [passphraseDraft, setPassphraseDraft] = useState("");
 
 	useEffect(() => {
 		if (profile.avatarUrl && !avatarUrl) {
@@ -106,6 +107,34 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 			setCloudSync(st);
 		} catch (err: any) {
 			setErrorMessage(err?.message || "同步失败");
+		} finally {
+			setSyncing(false);
+		}
+	};
+
+	const handleSetPassphrase = async () => {
+		if (!passphraseDraft.trim()) return;
+		setSyncing(true);
+		setErrorMessage(null);
+		try {
+			const st = await desktopApi.cloudSetPassphrase(passphraseDraft.trim());
+			setCloudSync(st);
+			setPassphraseDraft("");
+			setSuccessMessage("同步口令已设置，API Key 将加密上传");
+		} catch (err: any) {
+			setErrorMessage(err?.message || "设置同步口令失败");
+		} finally {
+			setSyncing(false);
+		}
+	};
+
+	const handleClearPassphrase = async () => {
+		setSyncing(true);
+		try {
+			const st = await desktopApi.cloudClearPassphrase();
+			setCloudSync(st);
+		} catch (err: any) {
+			setErrorMessage(err?.message || "清除同步口令失败");
 		} finally {
 			setSyncing(false);
 		}
@@ -596,7 +625,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 											? `上次同步出错：${cloudSync.lastError}`
 											: cloudSync?.lastSyncAt
 												? `上次同步 ${new Date(cloudSync.lastSyncAt).toLocaleTimeString()} · 推送 ${cloudSync.pushed} / 拉取 ${cloudSync.pulled}`
-												: "同步档案与定时任务（不含 API Key 与会话历史）"}
+												: "同步档案 / 定时任务 / 记忆 / 技能 / 会话（脱敏）；API Key 加密同步"}
 								</span>
 							</div>
 							<button
@@ -608,6 +637,55 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 							>
 								{syncing ? "同步中…" : "立即同步"}
 							</button>
+						</div>
+
+						<div
+							style={{
+								background: "var(--bg-secondary)",
+								borderRadius: "8px",
+								padding: "12px",
+								border: "1px solid var(--border)",
+								marginBottom: "16px",
+							}}
+						>
+							<div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "8px" }}>
+								<span style={{ fontWeight: 600, fontSize: "13px", color: "var(--text)" }}>
+									API Key 加密同步 · {cloudSync?.passphraseSet ? "已设置" : "未设置"}
+								</span>
+								<span style={{ color: "var(--text-tertiary)", fontSize: "11px" }}>
+									设置同步口令后，API Key 以 AES-256-GCM 端到端加密上传，云端只存密文。口令仅在本机使用，忘记则无法恢复。
+								</span>
+							</div>
+							<div style={{ display: "flex", gap: "8px" }}>
+								<input
+									type="password"
+									value={passphraseDraft}
+									onChange={(e) => setPassphraseDraft(e.target.value)}
+									placeholder="同步口令（各设备需一致）"
+									disabled={syncing || isBusy}
+									style={{ flex: 1 }}
+								/>
+								<button
+									type="button"
+									className="button secondary"
+									style={{ padding: "5px 10px", fontSize: "11.5px", flexShrink: 0 }}
+									disabled={syncing || isBusy || !passphraseDraft.trim()}
+									onClick={handleSetPassphrase}
+								>
+									设置
+								</button>
+								{cloudSync?.passphraseSet && (
+									<button
+										type="button"
+										className="button secondary"
+										style={{ padding: "5px 10px", fontSize: "11.5px", flexShrink: 0 }}
+										disabled={syncing || isBusy}
+										onClick={handleClearPassphrase}
+									>
+										清除
+									</button>
+								)}
+							</div>
 						</div>
 
 						<label style={{ display: "block", marginBottom: "12px", fontSize: "13px" }}>
