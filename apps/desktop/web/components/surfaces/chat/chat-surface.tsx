@@ -1322,14 +1322,15 @@ export function ChatSurface({
 									/>
 								),
 							)}
-							{runningTools.length > 0 && <ChatLiveTools tools={runningTools} />}
-							<TurnProgressRow
-								progress={turnProgress}
-								onAbort={handleSafeAbort}
-								isWorking={isWorking}
-								tokens={stats?.tokens?.total}
-							/>
-							{isWorking && !turnProgress && (
+							{runningTools.length > 0 ? (
+								<ChatLiveTools tools={runningTools} />
+							) : (
+								<TurnProgressRow
+									progress={turnProgress}
+									isWorking={isWorking}
+								/>
+							)}
+							{isWorking && runningTools.length === 0 && !turnProgress && (
 								<div className="agent-progress">
 									<span className="agent-avatar">
 										<Bot size={16} />

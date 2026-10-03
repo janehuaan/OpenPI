@@ -364,173 +364,28 @@
 	letter-spacing: 0.01em;
 }
 
-/* ── Elite Developer Agent Runtime HUD ── */
-.agent-runtime-hud {
-	display: flex;
-	flex-direction: column;
-	align-self: flex-start;
-	gap: 5px;
-	margin: 6px 0 10px 0;
-	user-select: none;
-	font-family: var(--font, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif);
-}
-
-.agent-runtime-main-bar {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.agent-runtime-badge {
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	height: 24px;
-	padding: 0 9px 0 7px;
-	border-radius: 6px;
-	font-size: 11.5px;
-	font-weight: 600;
-	letter-spacing: -0.1px;
-	font-family: var(--mono, ui-monospace, Menlo, monospace);
-	background: rgba(224, 106, 38, 0.1);
-	border: 1px solid rgba(224, 106, 38, 0.25);
-	color: var(--accent, #e06a26);
-	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-	transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-
-.agent-runtime-badge-icon {
-	font-size: 11px;
-	opacity: 0.85;
-	line-height: 1;
-}
-
-.agent-runtime-badge-verb {
-	line-height: 1;
-}
-
-/* Verb-specific distinct aesthetic hues */
-.agent-runtime-badge.executing,
-.agent-runtime-badge.operating {
-	background: rgba(224, 106, 38, 0.12);
-	border-color: rgba(224, 106, 38, 0.32);
-	color: #e06a26;
-}
-
-.agent-runtime-badge.investigating,
-.agent-runtime-badge.analyzing {
-	background: rgba(56, 189, 248, 0.12);
-	border-color: rgba(56, 189, 248, 0.3);
-	color: #38bdf8;
-}
-
-.agent-runtime-badge.refactoring {
-	background: rgba(168, 85, 247, 0.12);
-	border-color: rgba(168, 85, 247, 0.3);
-	color: #c084fc;
-}
-
-.agent-runtime-badge.orchestrating {
-	background: rgba(234, 179, 8, 0.12);
-	border-color: rgba(234, 179, 8, 0.3);
-	color: #facc15;
-}
-
-.agent-runtime-badge.formulating,
-.agent-runtime-badge.synthesizing {
-	background: rgba(34, 197, 94, 0.12);
-	border-color: rgba(34, 197, 94, 0.3);
-	color: #4ade80;
-}
-
-.agent-runtime-badge.illuminating,
-.agent-runtime-badge.reasoning {
-	background: rgba(139, 92, 246, 0.14);
-	border-color: rgba(139, 92, 246, 0.32);
-	color: #a78bfa;
-}
-
-.agent-runtime-meta-stream {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 11px;
-	font-family: var(--mono, ui-monospace, Menlo, monospace);
-	color: var(--text-tertiary, #94a3b8);
-}
-
-.agent-runtime-interrupt-btn {
-	appearance: none;
-	-webkit-appearance: none;
-	background: transparent;
-	border: 1px solid transparent;
-	padding: 1px 5px;
-	border-radius: 4px;
-	color: var(--text-tertiary, #94a3b8);
-	font-size: 11px;
-	font-family: inherit;
-	cursor: pointer;
-	transition: all 120ms ease;
-}
-
-.agent-runtime-interrupt-btn:hover {
-	background: var(--bg-hover, rgba(255, 255, 255, 0.08));
-	border-color: var(--border-subtle, rgba(255, 255, 255, 0.15));
-	color: var(--text-secondary, #cbd5e1);
-}
-
-.agent-runtime-meta-hint {
-	color: var(--text-tertiary, #94a3b8);
-	opacity: 0.8;
-}
-
-.agent-runtime-bullet {
-	opacity: 0.4;
-	font-size: 9px;
-}
-
-.agent-runtime-time {
-	color: var(--text-secondary, #cbd5e1);
-}
-
-.agent-runtime-tokens {
-	color: var(--text-tertiary, #94a3b8);
-}
-
-.agent-runtime-subline {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-size: 11px;
-	color: var(--text-muted, #94a3b8);
-	padding-left: 2px;
-	line-height: 1.4;
-}
-
-.agent-runtime-subline-prefix {
-	color: var(--text-tertiary, #64748b);
-	font-family: var(--mono, ui-monospace, Menlo, monospace);
-	font-weight: 600;
-}
-
-.agent-runtime-subline-text {
-	color: var(--text-secondary, #cbd5e1);
-}
-
+/* ── Clean Minimalist Turn Progress Status Pill ── */
 .turn-progress {
 	display: inline-flex;
 	align-self: flex-start;
 	align-items: center;
-	gap: 8px;
-	margin: 8px 0;
-	color: var(--text-secondary, #475569);
-	font-size: 12px;
+	gap: 7px;
+	margin: 6px 0 10px 0;
+	padding: 4px 11px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	color: var(--text-secondary, #94a3b8);
+	font-size: 11.5px;
 	line-height: 1;
 	font-variant-numeric: tabular-nums;
 	user-select: none;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+	backdrop-filter: blur(8px);
+	-webkit-backdrop-filter: blur(8px);
 }
 .reference-activity-feed .turn-progress {
-	margin: 8px 0 12px 0;
+	margin: 6px 0 10px 0;
 }
 .turn-progress-dots {
 	display: inline-flex;
@@ -541,7 +396,7 @@
 	width: 5px;
 	height: 5px;
 	border-radius: 50%;
-	background: var(--accent, #2563eb);
+	background: var(--accent, #38bdf8);
 	animation: turn-progress-bounce 1.1s ease-in-out infinite;
 }
 .turn-progress-dots span:nth-child(2) {
@@ -564,19 +419,38 @@
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: var(--accent, #2563eb);
+	background: var(--accent, #38bdf8);
 	animation: turn-progress-pulse 1.15s ease-in-out infinite;
+	box-shadow: 0 0 6px rgba(56, 189, 248, 0.5);
+}
+.turn-progress-icon {
+	color: #38bdf8;
+	flex-shrink: 0;
 }
 .turn-progress-label {
-	color: var(--text-secondary, #475569);
+	color: var(--text-secondary, #cbd5e1);
 	font-weight: 500;
-	font-size: 12px;
+	font-size: 11.5px;
+}
+.turn-progress-step-tag {
+	font-size: 10px;
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: rgba(56, 189, 248, 0.12);
+	border: 1px solid rgba(56, 189, 248, 0.25);
+	color: #38bdf8;
+	font-family: var(--mono, ui-monospace, monospace);
 }
 .turn-progress-elapsed {
-	color: var(--text-tertiary, #94a3b8);
+	color: var(--text-tertiary, #64748b);
 	font-size: 11px;
 	font-weight: 400;
+	font-family: var(--mono, ui-monospace, monospace);
 	margin-left: 2px;
+}
+.turn-progress-hint {
+	font-size: 10.5px;
+	color: rgba(251, 191, 36, 0.85);
 }
 @keyframes turn-progress-pulse { 50% { opacity: 0.35; transform: scale(0.76); } }
 .agent-avatar {
