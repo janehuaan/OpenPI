@@ -260,9 +260,10 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 
 			// Background health-check / ping for active providers so connection status is live
 			for (const pid of providerKeys) {
-				const p = provs[pid];
+				const p = (provs as Record<string, ModelProviderConfig>)[pid];
 				if (p && p.baseUrl && p.enabled !== false) {
-					desktopApi.pingModelProvider(pid, { baseUrl: p.baseUrl, apiKey: p.apiKey, api: p.api })
+					desktopApi
+						.pingModelProvider({ providerId: pid, baseUrl: p.baseUrl, apiKey: p.apiKey })
 						.then((res) => {
 							setPingResults((prev) => ({ ...prev, [pid]: res }));
 						})
@@ -315,8 +316,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 
 	// Ping a provider
 	const handlePing = async (providerId: string, baseUrl?: string, apiKey?: string) => {
-		const targetUrl = baseUrl || providers[providerId]?.baseUrl;
-		if (!targetUrl) return;
+		const targetUrl = baseUrl || providers[providerId]?.baseUrl || "";
 		setPingingId(providerId);
 		try {
 			const res = await desktopApi.pingModelProvider({

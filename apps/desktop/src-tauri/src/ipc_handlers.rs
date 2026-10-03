@@ -2660,24 +2660,50 @@ pub async fn handle_invoke(
         }
 
         "ping_model_provider" => {
-            let mut base_url = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let mut api_key = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let provider_id = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("");
+            let (mut base_url, mut api_key, mut provider_id) = if let Some(s) = args.as_str() {
+                ("".to_string(), "".to_string(), s.to_string())
+            } else {
+                let u = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let k = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let p = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                (u, k, p)
+            };
+
+            // If provider_id is empty, check settings.json for defaultProvider
+            if provider_id.is_empty() && base_url.is_empty() {
+                let settings_path = agent_dir().join("settings.json");
+                if let Ok(content) = fs::read_to_string(&settings_path) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(dp) = json.get("defaultProvider").and_then(|v| v.as_str()) {
+                            provider_id = dp.to_string();
+                        }
+                    }
+                }
+            }
 
             // If baseUrl or apiKey are missing, look up from models.json
-            if (base_url.is_empty() || api_key.is_empty()) && !provider_id.is_empty() {
+            if base_url.is_empty() || api_key.is_empty() {
                 let models_path = agent_dir().join("models.json");
                 if let Ok(content) = fs::read_to_string(&models_path) {
                     if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                        if let Some(p) = json.get("providers").and_then(|pr| pr.get(provider_id)) {
-                            if base_url.is_empty() {
-                                if let Some(u) = p.get("baseUrl").and_then(|v| v.as_str()) {
-                                    base_url = u.to_string();
+                        if let Some(providers) = json.get("providers").and_then(|pr| pr.as_object()) {
+                            let p_opt = if !provider_id.is_empty() {
+                                providers.get(&provider_id)
+                                    .or_else(|| providers.values().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(&provider_id)))
+                            } else {
+                                None
+                            }.or_else(|| if providers.len() == 1 { providers.values().next() } else { None });
+
+                            if let Some(p) = p_opt {
+                                if base_url.is_empty() {
+                                    if let Some(u) = p.get("baseUrl").and_then(|v| v.as_str()) {
+                                        base_url = u.to_string();
+                                    }
                                 }
-                            }
-                            if api_key.is_empty() {
-                                if let Some(k) = p.get("apiKey").and_then(|v| v.as_str()) {
-                                    api_key = k.to_string();
+                                if api_key.is_empty() {
+                                    if let Some(k) = p.get("apiKey").and_then(|v| v.as_str()) {
+                                        api_key = k.to_string();
+                                    }
                                 }
                             }
                         }
@@ -2977,23 +3003,48 @@ pub async fn handle_invoke(
         }
 
         "fetch_provider_remote_models" => {
-            let mut base_url = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let mut api_key = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let provider_id = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("");
+            let (mut base_url, mut api_key, mut provider_id) = if let Some(s) = args.as_str() {
+                ("".to_string(), "".to_string(), s.to_string())
+            } else {
+                let u = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let k = args.get("apiKey").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let p = args.get("providerId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                (u, k, p)
+            };
 
-            if (base_url.is_empty() || api_key.is_empty()) && !provider_id.is_empty() {
+            if provider_id.is_empty() && base_url.is_empty() {
+                let settings_path = agent_dir().join("settings.json");
+                if let Ok(content) = fs::read_to_string(&settings_path) {
+                    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+                        if let Some(dp) = json.get("defaultProvider").and_then(|v| v.as_str()) {
+                            provider_id = dp.to_string();
+                        }
+                    }
+                }
+            }
+
+            if base_url.is_empty() || api_key.is_empty() {
                 let models_path = agent_dir().join("models.json");
                 if let Ok(content) = fs::read_to_string(&models_path) {
                     if let Ok(json) = serde_json::from_str::<Value>(&content) {
-                        if let Some(p) = json.get("providers").and_then(|pr| pr.get(provider_id)) {
-                            if base_url.is_empty() {
-                                if let Some(u) = p.get("baseUrl").and_then(|v| v.as_str()) {
-                                    base_url = u.to_string();
+                        if let Some(providers) = json.get("providers").and_then(|pr| pr.as_object()) {
+                            let p_opt = if !provider_id.is_empty() {
+                                providers.get(&provider_id)
+                                    .or_else(|| providers.values().find(|p| p.get("name").and_then(|n| n.as_str()) == Some(&provider_id)))
+                            } else {
+                                None
+                            }.or_else(|| if providers.len() == 1 { providers.values().next() } else { None });
+
+                            if let Some(p) = p_opt {
+                                if base_url.is_empty() {
+                                    if let Some(u) = p.get("baseUrl").and_then(|v| v.as_str()) {
+                                        base_url = u.to_string();
+                                    }
                                 }
-                            }
-                            if api_key.is_empty() {
-                                if let Some(k) = p.get("apiKey").and_then(|v| v.as_str()) {
-                                    api_key = k.to_string();
+                                if api_key.is_empty() {
+                                    if let Some(k) = p.get("apiKey").and_then(|v| v.as_str()) {
+                                        api_key = k.to_string();
+                                    }
                                 }
                             }
                         }
@@ -3059,11 +3110,11 @@ pub async fn handle_invoke(
                         };
 
                         if let Some(providers_obj) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
-                            let target_p = if let Some(p) = providers_obj.get_mut(provider_id) {
+                            let target_p = if let Some(p) = providers_obj.get_mut(&provider_id) {
                                 p
                             } else {
                                 providers_obj.insert(
-                                    provider_id.to_string(),
+                                    provider_id.clone(),
                                     json!({
                                         "name": provider_id,
                                         "baseUrl": base_url,
@@ -3074,7 +3125,7 @@ pub async fn handle_invoke(
                                         "models": []
                                     }),
                                 );
-                                providers_obj.get_mut(provider_id).unwrap()
+                                providers_obj.get_mut(&provider_id).unwrap()
                             };
 
                             if let Some(target_p_obj) = target_p.as_object_mut() {

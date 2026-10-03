@@ -298,8 +298,16 @@ export const desktopApi = {
 		window.dispatchEvent(new Event("openpi:model-providers-changed"));
 		return result;
 	},
-	pingModelProvider: (params: { providerId?: string; baseUrl: string; apiKey?: string }) =>
-		call<ProviderPingResult>("ping_model_provider", params),
+	pingModelProvider: (
+		params: { providerId?: string; baseUrl?: string; apiKey?: string } | string,
+		options?: { baseUrl?: string; apiKey?: string; api?: string }
+	) => {
+		const payload =
+			typeof params === "string"
+				? { providerId: params, baseUrl: options?.baseUrl || "", apiKey: options?.apiKey }
+				: params;
+		return call<ProviderPingResult>("ping_model_provider", payload);
+	},
 	probeModelCapabilities: (params: { providerId?: string; modelId: string; baseUrl?: string; apiKey?: string }) =>
 		call<ModelProbeResult>("probe_model_capabilities", params),
 	batchProbeProviderModels: (params: { providerId: string; modelIds?: string[]; baseUrl?: string; apiKey?: string }) =>

@@ -115,7 +115,7 @@ export function MemorySurface({
 		summary: string;
 		handbook: string;
 		rolloutSummaries: Array<{ slug: string; fileName: string; date: string; content: string }>;
-		skills: Array<{ name: string; content: string }>;
+		skills: Array<{ name: string; content: string; description?: string }>;
 		stats: { pending: number; running: number; completed: number; failed: number; unconsolidatedStage1: number };
 		recentJobs: any[];
 	} | null>(null);

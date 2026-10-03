@@ -24,3 +24,4 @@ release_notes.md
 .cargo/
 *.tar.gz
 *.zip
+.commandcode/
