@@ -32,6 +32,45 @@ pub async fn run_ipc_server(
     info!("OpenPI Rust Daemon listening on {}", socket_path);
 
     let start_time = std::time::Instant::now();
+    let last_active = Arc::new(Mutex::new(std::time::Instant::now()));
+    let active_connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // 🌌 Scale-to-Zero Watchdog: Idle auto-terminate after 180s of complete conversation and client inactivity
+    let supervisor_idle = supervisor.clone();
+    let storage_idle = storage.clone();
+    let socket_path_str = socket_path.to_string();
+    let last_active_watchdog = last_active.clone();
+    let active_conns_watchdog = active_connections.clone();
+
+    tokio::spawn(async move {
+        let idle_timeout = std::time::Duration::from_secs(180);
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+            let sessions = supervisor_idle.list_sessions().await;
+            let any_running = sessions.iter().any(|s| s.running);
+
+            let has_active_scheduled = if let Ok(tasks) = storage_idle.list_tasks() {
+                tasks.iter().any(|t| t.status == "active" || t.status == "running")
+            } else {
+                false
+            };
+
+            let has_active_client = active_conns_watchdog.load(std::sync::atomic::Ordering::SeqCst) > 0;
+
+            if any_running || has_active_scheduled || has_active_client {
+                *last_active_watchdog.lock().await = std::time::Instant::now();
+            } else {
+                let elapsed = last_active_watchdog.lock().await.elapsed();
+                if elapsed >= idle_timeout {
+                    info!("🌌 [Scale-to-Zero] OpenPI Daemon has been idle for {:?}. Gracefully terminating to 0 resource usage...", elapsed);
+                    supervisor_idle.shutdown_all().await;
+                    let _ = std::fs::remove_file(&socket_path_str);
+                    std::process::exit(0);
+                }
+            }
+        }
+    });
 
     loop {
         match listener.accept().await {
@@ -40,8 +79,10 @@ pub async fn run_ipc_server(
                 let storage = storage.clone();
                 let scheduler = scheduler.clone();
                 let pi_cli = pi_cli_path.clone();
+                let last_active_conn = last_active.clone();
+                let active_conns = active_connections.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, supervisor, storage, scheduler, pi_cli, start_time).await {
+                    if let Err(e) = handle_connection(stream, supervisor, storage, scheduler, pi_cli, start_time, last_active_conn, active_conns).await {
                         warn!("Client connection error: {}", e);
                     }
                 });
@@ -53,6 +94,13 @@ pub async fn run_ipc_server(
     }
 }
 
+struct ConnGuard(Arc<std::sync::atomic::AtomicUsize>);
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 async fn handle_connection(
     stream: UnixStream,
     supervisor: Supervisor,
@@ -60,7 +108,11 @@ async fn handle_connection(
     scheduler: Scheduler,
     pi_cli_path: String,
     start_time: std::time::Instant,
+    last_active: Arc<Mutex<std::time::Instant>>,
+    active_connections: Arc<std::sync::atomic::AtomicUsize>,
 ) -> anyhow::Result<()> {
+    active_connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let _guard = ConnGuard(active_connections);
     let (reader_half, mut writer_half) = stream.into_split();
     let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
@@ -132,10 +184,11 @@ async fn handle_connection(
         let pi_cli_path = pi_cli_path.clone();
         let subscribed_sessions = subscribed_sessions.clone();
         let write_tx = write_tx.clone();
+        let last_active = last_active.clone();
         requests.spawn(async move {
             if let Err(e) = handle_request(
                 request, supervisor, storage, scheduler, pi_cli_path,
-                start_time, subscribed_sessions, write_tx,
+                start_time, subscribed_sessions, write_tx, last_active,
             ).await {
                 warn!("Client request error: {}", e);
             }
@@ -157,7 +210,24 @@ async fn handle_request(
     start_time: std::time::Instant,
     subscribed_sessions: Arc<Mutex<HashSet<String>>>,
     write_tx: tokio::sync::mpsc::Sender<String>,
+    last_active: Arc<Mutex<std::time::Instant>>,
 ) -> anyhow::Result<()> {
+    let is_passive = match &request {
+        ClientRequest::Health { .. }
+        | ClientRequest::ListSessions { .. }
+        | ClientRequest::Subscribe { .. }
+        | ClientRequest::Unsubscribe { .. } => true,
+        ClientRequest::App { op, .. } => {
+            let op_name = op.get("name").or_else(|| op.get("method")).and_then(|m| m.as_str()).unwrap_or("");
+            op_name.starts_with("get_") || op_name.starts_with("list_")
+        }
+        _ => false,
+    };
+
+    if !is_passive {
+        *last_active.lock().await = std::time::Instant::now();
+    }
+
         let response = match request {
             ClientRequest::Health { id } => {
                 let sessions = supervisor.list_sessions().await;

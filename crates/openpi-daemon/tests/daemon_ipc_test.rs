@@ -127,6 +127,91 @@ async fn test_daemon_full_lifecycle() {
     let tasks = resp["data"]["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0]["task"]["title"], "Scheduled Build");
+    let task_id = tasks[0]["task"]["id"].as_str().unwrap();
+
+    // 4b. Test AppOp: run_task
+    let run_task_req = serde_json::json!({
+        "id": "req-task-run",
+        "type": "app",
+        "op": { "name": "run_task", "taskId": task_id }
+    });
+    writer.write_all(format!("{}\n", run_task_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    // Helper to read until a response with matching request id arrives (skipping broadcast events)
+    async fn read_resp(reader: &mut BufReader<tokio::net::unix::OwnedReadHalf>, target_id: &str) -> serde_json::Value {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            reader.read_line(&mut line).await.unwrap();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if v.get("id").and_then(|id| id.as_str()) == Some(target_id) {
+                    return v;
+                }
+            }
+        }
+    }
+
+    let resp = read_resp(&mut reader, "req-task-run").await;
+    assert_eq!(resp["id"], "req-task-run");
+    assert_eq!(resp["ok"], true);
+    let run_id = resp["data"]["id"].as_str().unwrap();
+    assert!(!run_id.is_empty());
+
+    // 4c. Test AppOp: read_run_log
+    let read_log_req = serde_json::json!({
+        "id": "req-task-log",
+        "type": "app",
+        "op": { "name": "read_run_log", "runId": run_id, "stream": "stdout" }
+    });
+    writer.write_all(format!("{}\n", read_log_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    let resp = read_resp(&mut reader, "req-task-log").await;
+    assert_eq!(resp["id"], "req-task-log");
+    assert_eq!(resp["ok"], true);
+    assert!(resp["data"]["text"].is_string());
+
+    // 4d. Test AppOp: step_runs
+    let step_runs_req = serde_json::json!({
+        "id": "req-task-steps",
+        "type": "app",
+        "op": { "name": "step_runs", "runId": run_id }
+    });
+    writer.write_all(format!("{}\n", step_runs_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    let resp = read_resp(&mut reader, "req-task-steps").await;
+    assert_eq!(resp["id"], "req-task-steps");
+    assert_eq!(resp["ok"], true);
+    assert!(resp["data"]["stepRuns"].is_array());
+
+    // 4e. Test AppOp: cancel_run
+    let cancel_req = serde_json::json!({
+        "id": "req-task-cancel",
+        "type": "app",
+        "op": { "name": "cancel_run", "runId": run_id }
+    });
+    writer.write_all(format!("{}\n", cancel_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    let resp = read_resp(&mut reader, "req-task-cancel").await;
+    assert_eq!(resp["id"], "req-task-cancel");
+    assert_eq!(resp["ok"], true);
+
+    // 4f. Test AppOp: set_task_paused
+    let pause_req = serde_json::json!({
+        "id": "req-task-pause",
+        "type": "app",
+        "op": { "name": "set_task_paused", "taskId": task_id, "paused": true }
+    });
+    writer.write_all(format!("{}\n", pause_req).as_bytes()).await.unwrap();
+    writer.flush().await.unwrap();
+
+    let resp = read_resp(&mut reader, "req-task-pause").await;
+    assert_eq!(resp["id"], "req-task-pause");
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["status"], "paused");
 
     // 5. Test AppOp: write_memory & list_memory
     let write_mem_req = serde_json::json!({

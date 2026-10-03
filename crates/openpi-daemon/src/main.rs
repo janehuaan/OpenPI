@@ -5,6 +5,9 @@ use openpi_storage::Storage;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     tracing_subscriber::fmt::init();
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -31,12 +34,33 @@ async fn main() -> anyhow::Result<()> {
     let scheduler = Scheduler::new(storage.clone());
     let supervisor = Supervisor::new();
 
+    // Spawn scheduler background loop
+    let scheduler_clone = scheduler.clone();
+    let supervisor_for_sched = supervisor.clone();
+    let storage_clone = storage.clone();
+    let pi_cli_clone = pi_cli_path.clone();
+    tokio::spawn(async move {
+        openpi_daemon::run_scheduler_loop(
+            scheduler_clone,
+            supervisor_for_sched,
+            storage_clone,
+            pi_cli_clone,
+        ).await;
+    });
+
     let supervisor_clone = supervisor.clone();
     tokio::spawn(async move {
         if let Ok(()) = tokio::signal::ctrl_c().await {
             info!("Received termination signal (Ctrl-C), cleanly reaping all managed session subprocesses...");
             supervisor_clone.shutdown_all().await;
             std::process::exit(0);
+        }
+    });
+
+    // Reconcile and consolidate long-term memories at daemon startup
+    tokio::spawn(async {
+        if let Err(e) = openpi_engine::memory_worker::reconcile_all_session_memories() {
+            tracing::warn!("Failed to reconcile session memories at startup: {:?}", e);
         }
     });
 

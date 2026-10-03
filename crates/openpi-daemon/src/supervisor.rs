@@ -8,6 +8,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::{info, warn};
 use serde_json::Value;
 use openpi_proto::{SessionInfo, SessionMode};
+use openpi_engine::config::{default_project_workspace, is_forbidden_workspace_dir};
 
 pub fn openpi_dir() -> PathBuf {
     if let Ok(p) = std::env::var("OPENPI_DIR") {
@@ -195,7 +196,7 @@ pub struct ManagedSession {
 #[derive(Clone)]
 pub struct Supervisor {
     sessions: Arc<Mutex<HashMap<String, ManagedSession>>>,
-    event_tx: broadcast::Sender<(String, Value)>,
+    pub event_tx: broadcast::Sender<(String, Value)>,
     pub jev: Arc<openpi_jev::JevCoordinator>,
     pub memory: Arc<openpi_memory::CodebaseMemoryManager>,
     pub pi_cli_path: Arc<tokio::sync::RwLock<String>>,
@@ -272,6 +273,19 @@ impl Supervisor {
             }
         }
 
+        // Auto-summarize any session that has no name or has generic "新对话"
+        for (sid, sess) in map.iter_mut() {
+            let needs_name = sess.info.name.is_none()
+                || sess.info.name.as_deref().unwrap_or("").trim().is_empty()
+                || sess.info.name.as_deref() == Some("新对话");
+            if needs_name {
+                let file_path = find_session_file(sid);
+                if let Some(derived) = openpi_engine::title_summarizer::extract_title_from_jsonl(&file_path, &sess.info.cwd) {
+                    sess.info.name = Some(derived);
+                }
+            }
+        }
+
         let jev = Arc::new(openpi_jev::JevCoordinator::new());
         jev.spawn_async_warmup();
         let memory = Arc::new(openpi_memory::CodebaseMemoryManager::new());
@@ -280,6 +294,7 @@ impl Supervisor {
         let engine_cfg = openpi_engine::EngineConfig::load().unwrap_or_else(|_| openpi_engine::EngineConfig {
             default_provider: None,
             default_model: None,
+            max_steps: 200,
             models: HashMap::new(),
         });
         let tool_reg = openpi_engine::ToolRegistry::new(jev.clone(), memory.clone());
@@ -311,6 +326,19 @@ impl Supervisor {
             let dir = sessions_dir();
             if let Ok(res) = jev_init.trigger_offline_dreaming(&dir).await {
                 tracing::info!("🌌 [Jev Dream-RSI] 启动自适应做梦完成: beta*={:?}", res.get("optimal_beta"));
+            }
+        });
+
+        // 监听会话重命名事件并实时持久化 records
+        let sup_rename = supervisor.clone();
+        let mut rename_rx = supervisor.subscribe_events();
+        tokio::spawn(async move {
+            while let Ok((sid, val)) = rename_rx.recv().await {
+                if val.get("type").and_then(|v| v.as_str()) == Some("session_renamed") {
+                    if let Some(new_name) = val.get("name").and_then(|v| v.as_str()) {
+                        let _ = sup_rename.rename_session(&sid, Some(new_name.to_string())).await;
+                    }
+                }
             }
         });
 
@@ -367,9 +395,11 @@ impl Supervisor {
                                     for c in contents {
                                         if c.get("type").and_then(|v| v.as_str()) == Some("text") {
                                             if let Some(txt) = c.get("text").and_then(|v| v.as_str()) {
-                                                let preview: String = txt.chars().take(40).collect();
-                                                name = Some(preview);
-                                                break;
+                                                let t = openpi_engine::title_summarizer::summarize_title_heuristic(txt, &cwd);
+                                                if !t.is_empty() && t != "新对话" {
+                                                    name = Some(t);
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
@@ -381,8 +411,8 @@ impl Supervisor {
             }
         }
 
-        if cwd.is_empty() {
-            cwd = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        if cwd.is_empty() || is_forbidden_workspace_dir(Path::new(&cwd)).is_err() {
+            cwd = default_project_workspace().to_string_lossy().to_string();
         }
 
         Some(SessionInfo {
@@ -406,7 +436,16 @@ impl Supervisor {
         let path = instances_path();
         let _ = std::fs::create_dir_all(openpi_dir());
         let sessions = self.sessions.lock().await;
-        let mut records: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
+        let mut records: Vec<SessionInfo> = Vec::with_capacity(sessions.len());
+        for s in sessions.values() {
+            let mut info = s.info.clone();
+            if Self::use_native_engine() {
+                info.running = self.engine.is_running(&info.session_id).await;
+            } else {
+                info.running = s.child.is_some() && s.info.running;
+            }
+            records.push(info);
+        }
         records.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         if let Ok(json) = serde_json::to_string_pretty(&records) {
@@ -418,14 +457,33 @@ impl Supervisor {
 
     pub async fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.lock().await;
-        let mut list: Vec<SessionInfo> = sessions.values().map(|s| s.info.clone()).collect();
+        let mut list: Vec<SessionInfo> = Vec::with_capacity(sessions.len());
+        for s in sessions.values() {
+            let mut info = s.info.clone();
+            if Self::use_native_engine() {
+                info.running = self.engine.is_running(&info.session_id).await;
+            } else {
+                info.running = s.child.is_some() && s.info.running;
+            }
+            list.push(info);
+        }
         list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         list
     }
 
     pub async fn get_session(&self, id: &str) -> Option<SessionInfo> {
         let sessions = self.sessions.lock().await;
-        sessions.get(id).map(|s| s.info.clone())
+        if let Some(s) = sessions.get(id) {
+            let mut info = s.info.clone();
+            if Self::use_native_engine() {
+                info.running = self.engine.is_running(&info.session_id).await;
+            } else {
+                info.running = s.child.is_some() && s.info.running;
+            }
+            Some(info)
+        } else {
+            None
+        }
     }
 
     pub async fn set_pi_cli_path(&self, path: &str) {
@@ -573,9 +631,14 @@ impl Supervisor {
         in_memory: Option<bool>,
     ) -> anyhow::Result<SessionInfo> {
         let now = chrono::Utc::now().to_rfc3339();
+        let safe_cwd = if cwd.is_empty() || is_forbidden_workspace_dir(Path::new(&cwd)).is_err() {
+            default_project_workspace().to_string_lossy().to_string()
+        } else {
+            cwd.clone()
+        };
         let info = SessionInfo {
             session_id: id.clone(),
-            cwd: cwd.clone(),
+            cwd: safe_cwd,
             mode,
             name,
             model,
@@ -625,6 +688,9 @@ impl Supervisor {
     }
 
     pub async fn update_session_workspace(&self, id: &str, cwd: String) -> anyhow::Result<()> {
+        if let Err(err_msg) = is_forbidden_workspace_dir(Path::new(&cwd)) {
+            anyhow::bail!("拒绝将工作区变更为非法或敏感目录: {}", err_msg);
+        }
         let _ = self.stop_session(id).await;
         {
             let mut sessions = self.sessions.lock().await;
@@ -649,6 +715,14 @@ impl Supervisor {
         Ok(())
     }
 
+    pub async fn is_session_running(&self, session_id: &str) -> bool {
+        if Self::use_native_engine() {
+            return self.engine.is_running(session_id).await;
+        }
+        let sessions = self.sessions.lock().await;
+        sessions.get(session_id).map(|s| s.info.running).unwrap_or(false)
+    }
+
     pub fn use_native_engine() -> bool {
         if let Ok(v) = std::env::var("OPENPI_ENGINE") {
             return v.to_lowercase() != "node";
@@ -669,7 +743,7 @@ impl Supervisor {
                     let now = chrono::Utc::now().to_rfc3339();
                     SessionInfo {
                         session_id: session_id.to_string(),
-                        cwd: std::env::var("HOME").unwrap_or_default(),
+                        cwd: default_project_workspace().to_string_lossy().to_string(),
                         mode: SessionMode::Code,
                         name: None,
                         model: None,
@@ -683,7 +757,7 @@ impl Supervisor {
                 let now = chrono::Utc::now().to_rfc3339();
                 SessionInfo {
                     session_id: session_id.to_string(),
-                    cwd: std::env::var("HOME").unwrap_or_default(),
+                    cwd: default_project_workspace().to_string_lossy().to_string(),
                     mode: SessionMode::Code,
                     name: None,
                     model: None,
@@ -707,7 +781,6 @@ impl Supervisor {
         let session = sessions.get_mut(session_id).unwrap();
 
         if Self::use_native_engine() {
-            session.info.running = true;
             let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({ "type": "rpc_ready" })));
             return Ok(());
         }
@@ -1072,6 +1145,26 @@ impl Supervisor {
                         let sessions = self.sessions.lock().await;
                         sessions.get(session_id).and_then(|s| s.info.model.clone())
                     };
+
+                    let needs_name = {
+                        let sessions = self.sessions.lock().await;
+                        sessions.get(session_id).map(|s| {
+                            s.info.name.is_none()
+                                || s.info.name.as_deref().unwrap_or("").trim().is_empty()
+                                || s.info.name.as_deref() == Some("新对话")
+                        }).unwrap_or(false)
+                    };
+                    if needs_name && !msg.trim().is_empty() {
+                        let fast_title = openpi_engine::title_summarizer::summarize_title_heuristic(msg, &cwd);
+                        if !fast_title.is_empty() && fast_title != "新对话" {
+                            let _ = self.rename_session(session_id, Some(fast_title.clone())).await;
+                            let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({
+                                "type": "session_renamed",
+                                "sessionId": session_id,
+                                "name": fast_title,
+                            })));
+                        }
+                    }
 
                     self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
                     return Ok(serde_json::json!(true));
