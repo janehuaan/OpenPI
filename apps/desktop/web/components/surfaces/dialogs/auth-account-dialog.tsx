@@ -625,7 +625,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 											? `上次同步出错：${cloudSync.lastError}`
 											: cloudSync?.lastSyncAt
 												? `上次同步 ${new Date(cloudSync.lastSyncAt).toLocaleTimeString()} · 推送 ${cloudSync.pushed} / 拉取 ${cloudSync.pulled}`
-												: "同步档案 / 定时任务 / 记忆 / 技能 / 会话（脱敏）；API Key 加密同步"}
+												: "同步档案 / 定时任务 / 记忆 / 技能 / 会话；设同步口令后 API Key 与会话原文端到端加密"}
 								</span>
 							</div>
 							<button
@@ -653,7 +653,7 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 									API Key 加密同步 · {cloudSync?.passphraseSet ? "已设置" : "未设置"}
 								</span>
 								<span style={{ color: "var(--text-tertiary)", fontSize: "11px" }}>
-									设置同步口令后，API Key 以 AES-256-GCM 端到端加密上传，云端只存密文。口令仅在本机使用，忘记则无法恢复。
+									设置同步口令后，API Key 与会话历史（原文）以 AES-256-GCM 端到端加密上传，云端只存密文；未设口令时会话按脱敏明文同步。口令仅在本机使用，忘记则无法恢复。
 								</span>
 							</div>
 							<div style={{ display: "flex", gap: "8px" }}>

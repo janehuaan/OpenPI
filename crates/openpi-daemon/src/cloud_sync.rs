@@ -177,10 +177,11 @@ impl CloudSync {
         step!(self.sync_runs(&auth).await);
         // files: memories / skills / preferences
         step!(self.sync_files(&auth).await);
-        // conversation transcripts (phase 3, redacted before upload)
-        step!(self.sync_conversations(&auth).await);
-        // end-to-end encrypted secrets (API keys)
+        // end-to-end encrypted secrets (API keys) — runs before conversations so
+        // the shared salt exists when transcripts are encrypted
         step!(self.sync_secrets(&auth).await);
+        // conversation transcripts (encrypted when a passphrase is set, else redacted)
+        step!(self.sync_conversations(&auth).await);
         // local deletions
         step!(self.push_tombstones(&auth).await);
 
@@ -575,6 +576,29 @@ impl CloudSync {
         let mut pushed = 0u64;
         let mut pulled = 0u64;
 
+        // Optional end-to-end encryption: with a passphrase we upload the raw
+        // transcript encrypted; otherwise we fall back to lossy redaction.
+        let pass = self
+            .storage
+            .get_kv(SECRET_PASS_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let salt: Option<String> = if pass.is_empty() {
+            None
+        } else {
+            self.fetch_secret_salt(auth)
+                .await
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+        };
+        let enc_key: Option<[u8; 32]> = match (&salt, pass.is_empty()) {
+            (Some(s), false) => derive_key(&pass, s).ok(),
+            _ => None,
+        };
+        let mode = if enc_key.is_some() { "enc" } else { "plain" };
+
         // ---- push ----
         let mut sessions: Vec<(String, std::path::PathBuf)> = Vec::new();
         if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -597,7 +621,7 @@ impl CloudSync {
             };
             let wm: i64 = self
                 .storage
-                .get_kv(&format!("cloud:conv:wm:{}", sid))
+                .get_kv(&format!("cloud:conv:wm:{}:{}", sid, mode))
                 .ok()
                 .flatten()
                 .and_then(|s| s.parse::<i64>().ok())
@@ -640,22 +664,25 @@ impl CloudSync {
                 if idx <= wm {
                     continue;
                 }
-                // Redact before it ever leaves the machine.
-                let redacted = self.leak.scan_and_sanitize(line).sanitized_text;
-                let payload: Value =
-                    serde_json::from_str(&redacted).unwrap_or_else(|_| json!({ "raw": redacted }));
-                let mid = payload
+                let raw: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                let mid = raw
                     .get("id")
                     .and_then(|x| x.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("line-{}", idx));
-                let ts = payload.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
-                let ts_iso = if ts.is_empty() {
-                    now_iso()
-                } else if last_ts.is_empty() {
-                    to_iso(ts)
-                } else {
-                    to_iso(ts)
+                let ts = raw.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
+                let ts_iso = if ts.is_empty() { now_iso() } else { to_iso(ts) };
+                let payload: Value = match (&enc_key, &salt) {
+                    (Some(key), Some(s)) => {
+                        let nonce = random_b64(12);
+                        let ct = encrypt(key, &nonce, line.as_bytes())?;
+                        json!({ "__enc": { "v": 1, "salt": s, "nonce": nonce, "ct": ct } })
+                    }
+                    _ => {
+                        // No passphrase: redact before it ever leaves the machine.
+                        let redacted = self.leak.scan_and_sanitize(line).sanitized_text;
+                        serde_json::from_str(&redacted).unwrap_or_else(|_| json!({ "raw": redacted }))
+                    }
                 };
                 rows.push(json!({
                     "conversation_id": sid,
@@ -732,7 +759,7 @@ impl CloudSync {
                     max_conv_ts = ts.to_string();
                 }
             }
-            if let Ok(n) = self.pull_messages(auth, &sid).await {
+            if let Ok(n) = self.pull_messages(auth, &sid, &pass).await {
                 pulled += n;
             }
         }
@@ -743,7 +770,7 @@ impl CloudSync {
         Ok((pushed, pulled))
     }
 
-    async fn pull_messages(&self, auth: &CloudAuth, sid: &str) -> Result<u64> {
+    async fn pull_messages(&self, auth: &CloudAuth, sid: &str, pass: &str) -> Result<u64> {
         let path = openpi_root().join("sessions").join(format!("{}.jsonl", sid));
         let local_count = std::fs::read_to_string(&path)
             .map(|c| c.lines().count())
@@ -780,11 +807,35 @@ impl CloudSync {
         let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
         use std::io::Write;
         let mut n = 0u64;
+        let mut keys: std::collections::HashMap<String, [u8; 32]> = std::collections::HashMap::new();
         for r in &rows {
-            if let Some(payload) = r.get("payload") {
-                if writeln!(file, "{}", serde_json::to_string(payload).unwrap_or_default()).is_ok() {
-                    n += 1;
+            let Some(payload) = r.get("payload") else {
+                continue;
+            };
+            let line = if let Some(enc) = payload.get("__enc") {
+                if pass.is_empty() {
+                    continue; // encrypted row, but no passphrase on this device
                 }
+                let salt = enc.get("salt").and_then(|s| s.as_str()).unwrap_or_default().to_string();
+                let nonce = enc.get("nonce").and_then(|s| s.as_str()).unwrap_or_default();
+                let ct = enc.get("ct").and_then(|s| s.as_str()).unwrap_or_default();
+                if salt.is_empty() || nonce.is_empty() || ct.is_empty() {
+                    continue;
+                }
+                let key = match keys.get(&salt) {
+                    Some(k) => *k,
+                    None => {
+                        let k = derive_key(pass, &salt)?;
+                        keys.insert(salt.clone(), k);
+                        k
+                    }
+                };
+                decrypt(&key, nonce, ct)?
+            } else {
+                serde_json::to_string(payload).unwrap_or_default()
+            };
+            if writeln!(file, "{}", line).is_ok() {
+                n += 1;
             }
         }
         Ok(n)
@@ -809,43 +860,50 @@ impl CloudSync {
         let mut pulled = 0u64;
 
         // ---- push ----
-        if let Ok(content) = std::fs::read_to_string(&models_path) {
-            if !content.trim().is_empty() {
-                let mtime = std::fs::metadata(&models_path)
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
-                    .unwrap_or_else(now_iso);
-                let last = self
-                    .storage
-                    .get_kv("cloud:push:wm:cloud_secrets")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                if last.is_empty() || newer(&mtime, &last) {
-                    // Reuse the existing salt so every device derives the same key.
-                    let salt = match self.fetch_secret_salt(auth).await {
-                        Ok(Some(s)) if !s.is_empty() => s,
-                        _ => random_b64(16),
-                    };
-                    let key = derive_key(&pass, &salt)?;
-                    let nonce = random_b64(12);
-                    let ciphertext = encrypt(&key, &nonce, content.as_bytes())?;
-                    let ts = now_iso();
-                    let row = json!({
-                        "name": SECRET_NAME,
-                        "salt": salt,
-                        "nonce": nonce,
-                        "ciphertext": ciphertext,
-                        "updated_at": ts.clone(),
-                    });
-                    pushed += self
-                        .push_rows(auth, SECRETS_TABLE, "user_id,name", std::slice::from_ref(&row))
-                        .await?;
-                    let _ = self.storage.set_kv("cloud:push:wm:cloud_secrets", &mtime);
-                    let _ = self.set_wm("pull", SECRETS_TABLE, &ts);
-                }
-            }
+        let content = std::fs::read_to_string(&models_path).unwrap_or_default();
+        let mtime = std::fs::metadata(&models_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+            .unwrap_or_else(now_iso);
+        let last = self
+            .storage
+            .get_kv("cloud:push:wm:cloud_secrets")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        // The salt is shared across devices so they derive the same key; it is
+        // established even when there is no payload yet (empty ciphertext).
+        let existing_salt = self
+            .fetch_secret_salt(auth)
+            .await
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty());
+        let models_changed =
+            (last.is_empty() || newer(&mtime, &last)) && !content.trim().is_empty();
+        if existing_salt.is_none() || models_changed {
+            let salt = existing_salt.unwrap_or_else(|| random_b64(16));
+            let key = derive_key(&pass, &salt)?;
+            let nonce = random_b64(12);
+            let ciphertext = if content.trim().is_empty() {
+                String::new()
+            } else {
+                encrypt(&key, &nonce, content.as_bytes())?
+            };
+            let ts = now_iso();
+            let row = json!({
+                "name": SECRET_NAME,
+                "salt": salt,
+                "nonce": nonce,
+                "ciphertext": ciphertext,
+                "updated_at": ts.clone(),
+            });
+            pushed += self
+                .push_rows(auth, SECRETS_TABLE, "user_id,name", std::slice::from_ref(&row))
+                .await?;
+            let _ = self.storage.set_kv("cloud:push:wm:cloud_secrets", &mtime);
+            let _ = self.set_wm("pull", SECRETS_TABLE, &ts);
         }
 
         // ---- pull ----
