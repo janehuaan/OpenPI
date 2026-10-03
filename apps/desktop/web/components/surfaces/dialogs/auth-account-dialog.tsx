@@ -1,6 +1,6 @@
 import { useState, useEffect, type FC } from "react";
 import { X, Shield, LogIn, LogOut, Check, AlertCircle, Wrench, UserRound, UploadCloud, Github, Google } from "../../icons";
-import { desktopApi } from "../../../api";
+import { desktopApi, type CloudSyncStatus } from "../../../api";
 import { supabase, type SupabaseUser } from "../../../lib/supabase-client";
 
 interface AuthAccountDialogProps {
@@ -46,6 +46,8 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	const [busy, setBusy] = useState(false);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [successMessage, setSuccessMessage] = useState<string | null>(null);
+	const [cloudSync, setCloudSync] = useState<CloudSyncStatus | null>(null);
+	const [syncing, setSyncing] = useState(false);
 
 	useEffect(() => {
 		if (profile.avatarUrl && !avatarUrl) {
@@ -76,6 +78,38 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 	}, []);
 
 	const isBusy = busy || parentBusy;
+
+	// Cloud sync status — poll while the dialog is open
+	useEffect(() => {
+		let cancelled = false;
+		const load = async () => {
+			try {
+				const st = await desktopApi.cloudStatus();
+				if (!cancelled) setCloudSync(st);
+			} catch {
+				/* daemon offline */
+			}
+		};
+		void load();
+		const t = setInterval(load, 4000);
+		return () => {
+			cancelled = true;
+			clearInterval(t);
+		};
+	}, []);
+
+	const handleSyncNow = async () => {
+		setSyncing(true);
+		setErrorMessage(null);
+		try {
+			const st = await desktopApi.cloudSyncNow();
+			setCloudSync(st);
+		} catch (err: any) {
+			setErrorMessage(err?.message || "同步失败");
+		} finally {
+			setSyncing(false);
+		}
+	};
 
 	const handleSaveConfig = () => {
 		if (!projectUrl.trim() || !anonKey.trim()) {
@@ -534,6 +568,45 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 							>
 								<LogOut size={13} />
 								<span>退出</span>
+							</button>
+						</div>
+
+						{/* Cloud data sync status (profile + scheduled tasks) */}
+						<div
+							style={{
+								padding: "10px 12px",
+								borderRadius: "10px",
+								background: "var(--bg-muted)",
+								border: "1px solid var(--border)",
+								marginBottom: "16px",
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "space-between",
+								gap: "10px",
+							}}
+						>
+							<div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+								<span style={{ fontWeight: 600, fontSize: "13px", color: "var(--text)" }}>
+									云端同步 · {cloudSync?.signedIn ? "已开启" : "未开启"}
+								</span>
+								<span style={{ color: "var(--text-tertiary)", fontSize: "11px" }}>
+									{cloudSync?.authRequired
+										? "登录凭证已过期，请重新登录"
+										: cloudSync?.lastError
+											? `上次同步出错：${cloudSync.lastError}`
+											: cloudSync?.lastSyncAt
+												? `上次同步 ${new Date(cloudSync.lastSyncAt).toLocaleTimeString()} · 推送 ${cloudSync.pushed} / 拉取 ${cloudSync.pulled}`
+												: "同步档案与定时任务（不含 API Key 与会话历史）"}
+								</span>
+							</div>
+							<button
+								type="button"
+								className="button secondary"
+								style={{ padding: "5px 10px", fontSize: "11.5px", flexShrink: 0 }}
+								disabled={syncing || isBusy}
+								onClick={handleSyncNow}
+							>
+								{syncing ? "同步中…" : "立即同步"}
 							</button>
 						</div>
 

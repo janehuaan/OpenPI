@@ -122,6 +122,16 @@ async function call<T>(channel: string, args?: unknown, maxRetries = 4): Promise
 	throw new Error(`IPC call ${channel} failed after retries`);
 }
 
+export interface CloudSyncStatus {
+	configured: boolean;
+	signedIn: boolean;
+	authRequired: boolean;
+	lastSyncAt?: string | null;
+	lastError?: string | null;
+	pushed: number;
+	pulled: number;
+}
+
 export const desktopApi = {
 	isNative,
 	getSnapshot: (opts?: { includeStopped?: boolean }) =>
@@ -483,6 +493,17 @@ export const desktopApi = {
 	hideIslandWindow: () => call<boolean>("hide_island_window"),
 	runTerminalCommand: (opts: { cwd?: string; command: string; timeoutMs?: number }) =>
 		call<{ exitCode: number; stdout: string; stderr: string }>("run_terminal_command", opts),
+
+	// ── Cloud account data sync ──────────────────────────────────────────────
+	cloudSetAuth: (input: {
+		url: string;
+		anonKey: string;
+		accessToken: string;
+		expiresAt: number;
+	}) => call<CloudSyncStatus>("cloud_set_auth", input),
+	cloudClearAuth: () => call<{ signedIn: boolean }>("cloud_clear_auth"),
+	cloudSyncNow: () => call<CloudSyncStatus>("cloud_sync_now"),
+	cloudStatus: () => call<CloudSyncStatus>("cloud_status"),
 
 	// ── Kernel Runtime Hot-Update & Diagnostics ──────────────────────────────
 	getRuntimeInfo: () => call<RuntimeInfo>("runtime_get_info"),

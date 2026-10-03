@@ -13,6 +13,7 @@ pub async fn handle_app_op(
     scheduler: &Scheduler,
     supervisor: &crate::supervisor::Supervisor,
     memory: &openpi_memory::CodebaseMemoryManager,
+    cloud: &crate::cloud_sync::CloudSync,
 ) -> anyhow::Result<ServerMessage> {
     let jev = &supervisor.jev;
     let name = match op.get("name").and_then(|n| n.as_str()) {
@@ -144,6 +145,10 @@ pub async fn handle_app_op(
 
         "delete_task" => {
             let task_id = op.get("taskId").and_then(|t| t.as_str()).unwrap_or_default();
+            if !task_id.is_empty() {
+                // Leave a tombstone so the deletion propagates to the cloud.
+                cloud.tombstone("cloud_tasks", task_id);
+            }
             let deleted = storage.delete_task(task_id)?;
             Ok(ServerMessage::ok(id, serde_json::json!({ "deleted": deleted })))
         }
@@ -821,6 +826,40 @@ pub async fn handle_app_op(
                     })))
                 }
             }
+        }
+
+        // ── Cloud account data sync (Supabase PostgREST + RLS) ──
+        "cloud_set_auth" => {
+            let url = op.get("url").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let anon_key = op.get("anonKey").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let access_token = op.get("accessToken").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let expires_at = op.get("expiresAt").and_then(|v| v.as_i64()).unwrap_or(0);
+            if url.is_empty() || access_token.is_empty() {
+                return Ok(ServerMessage::err(id, "cloud_set_auth requires url and accessToken"));
+            }
+            cloud
+                .set_auth(crate::cloud_sync::CloudAuth {
+                    url,
+                    anon_key,
+                    access_token,
+                    expires_at,
+                })
+                .await;
+            let _ = cloud.sync_now().await;
+            let st = cloud.status().await;
+            Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
+        }
+        "cloud_clear_auth" => {
+            cloud.clear_auth().await;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "signedIn": false })))
+        }
+        "cloud_sync_now" => {
+            let st = cloud.sync_now().await?;
+            Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
+        }
+        "cloud_status" => {
+            let st = cloud.status().await;
+            Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
         }
 
         // Default handler

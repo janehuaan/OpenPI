@@ -33,6 +33,13 @@ async fn main() -> anyhow::Result<()> {
     let storage = Storage::open(&db_path)?;
     let scheduler = Scheduler::new(storage.clone());
     let supervisor = Supervisor::new();
+    let cloud = openpi_daemon::CloudSync::new(storage.clone());
+
+    // Spawn cloud sync background loop (no-op until the renderer pushes a token)
+    let cloud_for_loop = cloud.clone();
+    tokio::spawn(async move {
+        openpi_daemon::run_cloud_sync_loop(cloud_for_loop).await;
+    });
 
     // Spawn scheduler background loop
     let scheduler_clone = scheduler.clone();
@@ -64,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    run_ipc_server(&socket_path, supervisor, storage, scheduler, pi_cli_path).await?;
+    run_ipc_server(&socket_path, supervisor, storage, scheduler, pi_cli_path, cloud).await?;
 
     Ok(())
 }
