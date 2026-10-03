@@ -85,21 +85,6 @@ export function TurnProgressRow({ progress, onAbort, isWorking, tokens }: TurnPr
 				</div>
 
 				<div className="agent-runtime-meta-stream">
-					{onAbort ? (
-						<button
-							type="button"
-							className="agent-runtime-interrupt-btn"
-							onClick={onAbort}
-							title="点击或按 ESC 中断当前执行"
-						>
-							esc to interrupt
-						</button>
-					) : (
-						<span className="agent-runtime-meta-hint">esc to interrupt</span>
-					)}
-
-					<span className="agent-runtime-bullet">•</span>
-
 					<span className="agent-runtime-time">{elapsedStr}</span>
 
 					{tokenStr && (
