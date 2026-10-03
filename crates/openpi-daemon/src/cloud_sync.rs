@@ -22,6 +22,9 @@ const RUNS_TABLE: &str = "cloud_task_runs";
 const FILES_TABLE: &str = "cloud_files";
 const CONV_TABLE: &str = "cloud_conversations";
 const MSG_TABLE: &str = "cloud_messages";
+const SECRETS_TABLE: &str = "cloud_secrets";
+const SECRET_NAME: &str = "models";
+const SECRET_PASS_KEY: &str = "cloud:secret:pass";
 
 /// Only these `key_values` keys are ever pushed to the cloud (phase 1).
 const KV_ALLOWLIST: &[&str] = &["profile"];
@@ -46,6 +49,7 @@ pub struct CloudStatus {
     pub last_error: Option<String>,
     pub pushed: u64,
     pub pulled: u64,
+    pub passphrase_set: bool,
 }
 
 #[derive(Clone)]
@@ -93,7 +97,36 @@ impl CloudSync {
     }
 
     pub async fn status(&self) -> CloudStatus {
-        self.status.read().await.clone()
+        let mut s = self.status.read().await.clone();
+        s.passphrase_set = self.has_passphrase();
+        s
+    }
+
+    /// Set the end-to-end encryption passphrase for secrets (API keys).
+    /// It is kept locally only and is never uploaded.
+    pub fn set_passphrase(&self, pass: &str) -> Result<()> {
+        let pass = pass.trim();
+        if pass.is_empty() {
+            return Err(anyhow!("passphrase must not be empty"));
+        }
+        self.storage.set_kv(SECRET_PASS_KEY, pass)?;
+        // force an encrypted re-push on the next sync
+        let _ = self.storage.set_kv("cloud:push:wm:cloud_secrets", "");
+        Ok(())
+    }
+
+    pub fn clear_passphrase(&self) -> Result<()> {
+        self.storage.set_kv(SECRET_PASS_KEY, "")?;
+        Ok(())
+    }
+
+    pub fn has_passphrase(&self) -> bool {
+        self.storage
+            .get_kv(SECRET_PASS_KEY)
+            .ok()
+            .flatten()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
     }
 
     /// Record a local deletion so it propagates on the next push.
@@ -146,6 +179,8 @@ impl CloudSync {
         step!(self.sync_files(&auth).await);
         // conversation transcripts (phase 3, redacted before upload)
         step!(self.sync_conversations(&auth).await);
+        // end-to-end encrypted secrets (API keys)
+        step!(self.sync_secrets(&auth).await);
         // local deletions
         step!(self.push_tombstones(&auth).await);
 
@@ -155,6 +190,7 @@ impl CloudSync {
         s.auth_required = auth_required;
         s.pushed = pushed;
         s.pulled = pulled;
+        s.passphrase_set = self.has_passphrase();
         s.last_sync_at = Some(now_iso());
         s.last_error = first_err;
         Ok(s.clone())
@@ -754,6 +790,149 @@ impl CloudSync {
         Ok(n)
     }
 
+    // ── end-to-end encrypted secrets (API keys) ─────────────────
+    /// Encrypts `agent/models.json` (provider API keys) with a key derived from
+    /// the user's local passphrase and stores only the ciphertext in the cloud.
+    /// The passphrase never leaves this machine.
+    async fn sync_secrets(&self, auth: &CloudAuth) -> Result<(u64, u64)> {
+        let pass = self
+            .storage
+            .get_kv(SECRET_PASS_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        if pass.is_empty() {
+            return Ok((0, 0));
+        }
+        let models_path = openpi_root().join("agent").join("models.json");
+        let mut pushed = 0u64;
+        let mut pulled = 0u64;
+
+        // ---- push ----
+        if let Ok(content) = std::fs::read_to_string(&models_path) {
+            if !content.trim().is_empty() {
+                let mtime = std::fs::metadata(&models_path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+                    .unwrap_or_else(now_iso);
+                let last = self
+                    .storage
+                    .get_kv("cloud:push:wm:cloud_secrets")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                if last.is_empty() || newer(&mtime, &last) {
+                    // Reuse the existing salt so every device derives the same key.
+                    let salt = match self.fetch_secret_salt(auth).await {
+                        Ok(Some(s)) if !s.is_empty() => s,
+                        _ => random_b64(16),
+                    };
+                    let key = derive_key(&pass, &salt)?;
+                    let nonce = random_b64(12);
+                    let ciphertext = encrypt(&key, &nonce, content.as_bytes())?;
+                    let ts = now_iso();
+                    let row = json!({
+                        "name": SECRET_NAME,
+                        "salt": salt,
+                        "nonce": nonce,
+                        "ciphertext": ciphertext,
+                        "updated_at": ts.clone(),
+                    });
+                    pushed += self
+                        .push_rows(auth, SECRETS_TABLE, "user_id,name", std::slice::from_ref(&row))
+                        .await?;
+                    let _ = self.storage.set_kv("cloud:push:wm:cloud_secrets", &mtime);
+                    let _ = self.set_wm("pull", SECRETS_TABLE, &ts);
+                }
+            }
+        }
+
+        // ---- pull ----
+        let wm = self.wm("pull", SECRETS_TABLE);
+        let mut url = format!(
+            "{}/rest/v1/{}?select=*&order=updated_at.asc&limit=10",
+            base_url(auth),
+            SECRETS_TABLE
+        );
+        if !wm.is_empty() {
+            url.push_str(&format!("&updated_at=gt.{}", urlencoding(&to_iso(&wm))));
+        }
+        let res = self
+            .http
+            .get(url)
+            .header("apikey", &auth.anon_key)
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send()
+            .await?;
+        let status = res.status();
+        if status.as_u16() == 401 {
+            return Err(anyhow!("401 auth_required"));
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(anyhow!("pull {} failed: {} {}", SECRETS_TABLE, status, body));
+        }
+        let rows: Vec<Value> = res.json().await.unwrap_or_default();
+        let mut max_ts = wm.clone();
+        for row in &rows {
+            if let Some(ts) = row["updated_at"].as_str() {
+                if newer(ts, &max_ts) {
+                    max_ts = ts.to_string();
+                }
+            }
+            let salt = row["salt"].as_str().unwrap_or_default();
+            let nonce = row["nonce"].as_str().unwrap_or_default();
+            let ciphertext = row["ciphertext"].as_str().unwrap_or_default();
+            if salt.is_empty() || nonce.is_empty() || ciphertext.is_empty() {
+                continue;
+            }
+            match derive_key(&pass, salt).and_then(|k| decrypt(&k, nonce, ciphertext)) {
+                Ok(plain) => {
+                    let local = std::fs::read_to_string(&models_path).unwrap_or_default();
+                    if plain != local {
+                        if let Some(parent) = models_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if std::fs::write(&models_path, &plain).is_ok() {
+                            pulled += 1;
+                        }
+                    }
+                }
+                Err(e) => warn!("cloud: failed to decrypt secret '{}': {}", SECRET_NAME, e),
+            }
+        }
+        if max_ts != wm {
+            let _ = self.set_wm("pull", SECRETS_TABLE, &max_ts);
+        }
+
+        Ok((pushed, pulled))
+    }
+
+    async fn fetch_secret_salt(&self, auth: &CloudAuth) -> Result<Option<String>> {
+        let url = format!(
+            "{}/rest/v1/{}?name=eq.{}&select=salt&limit=1",
+            base_url(auth),
+            SECRETS_TABLE,
+            urlencoding(SECRET_NAME)
+        );
+        let res = self
+            .http
+            .get(url)
+            .header("apikey", &auth.anon_key)
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send()
+            .await?;
+        if !res.status().is_success() {
+            return Ok(None);
+        }
+        let rows: Vec<Value> = res.json().await.unwrap_or_default();
+        Ok(rows
+            .first()
+            .and_then(|r| r["salt"].as_str())
+            .map(|s| s.to_string()))
+    }
+
     async fn patch_deleted(
         &self,
         auth: &CloudAuth,
@@ -956,18 +1135,74 @@ fn is_allowed_rel(rel: &str) -> bool {
     if rel.contains("..") || rel.starts_with('/') {
         return false;
     }
-    if rel.starts_with("memories/") {
+    if rel.starts_with("memories/") || rel.starts_with("agent/skills/") {
         return true;
     }
     matches!(
         rel,
-        "agent/settings.json" | "agent/app_settings.json" | "agent/HANDBOOK.md" | "agent/MEMORY.md"
+        "agent/settings.json"
+            | "agent/app_settings.json"
+            | "agent/HANDBOOK.md"
+            | "agent/MEMORY.md"
+            | "agent/profile.json"
     )
 }
 
 /// Exclude internal sessions (subagents, scheduled-task runs) from cloud sync.
 fn is_user_session_id(sid: &str) -> bool {
     !sid.starts_with("subagent-") && !sid.starts_with("task-session-")
+}
+
+// ── crypto helpers (end-to-end encrypted secrets) ───────────────
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn unb64(s: &str) -> Result<Vec<u8>> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .map_err(|e| anyhow!("base64: {}", e))
+}
+
+fn random_b64(n: usize) -> String {
+    use rand::RngCore;
+    let mut buf = vec![0u8; n];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    b64(&buf)
+}
+
+/// Argon2id(passphrase, salt) -> 32-byte key.
+fn derive_key(pass: &str, salt_b64: &str) -> Result<[u8; 32]> {
+    let salt = unb64(salt_b64)?;
+    let mut key = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(pass.as_bytes(), &salt, &mut key)
+        .map_err(|e| anyhow!("argon2: {}", e))?;
+    Ok(key)
+}
+
+fn encrypt(key: &[u8; 32], nonce_b64: &str, plain: &[u8]) -> Result<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    let cipher = aes_gcm::Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("cipher: {}", e))?;
+    let nonce = unb64(nonce_b64)?;
+    let ciphertext = cipher
+        .encrypt(aes_gcm::Nonce::from_slice(&nonce), plain)
+        .map_err(|e| anyhow!("encrypt: {}", e))?;
+    Ok(b64(&ciphertext))
+}
+
+fn decrypt(key: &[u8; 32], nonce_b64: &str, ct_b64: &str) -> Result<String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    let cipher = aes_gcm::Aes256Gcm::new_from_slice(key).map_err(|e| anyhow!("cipher: {}", e))?;
+    let nonce = unb64(nonce_b64)?;
+    let ciphertext = unb64(ct_b64)?;
+    let plain = cipher
+        .decrypt(aes_gcm::Nonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|e| anyhow!("decrypt: {}", e))?;
+    String::from_utf8(plain).map_err(|e| anyhow!("utf8: {}", e))
 }
 
 fn collect_files(root: &std::path::Path) -> Vec<SyncFile> {
@@ -1002,7 +1237,10 @@ fn walk_dir(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<SyncFil
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !matches!(ext, "md" | "json" | "txt") {
+        if !matches!(
+            ext,
+            "md" | "json" | "txt" | "py" | "sh" | "js" | "ts" | "toml" | "yaml" | "yml"
+        ) {
             continue;
         }
         if meta.len() == 0 || meta.len() > FILE_MAX_BYTES {

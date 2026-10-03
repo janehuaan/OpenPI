@@ -124,5 +124,22 @@ drop policy if exists own_rows on public.cloud_messages;
 create policy own_rows on public.cloud_messages
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- ── 端到端加密的密钥（如 API Key）：服务端只存密文 ──
+create table if not exists public.cloud_secrets (
+  user_id    uuid        not null default auth.uid(),
+  name       text        not null,             -- 逻辑名，如 'models'
+  salt       text        not null,             -- base64, 16B (Argon2id 盐)
+  nonce      text        not null,             -- base64, 12B
+  ciphertext text        not null,             -- base64, AES-256-GCM
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  primary key (user_id, name)
+);
+
+alter table public.cloud_secrets enable row level security;
+drop policy if exists own_rows on public.cloud_secrets;
+create policy own_rows on public.cloud_secrets
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 notify pgrst, 'reload schema';
 
