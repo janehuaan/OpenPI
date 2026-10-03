@@ -167,6 +167,22 @@ impl SafetyGate {
             }
         }
 
+        // 13. 极简代码律/反过度工程拦截 (Anti-Overengineering Gate)
+        // 拦截大面积无关代码扩散或一刀切破坏性大改
+        let overengineering_patterns = [
+            (r"(?i)rm\s+-rf\s+(src|crates|apps|lib)", "严禁一刀切删除源码树！触犯「砍大动脉零容忍」铁律，请执行微创修改。"),
+            (r"(?i)cargo\s+add\s+.*(actix|rocket|warp|diesel)", "禁止无方案盲目引入大型重型框架，严格遵守原生 MDL 极简架构。"),
+        ];
+        for (pattern, reason) in overengineering_patterns {
+            if let Ok(re) = Regex::new(pattern) {
+                if re.is_match(trimmed) {
+                    return GateVerdict::Deny {
+                        reason: reason.to_string(),
+                    };
+                }
+            }
+        }
+
         GateVerdict::Allow
     }
 
@@ -216,6 +232,33 @@ impl SafetyGate {
         }
 
         GateVerdict::Allow
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_anti_overengineering_gate() {
+        let gate = SafetyGate::new();
+        // 拦截破坏性全删源码树
+        let verdict = gate.inspect_command("rm -rf crates/openpi-jev");
+        match verdict {
+            GateVerdict::Deny { reason } => {
+                assert!(reason.contains("严禁一刀切删除源码树"));
+            }
+            _ => panic!("Expected Deny on rm -rf crates, got {:?}", verdict),
+        }
+
+        // 拦截盲目引入重型框架
+        let verdict2 = gate.inspect_command("cargo add actix-web");
+        match verdict2 {
+            GateVerdict::Deny { reason } => {
+                assert!(reason.contains("禁止无方案盲目引入大型重型框架"));
+            }
+            _ => panic!("Expected Deny on heavy cargo add, got {:?}", verdict2),
+        }
     }
 }
 

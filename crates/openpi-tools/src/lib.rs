@@ -1,10 +1,12 @@
 pub mod file_ops;
 pub mod search_ops;
 pub mod managed_bash;
+pub mod radar;
 
 pub use file_ops::{FileOps, ReadFileResult, WriteFileResult, SearchReplaceResult};
 pub use search_ops::{SearchOps, SearchResult, GrepMatch};
 pub use managed_bash::{ManagedBash, BashResult};
+pub use radar::{WebRadar, TrendingRepo};
 
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;

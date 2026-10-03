@@ -8,7 +8,9 @@ import {
 	isToolCallBlock,
 	toolCallSummary,
 	toolCallIconName,
-	formatActionItem,
+	shortWorkspacePath,
+	cleanPath,
+	formatDuration,
 	type ActionChainItem,
 	type ToolCallBlock,
 } from "../lib/helpers";
@@ -18,228 +20,87 @@ import {
 	toolLabel,
 	type TurnProgress,
 } from "../lib/turn-progress";
-import { useTheme } from "../lib/theme-manager";
-import { MarkdownText } from "../lib/markdown";
-import type { AgentInstance, ConversationMessage, ConversationSnapshot, RunningTool } from "../types";
+import type { AgentInstance, ConversationMessage, ConversationSnapshot, ConversationStats, RunningTool } from "../types";
 import {
-	Send,
-	X,
 	ExternalLink,
-	Bot,
-	ChevronDown,
-	Sparkles,
+	Pause,
+	Play,
+	FileText,
+	Terminal,
+	Clock3,
 } from "./icons";
-import { TurnProgressRow } from "./surfaces/workspace/turn-progress-row";
-import { AgentActionChain } from "./surfaces/workspace/action-chain";
-import { ReasoningBlock } from "./surfaces/workspace/reasoning-block";
 
-function sanitizeTitle(raw?: string): string {
-	if (!raw) return "OpenPI 对话";
-	const trimmed = raw.trim();
-	if (
-		trimmed.includes("Ephemeral Subagent Directive") ||
-		trimmed.includes("Directive") ||
-		trimmed.includes("ROLE:") ||
-		trimmed.startsWith("【")
-	) {
-		return "OpenPI 任务会话";
+// ── Step & Scope Extraction ──
+interface ProcessRow {
+	id: string;
+	actionType: string;
+	path: string;
+	durationText: string;
+	status: "done" | "running" | "pending" | "error";
+}
+
+function deriveVerb(toolName?: string, pathOrCommand?: string): string {
+	const t = (toolName || "").toLowerCase();
+	const p = (pathOrCommand || "").toLowerCase();
+	if (t.includes("read") || t.includes("cat") || t.includes("view")) return "读取文件";
+	if (t.includes("edit") || t.includes("replace") || t.includes("patch")) return "修改代码";
+	if (t.includes("write")) return "写入文件";
+	if (t.includes("grep") || t.includes("search") || t.includes("find") || t.includes("glob")) return "检索代码";
+	if (t.includes("bash") || t.includes("terminal") || t.includes("exec")) {
+		if (p.includes("cargo test") || p.includes("pytest") || p.includes("test")) return "运行自动化测试";
+		if (p.includes("cargo build") || p.includes("cargo check") || p.includes("build")) return "执行项目编译";
+		if (p.includes("git ")) return "版本控制操作";
+		if (p.includes("npm") || p.includes("pnpm") || p.includes("yarn") || p.includes("pip")) return "管理依赖包";
+		return "运行终端指令";
 	}
-	return trimmed.length > 20 ? `${trimmed.slice(0, 18)}…` : trimmed;
+	if (t.includes("subagent")) return "调度子代理";
+	if (t.includes("mcp")) return "调用扩展服务";
+	return "执行操作";
 }
 
-function formatModelName(name?: string): string {
-	if (!name) return "";
-	return name
-		.replace(/-high$|-low$|-medium$/i, "")
-		.replace(/^gemini-/, "Gemini ")
-		.replace(/^claude-/, "Claude ")
-		.replace(/^gpt-/, "GPT-");
-}
+function cleanActionTarget(raw?: string, toolName?: string, cwd?: string): string {
+	if (!raw) return "—";
+	let text = raw.trim();
+	// Remove leading shell wrappers
+	text = text.replace(/^cd\s+[^&]+\s*&&\s*/i, "");
+	text = text.replace(/^bash\s+-c\s+["']?(.*?)["']?$/i, "$1");
 
-interface IslandFeedUserItem {
-	kind: "user";
-	id: string;
-	text: string;
-}
-
-interface IslandFeedActionsItem {
-	kind: "actions";
-	id: string;
-	actions: ActionChainItem[];
-	reasoning?: string;
-}
-
-interface IslandFeedAssistantItem {
-	kind: "assistant";
-	id: string;
-	text: string;
-	reasoning?: string;
-}
-
-type IslandFeedItem = IslandFeedUserItem | IslandFeedActionsItem | IslandFeedAssistantItem;
-
-function buildIslandFeedItems(
-	messages: ConversationMessage[] = [],
-	toolDurations: Record<string, number> = {},
-): IslandFeedItem[] {
-	const items: IslandFeedItem[] = [];
-	let currentActions: ActionChainItem[] = [];
-	let currentReasoning = "";
-	const seenActionIds = new Set<string>();
-
-	const flushActions = () => {
-		if (currentActions.length > 0 || currentReasoning) {
-			items.push({
-				kind: "actions",
-				id: `actions-${items.length}`,
-				actions: [...currentActions],
-				reasoning: currentReasoning || undefined,
-			});
-			currentActions = [];
-			currentReasoning = "";
-		}
-	};
-
-	for (let index = 0; index < messages.length; index++) {
-		const message = messages[index];
-		if (!message) continue;
-
-		if (message.role === "user") {
-			flushActions();
-			const text = contentText(message.content).trim();
-			if (text) {
-				items.push({
-					kind: "user",
-					id: `user-${index}`,
-					text,
-				});
-			}
-			continue;
-		}
-
-		if (message.role === "toolResult") {
-			let match = currentActions.find(
-				(a) => !a.output && (a.id === message.toolCallId || a.name === message.toolName),
-			);
-			if (!match && message.toolCallId) {
-				for (let i = items.length - 1; i >= 0; i--) {
-					const it = items[i];
-					if (it?.kind === "actions") {
-						const prevMatch = it.actions.find(
-							(a) => !a.output && (a.id === message.toolCallId || a.name === message.toolName),
-						);
-						if (prevMatch) {
-							match = prevMatch;
-							break;
-						}
-					}
-				}
-			}
-
-			const outputText = contentText(message.content);
-			const isError = Boolean(message.isError);
-			const durationMs = message.toolCallId ? toolDurations[message.toolCallId] : undefined;
-
-			if (match) {
-				match.output = outputText;
-				match.isError = isError;
-				if (durationMs !== undefined) match.durationMs = durationMs;
-				const formatted = formatActionItem(match.name, match.args, outputText, isError);
-				match.badge = formatted.badge;
-				if (message.toolCallId) seenActionIds.add(message.toolCallId);
-			} else {
-				const name = message.toolName || "tool";
-				const formatted = formatActionItem(name, undefined, outputText, isError);
-				const id = message.toolCallId || `tr_${index}`;
-				if (!seenActionIds.has(id)) {
-					seenActionIds.add(id);
-					currentActions.push({
-						id,
-						name,
-						summary: name,
-						iconName: "wrench",
-						output: outputText,
-						isError,
-						actionType: formatted.actionType,
-						verb: formatted.verb,
-						target: formatted.target,
-						badge: formatted.badge,
-						durationMs,
-					});
-				}
-			}
-			continue;
-		}
-
-		if (message.role === "assistant") {
-			const text = visibleMessageText(contentText(message.content)).trim();
-			const reasoning = messageReasoning(message);
-			const toolBlocks = Array.isArray(message.content)
-				? (message.content.filter(isToolCallBlock) as ToolCallBlock[])
-				: [];
-
-			if (toolBlocks.length > 0) {
-				for (const tc of toolBlocks) {
-					const actionId = tc.id || `tc_${index}_${currentActions.length}`;
-					if (seenActionIds.has(actionId)) continue;
-					seenActionIds.add(actionId);
-					const args =
-						tc.arguments && typeof tc.arguments === "object"
-							? (tc.arguments as Record<string, unknown>)
-							: {};
-					const formatted = formatActionItem(tc.name, args);
-					const durationMs = tc.id ? toolDurations[tc.id] : undefined;
-					currentActions.push({
-						id: actionId,
-						name: tc.name,
-						summary: toolCallSummary(tc),
-						iconName: toolCallIconName(tc),
-						args,
-						actionType: formatted.actionType,
-						verb: formatted.verb,
-						target: formatted.target,
-						badge: formatted.badge,
-						durationMs,
-					});
-				}
-			}
-
-			if (reasoning && !text && toolBlocks.length > 0) {
-				currentReasoning = currentReasoning ? `${currentReasoning}\n\n${reasoning}` : reasoning;
-			}
-
-			if (text || (reasoning && toolBlocks.length === 0)) {
-				flushActions();
-				items.push({
-					kind: "assistant",
-					id: `asst-${index}`,
-					text,
-					reasoning: toolBlocks.length > 0 ? undefined : reasoning,
-				});
-			}
+	// Strip workspace cwd prefix if present
+	if (cwd && text.startsWith(cwd)) {
+		text = text.slice(cwd.length).replace(/^[/\\]+/, "");
+	}
+	// Strip users home path prefix
+	if (text.startsWith("/Users/")) {
+		const parts = text.split("/");
+		if (parts.length > 3) {
+			text = parts.slice(3).join("/");
 		}
 	}
-
-	flushActions();
-	return items;
+	return text || "—";
 }
+
+function formatDurationDisplay(ms?: number): string {
+	if (ms === undefined || ms === null || isNaN(ms)) return "—";
+	if (ms < 1000) return `${Math.max(10, Math.round(ms))}ms`;
+	const sec = ms / 1000;
+	if (sec < 60) return `${sec.toFixed(1)}s`;
+	const min = Math.floor(sec / 60);
+	const rem = Math.round(sec % 60);
+	return `${min}m ${rem}s`;
+}
+
+function formatElapsedSec(sec: number): string {
+	if (sec < 60) return `${sec}s`;
+	const min = Math.floor(sec / 60);
+	const rem = sec % 60;
+	return `${min}m ${rem}s`;
+}
+
+export type IslandMode = "idle" | "working" | "expanded" | "attention";
 
 export function IslandApp() {
-	// Hook to synchronize theme automatically with OpenPI
-	useTheme();
-
-	// ── Fluid Bezier Animation Lifecycle ──
-	// "collapsed": strictly 280x25, pill visible, card unmounted, native window 280x25
-	// "expanding": native window expanded to 460x540, card mounted, shell transitioning to 432x526
-	// "expanded": 432x526, card visible, interactive
-	// "collapsing": card fading out, shell transitioning to 280x25; after 340ms -> collapsed & native window resized to 280x25
-	const [animState, setAnimState] = useState<"collapsed" | "expanding" | "expanded" | "collapsing">("collapsed");
-	const animStateRef = useRef(animState);
-	animStateRef.current = animState;
-
-	const isExpanded = animState === "expanding" || animState === "expanded";
-	const isExpandedRef = useRef(false);
-	isExpandedRef.current = isExpanded;
+	const [isExpanded, setIsExpanded] = useState(false);
+	const [isPaused, setIsPaused] = useState(false);
 
 	const [justCompleted, setJustCompleted] = useState(false);
 	const completionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -250,78 +111,14 @@ export function IslandApp() {
 	const [runningTools, setRunningTools] = useState<RunningTool[]>([]);
 	const [toolDurations, setToolDurations] = useState<Record<string, number>>({});
 	const [isStreaming, setIsStreaming] = useState(false);
-	const [input, setInput] = useState("");
-	const [isSending, setIsSending] = useState(false);
+	const [stats, setStats] = useState<ConversationStats | null>(null);
+	const [lastTurnDuration, setLastTurnDuration] = useState<number | null>(null);
+	const [now, setNow] = useState(() => Date.now());
 
-	const messagesEndRef = useRef<HTMLDivElement>(null);
 	const activeInstanceRef = useRef<AgentInstance | null>(null);
 	activeInstanceRef.current = activeInstance;
 	const isBusyRef = useRef(false);
 
-	// Fluid expand with Bezier animation
-	const handleExpand = useCallback(async () => {
-		if (animStateRef.current === "expanded" || animStateRef.current === "expanding") return;
-
-		try {
-			await desktopApi.setIslandExpanded(true);
-		} catch (err) {
-			console.error("Failed to set island expanded:", err);
-		}
-
-		setAnimState("expanding");
-		requestAnimationFrame(() => {
-			requestAnimationFrame(() => {
-				setAnimState("expanded");
-			});
-		});
-	}, []);
-
-	// Fluid collapse with Bezier animation
-	const handleCollapse = useCallback(async () => {
-		if (animStateRef.current === "collapsed" || animStateRef.current === "collapsing") return;
-
-		setAnimState("collapsing");
-
-		setTimeout(async () => {
-			setAnimState("collapsed");
-			try {
-				await desktopApi.setIslandExpanded(false);
-				if (!isBusyRef.current) {
-					await desktopApi.hideIslandWindow();
-					setJustCompleted(false);
-				}
-			} catch (err) {
-				console.error("Failed to collapse island:", err);
-			}
-		}, 340);
-	}, []);
-
-	// Cleanup any completion timer on unmount
-	useEffect(() => {
-		return () => {
-			if (completionTimerRef.current) {
-				clearTimeout(completionTimerRef.current);
-			}
-		};
-	}, []);
-
-	// Listen for expand/collapse synchronization from native IPC or tray
-	useEffect(() => {
-		const unlisten = desktopApi.onIslandState?.((payload) => {
-			if (typeof payload?.expanded === "boolean") {
-				if (payload.expanded && animStateRef.current === "collapsed") {
-					void handleExpand();
-				} else if (!payload.expanded && (animStateRef.current === "expanded" || animStateRef.current === "expanding")) {
-					void handleCollapse();
-				}
-			}
-		});
-		return () => {
-			unlisten?.();
-		};
-	}, [handleExpand, handleCollapse]);
-
-	// Load and set conversation by instanceId
 	const loadConversation = useCallback(async (instanceId: string) => {
 		try {
 			const conv = await desktopApi.getConversation(instanceId);
@@ -335,20 +132,14 @@ export function IslandApp() {
 		}
 	}, []);
 
-	// Pick the most relevant user conversation (ignoring internal subagents)
 	const refreshSnapshot = useCallback(async () => {
 		try {
 			const snap = await desktopApi.getSnapshot();
 			if (!snap?.instances?.length) return;
 
-			// Filter out internal subagents
 			const userInstances = snap.instances.filter((i) => !i.id.startsWith("subagent-"));
 			const candidates = userInstances.length ? userInstances : snap.instances;
 
-			// 1. Is any instance currently running / online?
-			const runningInstance = candidates.find((i) => i.status === "online" || i.status === "starting");
-
-			// 2. Check stored selection from main window
 			let storedId: string | undefined;
 			try {
 				const stored = window.localStorage.getItem("openpi-selected-instance");
@@ -357,8 +148,8 @@ export function IslandApp() {
 				}
 			} catch {}
 
-			const targetId = runningInstance ? runningInstance.id : (storedId || candidates[0].id);
-
+			const runningInstance = candidates.find((i) => i.status === "online" || i.status === "starting");
+			const targetId = storedId || (runningInstance ? runningInstance.id : candidates[0].id);
 			if (targetId) {
 				await loadConversation(targetId);
 			}
@@ -371,14 +162,6 @@ export function IslandApp() {
 		refreshSnapshot();
 	}, [refreshSnapshot]);
 
-	// Auto-scroll to bottom on messages, tools, or streaming update (only when expanded)
-	useEffect(() => {
-		if (isExpanded) {
-			messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-		}
-	}, [conversation?.messages?.length, runningTools.length, isStreaming, isExpanded]);
-
-	// Derive display states
 	const isBusy =
 		isStreaming ||
 		runningTools.length > 0 ||
@@ -386,21 +169,82 @@ export function IslandApp() {
 		turnProgress?.stage === "tool";
 	isBusyRef.current = isBusy;
 
-	// When busy state begins, ensure island window is visible and reset completed badge
+	const currentMode: IslandMode = useMemo(() => {
+		if (isExpanded) return "expanded";
+		if (isBusy) return "working";
+		return "idle";
+	}, [isExpanded, isBusy]);
+
 	useEffect(() => {
-		if (isBusy) {
-			if (completionTimerRef.current) {
-				clearTimeout(completionTimerRef.current);
-				completionTimerRef.current = null;
+		const syncWindow = async () => {
+			try {
+				await desktopApi.setIslandExpanded(isExpanded, currentMode);
+			} catch (e) {
+				console.warn("Failed to update island window frame:", e);
 			}
-			setJustCompleted(false);
-			if (!isExpandedRef.current) {
-				void desktopApi.showIslandWindow();
+		};
+		void syncWindow();
+	}, [isExpanded, currentMode]);
+
+	useEffect(() => {
+		const unlisten = desktopApi.onIslandState?.((payload) => {
+			if (typeof payload?.expanded === "boolean") {
+				setIsExpanded(payload.expanded);
 			}
+		});
+		return () => {
+			unlisten?.();
+		};
+	}, []);
+
+	// ── Mouse Auto-Collapse Management (Hover-Out to Retract) ──
+	const collapseTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+	const handleCardMouseEnter = useCallback(() => {
+		if (collapseTimerRef.current) {
+			clearTimeout(collapseTimerRef.current);
+			collapseTimerRef.current = null;
 		}
+	}, []);
+
+	const handleCardMouseLeave = useCallback(() => {
+		if (!isExpanded) return;
+		if (collapseTimerRef.current) {
+			clearTimeout(collapseTimerRef.current);
+		}
+		// 180ms grace window to prevent accidental retract on fast mouse moves
+		collapseTimerRef.current = setTimeout(() => {
+			setIsExpanded(false);
+		}, 180);
+	}, [isExpanded]);
+
+	useEffect(() => {
+		if (!isExpanded) return;
+
+		const handleDocLeave = (e: MouseEvent) => {
+			if (!e.relatedTarget && !(e as any).toElement) {
+				handleCardMouseLeave();
+			}
+		};
+
+		document.addEventListener("mouseleave", handleDocLeave);
+		window.addEventListener("blur", handleCardMouseLeave);
+		return () => {
+			document.removeEventListener("mouseleave", handleDocLeave);
+			window.removeEventListener("blur", handleCardMouseLeave);
+			if (collapseTimerRef.current) {
+				clearTimeout(collapseTimerRef.current);
+			}
+		};
+	}, [isExpanded, handleCardMouseLeave]);
+
+	useEffect(() => {
+		if (!isBusy) return;
+		const t = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(t);
 	}, [isBusy]);
 
-	// Periodically refresh active conversation when busy/streaming to stay in lock-step
+	// Keep conversation updated while busy
 	useEffect(() => {
 		if (!isBusy || !activeInstance?.id) return;
 		const timer = setInterval(() => {
@@ -409,7 +253,35 @@ export function IslandApp() {
 		return () => clearInterval(timer);
 	}, [isBusy, activeInstance?.id, loadConversation]);
 
-	// Listen for live daemon events & synchronization
+	useEffect(() => {
+		const id = activeInstance?.id;
+		if (!id) return;
+		let cancelled = false;
+		const load = async () => {
+			try {
+				const s = await desktopApi.getConversationStats(id);
+				if (!cancelled) setStats(s);
+			} catch {}
+		};
+		void load();
+		const t = setInterval(load, 3000);
+		return () => {
+			cancelled = true;
+			clearInterval(t);
+		};
+	}, [activeInstance?.id]);
+
+	useEffect(() => {
+		if (isBusy) {
+			if (completionTimerRef.current) {
+				clearTimeout(completionTimerRef.current);
+				completionTimerRef.current = null;
+			}
+			setJustCompleted(false);
+			void desktopApi.showIslandWindow();
+		}
+	}, [isBusy]);
+
 	useEffect(() => {
 		if (!desktopApi.isNative) return;
 
@@ -428,26 +300,21 @@ export function IslandApp() {
 			if (instanceId === "task-scheduler") {
 				const evType = event.type;
 				if (evType === "task_run_started") {
-					if (!isExpandedRef.current) {
-						void desktopApi.showIslandWindow();
-					}
+					void desktopApi.showIslandWindow();
 				} else if (evType === "task_run_completed") {
 					setJustCompleted(true);
 					setTimeout(() => {
-						if (!isExpandedRef.current) void desktopApi.hideIslandWindow();
+						void desktopApi.hideIslandWindow();
 					}, 3500);
 				}
 				return;
 			}
 
 			const currentId = activeInstanceRef.current?.id;
-
-			// If event is for a user instance and not currently selected, switch to track the active work!
 			if (!isSubagent && currentId !== instanceId) {
 				void loadConversation(instanceId);
 			}
 
-			// Update turn progress
 			setTurnProgress((current) => {
 				const base =
 					current && current.instanceId === instanceId
@@ -465,12 +332,11 @@ export function IslandApp() {
 				});
 			});
 
-			// Update running tools & durations in real time (identical to main window)
 			if (eventType === "tool_execution_start" || eventType === "tool_execution_update") {
 				const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : undefined;
 				const toolName = typeof event.toolName === "string" ? event.toolName : undefined;
 				if (toolCallId && toolName) {
-					const now = Date.now();
+					const nowMs = Date.now();
 					setRunningTools((current) => {
 						const existingTool = current.find((t) => t.toolCallId === toolCallId);
 						const next: RunningTool = {
@@ -479,8 +345,8 @@ export function IslandApp() {
 							status: eventType === "tool_execution_update" ? "updating" : "running",
 							args: event.args,
 							partialResult: event.partialResult,
-							startedAt: existingTool?.startedAt ?? now,
-							updatedAt: now,
+							startedAt: existingTool?.startedAt ?? nowMs,
+							updatedAt: nowMs,
 						};
 						const existingIndex = current.findIndex((t) => t.toolCallId === toolCallId);
 						if (existingIndex === -1) return [...current, next];
@@ -508,9 +374,7 @@ export function IslandApp() {
 					completionTimerRef.current = null;
 				}
 				setJustCompleted(false);
-				if (!isExpandedRef.current) {
-					void desktopApi.showIslandWindow();
-				}
+				void desktopApi.showIslandWindow();
 				setIsStreaming(true);
 				setConversation((curr) =>
 					curr ? { ...curr, state: { ...curr.state, isStreaming: true } } : curr,
@@ -518,87 +382,35 @@ export function IslandApp() {
 			} else if (eventType === "agent_settled" || eventType === "turn_end") {
 				setIsStreaming(false);
 				setRunningTools([]);
+				if (turnProgress?.startedAt) {
+					setLastTurnDuration(Math.max(1, Math.floor((Date.now() - turnProgress.startedAt) / 1000)));
+				}
 				setTurnProgress(undefined);
 				if (!isSubagent) void loadConversation(instanceId);
 
-				// Signal completion badge & schedule auto-hide after 3.5s
 				setJustCompleted(true);
 				if (completionTimerRef.current) {
 					clearTimeout(completionTimerRef.current);
 				}
 				completionTimerRef.current = setTimeout(() => {
 					setJustCompleted(false);
-					if (!isExpandedRef.current) {
+					if (!isBusyRef.current) {
 						void desktopApi.hideIslandWindow();
 					}
 				}, 3500);
 			} else if (eventType === "message_end") {
 				if (!isSubagent) void loadConversation(instanceId);
-			} else if (eventType === "message_update" || eventType === "message_start") {
-				if (amEvent) {
-					// Handle text delta streaming
-					if (amEvent.type === "text_delta" && typeof amEvent.delta === "string") {
-						setConversation((curr) => {
-							if (!curr) return curr;
-							const msgs = [...curr.messages];
-							let last = msgs[msgs.length - 1];
-							if (!last || last.role !== "assistant") {
-								last = { role: "assistant", content: [{ type: "text", text: amEvent.delta }] };
-								msgs.push(last);
-							} else {
-								const contentArr = Array.isArray(last.content)
-									? [...last.content]
-									: [{ type: "text", text: contentText(last.content) }];
-								const textBlock = contentArr.find((b: any) => b.type === "text");
-								if (textBlock) {
-									textBlock.text = (textBlock.text || "") + amEvent.delta;
-								} else {
-									contentArr.push({ type: "text", text: amEvent.delta });
-								}
-								last = { ...last, content: contentArr };
-								msgs[msgs.length - 1] = last;
-							}
-							return { ...curr, messages: msgs };
-						});
-					} else if (
-						(amEvent.type === "thinking_delta" || amEvent.type === "reasoning_delta") &&
-						typeof amEvent.delta === "string"
-					) {
-						setConversation((curr) => {
-							if (!curr) return curr;
-							const msgs = [...curr.messages];
-							let last = msgs[msgs.length - 1];
-							if (!last || last.role !== "assistant") {
-								last = { role: "assistant", content: [{ type: "thinking", thinking: amEvent.delta }] };
-								msgs.push(last);
-							} else {
-								const contentArr = Array.isArray(last.content) ? [...last.content] : [];
-								const thinkBlock = contentArr.find((b: any) => b.type === "thinking");
-								if (thinkBlock) {
-									thinkBlock.thinking = (thinkBlock.thinking || "") + amEvent.delta;
-								} else {
-									contentArr.push({ type: "thinking", thinking: amEvent.delta });
-								}
-								last = { ...last, content: contentArr };
-								msgs[msgs.length - 1] = last;
-							}
-							return { ...curr, messages: msgs };
-						});
-					}
-				}
 			}
 		});
 
-		// Listen to user selecting conversation in main window
 		const unlistenSelect = desktopApi.onSelectConversation((id: string) => {
 			if (id && !id.startsWith("subagent-")) {
 				void loadConversation(id);
 			}
 		});
 
-		// Listen to localStorage changes across windows
 		const onStorage = (e: StorageEvent) => {
-			if (e.key === "openpi-selected-instance" && e.newValue && !e.newValue.startsWith("subagent-")) {
+			if (e.key === "openpi-selected-instance" && e.newValue) {
 				void loadConversation(e.newValue);
 			}
 		};
@@ -609,338 +421,658 @@ export function IslandApp() {
 			unlistenSelect();
 			window.removeEventListener("storage", onStorage);
 		};
-	}, [loadConversation]);
+	}, [loadConversation, turnProgress?.startedAt]);
 
-	// Open Main Window & Collapse Island
 	const handleOpenMain = useCallback(async () => {
 		try {
 			await desktopApi.openMainFromIsland();
-			setAnimState("collapsing");
-			setTimeout(async () => {
-				setAnimState("collapsed");
-				await desktopApi.setIslandExpanded(false);
-				await desktopApi.hideIslandWindow();
-				setJustCompleted(false);
-			}, 200);
+			setIsExpanded(false);
+			await desktopApi.setIslandExpanded(false, "idle");
 		} catch (err) {
 			console.error("Failed to open main window:", err);
 		}
 	}, []);
 
-	// Send message
-	const handleSend = async () => {
-		const text = input.trim();
-		if (!text || isSending || !activeInstance) return;
-
-		setIsSending(true);
-		setInput("");
-		try {
-			await desktopApi.sendMessage(activeInstance.id, text, []);
-			await loadConversation(activeInstance.id);
-		} catch (err) {
-			console.error("Failed to send message:", err);
-		} finally {
-			setIsSending(false);
+	const handleTogglePause = useCallback(async () => {
+		if (isBusy && activeInstance?.id) {
+			try {
+				await desktopApi.stopConversationStream(activeInstance.id);
+				setIsPaused(true);
+			} catch (e) {
+				console.error("Failed to pause/stop stream:", e);
+			}
+		} else {
+			setIsPaused((prev) => !prev);
 		}
-	};
+	}, [isBusy, activeInstance?.id]);
 
-	// Keyboard shortcut handling: Esc to collapse
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape" && (animState === "expanded" || animState === "expanding")) {
-				void handleCollapse();
+			if (e.key === "Escape" && isExpanded) {
+				setIsExpanded(false);
 			}
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [animState, handleCollapse]);
+	}, [isExpanded]);
 
-	// Auto-collapse on blur when clicking outside (only when expanded)
-	const lastFocusedRef = useRef<number>(Date.now());
+	// Re-fetch snapshot whenever expanded
 	useEffect(() => {
-		if (animState === "expanded" || animState === "expanding") {
-			lastFocusedRef.current = Date.now();
+		if (isExpanded) {
+			refreshSnapshot();
 		}
-	}, [animState]);
+	}, [isExpanded, refreshSnapshot]);
 
-	useEffect(() => {
-		const onFocus = () => {
-			lastFocusedRef.current = Date.now();
-		};
-		const onBlur = () => {
-			if ((animState === "expanded" || animState === "expanding") && Date.now() - lastFocusedRef.current > 600) {
-				void handleCollapse();
+	const cwd = activeInstance?.cwd;
+	const activeTool = runningTools[0];
+
+	// ── Real Data Extraction from Messages ──
+	const {
+		allActions,
+		touchedFiles,
+		lastUserPrompt,
+		latestReasoningSnippet,
+		lastBashCommand,
+	} = useMemo(() => {
+		const msgs = conversation?.messages || [];
+		const actions: ProcessRow[] = [];
+		const filesSet = new Set<string>();
+		let lastUser = "";
+		let lastReasoning = "";
+		let lastBash = "";
+
+		// Map tool results by toolCallId
+		const toolResultsMap = new Map<string, { output: string; isError: boolean; timestamp?: number }>();
+		for (const m of msgs) {
+			if (m.role === "toolResult" && m.toolCallId) {
+				toolResultsMap.set(m.toolCallId, {
+					output: contentText(m.content),
+					isError: Boolean(m.isError),
+					timestamp: m.timestamp,
+				});
 			}
+		}
+
+		for (let i = 0; i < msgs.length; i++) {
+			const m = msgs[i];
+			if (!m) continue;
+
+			if (m.role === "user") {
+				const text = contentText(m.content).trim();
+				if (text) lastUser = text;
+				continue;
+			}
+
+			if (m.role === "assistant") {
+				const reasoning = messageReasoning(m);
+				if (reasoning) lastReasoning = reasoning;
+
+				const toolBlocks = Array.isArray(m.content)
+					? (m.content.filter(isToolCallBlock) as ToolCallBlock[])
+					: [];
+
+				if (toolBlocks.length > 0) {
+					for (const tc of toolBlocks) {
+						const args = (tc.arguments && typeof tc.arguments === "object" ? tc.arguments : {}) as Record<string, any>;
+						const res = toolResultsMap.get(tc.id);
+						const isError = res?.isError ?? false;
+
+						let durationMs: number | undefined = toolDurations[tc.id];
+						if (durationMs === undefined && res?.timestamp && m.timestamp && res.timestamp >= m.timestamp) {
+							durationMs = Math.max(20, res.timestamp - m.timestamp);
+						}
+
+						const rawTarget =
+							args.command ||
+							args.cmd ||
+							args.CommandLine ||
+							args.path ||
+							args.file ||
+							args.target_file ||
+							args.targetFile ||
+							args.AbsolutePath ||
+							args.query ||
+							args.pattern ||
+							args.role ||
+							args.task ||
+							tc.name;
+
+						const cleanTarget = cleanActionTarget(String(rawTarget), tc.name, cwd);
+						const verb = deriveVerb(tc.name, String(rawTarget));
+
+						if (tc.name === "bash" || tc.name === "run_command") {
+							lastBash = cleanTarget;
+						} else if (
+							tc.name.includes("read") ||
+							tc.name.includes("edit") ||
+							tc.name.includes("write") ||
+							tc.name.includes("patch")
+						) {
+							if (cleanTarget && cleanTarget !== "—") {
+								filesSet.add(cleanTarget);
+							}
+						}
+
+						actions.push({
+							id: tc.id || `action-${actions.length}`,
+							actionType: verb,
+							path: cleanTarget,
+							durationText: formatDurationDisplay(durationMs),
+							status: isError ? "error" : "done",
+						});
+					}
+				}
+			}
+		}
+
+		return {
+			allActions: actions,
+			touchedFiles: filesSet,
+			lastUserPrompt: lastUser,
+			latestReasoningSnippet: lastReasoning ? lastReasoning.slice(0, 64).replace(/\s+/g, " ") : "",
+			lastBashCommand: lastBash,
 		};
-		window.addEventListener("focus", onFocus);
-		window.addEventListener("blur", onBlur);
-		return () => {
-			window.removeEventListener("focus", onFocus);
-			window.removeEventListener("blur", onBlur);
-		};
-	}, [animState, handleCollapse]);
+	}, [conversation?.messages, toolDurations, cwd]);
 
-	// Derive display states
-	const rawModelName = conversation?.state?.model?.name || conversation?.state?.model?.id;
-	const formattedModel = formatModelName(rawModelName);
-
-	// Status label matching main window accurately
-	const statusLabel = useMemo(() => {
-		if (justCompleted && !isBusy) return "回答完毕";
-		if (runningTools.length > 0) {
-			const activeTool = runningTools[0];
-			const name = activeTool?.toolName;
-			return name === "subagent"
-				? "正在执行独立子任务…"
-				: name
-					? toolLabel(name)
-					: "正在执行工具…";
+	// Elapsed runtime in seconds
+	const hudElapsed = useMemo(() => {
+		if (turnProgress?.startedAt) {
+			return Math.max(0, Math.floor((now - turnProgress.startedAt) / 1000));
 		}
-		if (turnProgress?.label) return turnProgress.label;
-		if (isStreaming) return "正在生成回复…";
-		return formattedModel || "待命";
-	}, [justCompleted, isBusy, runningTools, turnProgress?.label, isStreaming, formattedModel]);
-
-	// Derive title: check instance label, state sessionName, or first user prompt
-	const conversationTitle = (() => {
-		if (activeInstance?.label && !activeInstance.label.startsWith("【")) {
-			return sanitizeTitle(activeInstance.label);
+		if (lastTurnDuration !== null) {
+			return lastTurnDuration;
 		}
-		if (conversation?.state?.sessionName && !conversation.state.sessionName.startsWith("【")) {
-			return sanitizeTitle(conversation.state.sessionName);
-		}
-		const firstUserMsg = conversation?.messages?.find((m) => m.role === "user");
-		if (firstUserMsg) {
-			const txt = contentText(firstUserMsg.content).trim();
-			if (txt) return sanitizeTitle(txt);
-		}
-		return "OpenPI 对话";
-	})();
+		return 0;
+	}, [turnProgress?.startedAt, now, lastTurnDuration]);
 
-	// Build cohesive feed items matching main window
-	const feedItems = useMemo(() => {
-		const msgs = (conversation?.messages || []).slice(-35);
-		return buildIslandFeedItems(msgs, toolDurations);
-	}, [conversation?.messages, toolDurations]);
+	// Active tool target text
+	const activeToolTarget = useMemo(() => {
+		if (!activeTool) return "";
+		const detail = (activeTool.args && typeof activeTool.args === "object" ? activeTool.args : {}) as Record<string, any>;
+		const raw =
+			detail.command ||
+			detail.cmd ||
+			detail.CommandLine ||
+			detail.path ||
+			detail.file ||
+			detail.target_file ||
+			detail.query ||
+			detail.pattern ||
+			activeTool.toolName;
+		return cleanActionTarget(String(raw), activeTool.toolName, cwd);
+	}, [activeTool, cwd]);
 
-	const isCardMounted = animState !== "collapsed";
-	const isCardVisible = animState === "expanded";
+	// Derive Process Rows (Exactly 4 rows, completely real)
+	const processRows: ProcessRow[] = useMemo(() => {
+		const liveRunningRows: ProcessRow[] = runningTools.map((t) => {
+			const detail = (t.args && typeof t.args === "object" ? t.args : {}) as Record<string, any>;
+			const raw =
+				detail.command ||
+				detail.cmd ||
+				detail.CommandLine ||
+				detail.path ||
+				detail.file ||
+				detail.query ||
+				t.toolName;
+			const target = cleanActionTarget(String(raw), t.toolName, cwd);
+			return {
+				id: t.toolCallId,
+				actionType: deriveVerb(t.toolName, String(raw)),
+				path: target,
+				durationText: "进行中",
+				status: "running",
+			};
+		});
+
+		const combined = [...allActions, ...liveRunningRows];
+
+		if (combined.length > 0) {
+			const recent = combined.slice(-4);
+			// If fewer than 4 actions while active, pad with genuine live workflow stages
+			if (recent.length < 4 && isBusy) {
+				const padded = [...recent];
+				if (padded.length === 1) {
+					padded.push({
+						id: "flow-plan",
+						actionType: "分析结果",
+						path: "评估执行输出并制定下一步",
+						durationText: "进行中",
+						status: "running",
+					});
+					padded.push({
+						id: "flow-exec",
+						actionType: "准备操作",
+						path: "等待调度下一步骤",
+						durationText: "等待中",
+						status: "pending",
+					});
+					padded.push({
+						id: "flow-verify",
+						actionType: "结果校验",
+						path: "确保逻辑收敛与无错误",
+						durationText: "等待中",
+						status: "pending",
+					});
+				} else if (padded.length === 2) {
+					padded.push({
+						id: "flow-plan",
+						actionType: "综合评估",
+						path: "检查执行状态与后续计划",
+						durationText: "进行中",
+						status: "running",
+					});
+					padded.push({
+						id: "flow-reply",
+						actionType: "组织答复",
+						path: "准备生成最终结果汇报",
+						durationText: "等待中",
+						status: "pending",
+					});
+				} else if (padded.length === 3) {
+					padded.push({
+						id: "flow-verify",
+						actionType: "验证收敛",
+						path: "确认任务已达成预期目标",
+						durationText: "进行中",
+						status: "running",
+					});
+				}
+				return padded.slice(-4);
+			}
+			return recent;
+		}
+
+		// When 0 tool actions have executed yet:
+		if (isBusy) {
+			const goalText = lastUserPrompt ? cleanActionTarget(lastUserPrompt.slice(0, 36)) : "解析当前任务目标";
+			return [
+				{ id: "s1", actionType: "意图理解", path: goalText, durationText: `${hudElapsed}s`, status: "done" },
+				{ id: "s2", actionType: "方案规划", path: "分析上下文与执行策略", durationText: "进行中", status: "running" },
+				{ id: "s3", actionType: "工具调用", path: "准备执行终端或代码操作", durationText: "等待中", status: "pending" },
+				{ id: "s4", actionType: "结果校验", path: "验证执行输出并收敛", durationText: "等待中", status: "pending" },
+			];
+		}
+
+		// When idle / settled with no prior actions
+		const wsName = shortWorkspacePath(cwd) || "openpi-next";
+		const modelTitle = conversation?.state?.model?.name || conversation?.state?.model?.id || "自建 / Gemini 3.8";
+		return [
+			{ id: "i1", actionType: "工作空间", path: wsName, durationText: "就绪", status: "done" },
+			{ id: "i2", actionType: "服务引擎", path: "OpenPI Daemon (Active)", durationText: "在线", status: "done" },
+			{ id: "i3", actionType: "活跃模型", path: modelTitle, durationText: "就绪", status: "done" },
+			{ id: "i4", actionType: "等待指令", path: "输入任务即刻自动触发", durationText: "待命中", status: "pending" },
+		];
+	}, [allActions, runningTools, isBusy, cwd, lastUserPrompt, hudElapsed, conversation?.state?.model]);
+
+	// Progress percentage
+	const progressPercent = useMemo(() => {
+		const step = turnProgress?.step;
+		const max = turnProgress?.maxSteps;
+		if (step && max && max > 0) {
+			return Math.min(100, Math.round((step / max) * 100));
+		}
+		if (justCompleted) return 100;
+		if (!isBusy) return allActions.length > 0 ? 100 : 0;
+
+		const stage = turnProgress?.stage;
+		if (stage === "starting") return 15;
+		if (stage === "thinking") return 35;
+		if (stage === "tool") return Math.min(88, 45 + (turnProgress?.toolCount || 1) * 12);
+		if (stage === "responding") return 95;
+		return 50;
+	}, [turnProgress?.step, turnProgress?.maxSteps, turnProgress?.stage, turnProgress?.toolCount, isBusy, justCompleted, allActions.length]);
+
+	// Current Command Text
+	const currentCommandText = useMemo(() => {
+		if (activeTool) {
+			const detail = (activeTool.args && typeof activeTool.args === "object" ? activeTool.args : {}) as Record<string, any>;
+			const cmd = detail.command || detail.cmd || detail.CommandLine;
+			if (cmd) return cleanActionTarget(String(cmd), activeTool.toolName, cwd);
+			return `${activeTool.toolName}: ${activeToolTarget}`;
+		}
+		if (lastBashCommand) {
+			return lastBashCommand;
+		}
+		if (allActions.length > 0) {
+			const last = allActions[allActions.length - 1];
+			return `${last.actionType}: ${last.path}`;
+		}
+		return "待命中 (无活跃命令)";
+	}, [activeTool, activeToolTarget, lastBashCommand, allActions, cwd]);
+
+	// Processed Files Count
+	const processedFilesText = useMemo(() => {
+		if (turnProgress?.step && turnProgress?.maxSteps) {
+			return `${turnProgress.step} / ${turnProgress.maxSteps}`;
+		}
+		if (touchedFiles.size > 0) {
+			return `${touchedFiles.size} 个文件`;
+		}
+		if (allActions.length > 0) {
+			return `${allActions.length} 个操作`;
+		}
+		return "0 个文件";
+	}, [turnProgress?.step, turnProgress?.maxSteps, touchedFiles.size, allActions.length]);
+
+	// Session / Task Name
+	const sessionTitle = conversation?.state?.sessionName || activeInstance?.label || "";
+
+	// Hero Category Pill
+	const categoryPill = useMemo(() => {
+		if (isBusy) {
+			if (activeTool) {
+				const t = activeTool.toolName.toLowerCase();
+				if (t.includes("bash") || t.includes("terminal") || t.includes("exec")) return "EXECUTING";
+				if (t.includes("edit") || t.includes("write") || t.includes("patch")) return "EDITING";
+				if (t.includes("read") || t.includes("cat") || t.includes("view")) return "READING";
+				if (t.includes("grep") || t.includes("search") || t.includes("find")) return "SEARCHING";
+				if (t.includes("subagent")) return "ORCHESTRATING";
+				return "WORKING";
+			}
+			const stage = turnProgress?.stage;
+			if (stage === "thinking") return "THINKING";
+			if (stage === "responding") return "RESPONDING";
+			return "ANALYZING";
+		}
+		if (justCompleted) return "COMPLETED";
+		return allActions.length > 0 ? "STANDBY" : "READY";
+	}, [isBusy, activeTool, turnProgress?.stage, justCompleted, allActions.length]);
+
+	// Hero Title
+	const heroTitle = useMemo(() => {
+		if (isBusy) {
+			if (activeTool) {
+				return `正在${deriveVerb(activeTool.toolName, activeToolTarget)}`;
+			}
+			if (turnProgress?.label) {
+				return turnProgress.label;
+			}
+			return "正在深度分析与规划解法...";
+		}
+		if (justCompleted) {
+			return "当前任务执行完成";
+		}
+		if (sessionTitle) {
+			return sessionTitle;
+		}
+		if (lastUserPrompt) {
+			return lastUserPrompt.length > 22 ? `${lastUserPrompt.slice(0, 22)}…` : lastUserPrompt;
+		}
+		return "OpenPI Agent 待命";
+	}, [isBusy, activeTool, activeToolTarget, turnProgress?.label, justCompleted, sessionTitle, lastUserPrompt]);
+
+	// Hero Subtitle
+	const heroSub = useMemo(() => {
+		if (isBusy) {
+			if (activeTool) {
+				return activeToolTarget || "执行底层指令中...";
+			}
+			if (turnProgress?.stage === "thinking") {
+				return latestReasoningSnippet || "结合上下文与执行结果，评估下一步最佳策略...";
+			}
+			if (turnProgress?.stage === "responding") {
+				return "正在组织并输出答复内容...";
+			}
+			return activeInstance?.cwd ? `工作区: ${shortWorkspacePath(activeInstance.cwd)}` : "处理任务中...";
+		}
+		if (justCompleted) {
+			return `共执行 ${allActions.length} 项操作，等待下一轮指令`;
+		}
+		if (activeInstance?.cwd) {
+			return `工作区: ${shortWorkspacePath(activeInstance.cwd)} · 随时可以发起任务`;
+		}
+		return "准备就绪，随时可以开始";
+	}, [isBusy, activeTool, activeToolTarget, turnProgress?.stage, latestReasoningSnippet, activeInstance?.cwd, justCompleted, allActions.length]);
+
+	// Capsule Pill Task
+	const capsuleTaskText = useMemo(() => {
+		if (isBusy) {
+			if (activeTool) {
+				return `正在${deriveVerb(activeTool.toolName, activeToolTarget)}...`;
+			}
+			if (turnProgress?.label) {
+				return turnProgress.label;
+			}
+			return "正在分析项目...";
+		}
+		if (justCompleted) return "任务已完成";
+		return sessionTitle || "待命中";
+	}, [isBusy, activeTool, activeToolTarget, turnProgress?.label, justCompleted, sessionTitle]);
+
+	// Total Token Usage
+	const totalTokens = stats?.tokens?.total || stats?.contextUsage?.tokens || 0;
 
 	return (
 		<div className="island-root">
-			{/* Island — the persistent notch pill, always docked at the top */}
-			<div
-				className={`island-pill ${isExpanded ? "expanded" : ""} ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}
-				onClick={() => {
-					if (animStateRef.current === "collapsed") {
-						void handleExpand();
-					} else if (animStateRef.current === "expanded") {
-						void handleCollapse();
-					}
-				}}
-			>
-						{/* Status Dot & Title */}
-						<div className="island-pill-left">
-							<div className={`island-dot ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`} />
-							<span className="island-brand">OpenPI</span>
-						</div>
+			{!isExpanded ? (
+				/* ── Top Floating Island (Capsule Pill with Concave Bezier Shoulders) ── */
+				<div className="island-pill-assembly">
+					<svg className="island-shoulder left" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M 0,0 H 16 V 16 C 16,7.163 8.837,0 0,0 Z" />
+					</svg>
+					<div
+						className={`island-capsule-pill ${isBusy ? "working" : "idle"}`}
+						onClick={() => setIsExpanded(true)}
+					>
+						<span className={`island-dot ${isBusy ? "busy" : ""}`} />
+						<span className="island-capsule-brand">OpenPI</span>
 
-						{/* Center Live Status */}
-						<div className={`island-pill-center ${isBusy ? "busy" : justCompleted ? "completed" : "idle"}`}>
-							{isBusy && <Sparkles style={{ width: 12, height: 12 }} />}
-							{justCompleted && <span style={{ color: "var(--ok)", fontWeight: 700 }}>✓</span>}
-							<span>{statusLabel}</span>
-						</div>
+						{isBusy ? (
+							<>
+								<span className="island-capsule-task">
+									{capsuleTaskText}
+								</span>
 
-						{/* Actions: open-main (expanded) · dismiss · collapse toggle */}
-						<div className="island-pill-right">
-							{isExpanded && (
-								<button
-									type="button"
-									onClick={(e) => {
-										e.stopPropagation();
-										void handleOpenMain();
-									}}
-									title="在完整工作台中打开"
-									className="island-pill-act-btn"
-								>
-									<span>大窗</span>
-									<ExternalLink style={{ width: 11, height: 11 }} />
-								</button>
-							)}
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									setJustCompleted(false);
-									void desktopApi.hideIslandWindow();
-								}}
-								title="隐藏灵动岛"
-								className="island-pill-dismiss-btn"
-							>
-								<X style={{ width: 11, height: 11 }} />
-							</button>
-							<ChevronDown
-								style={{
-									width: 13,
-									height: 13,
-									transition: "transform 260ms cubic-bezier(0.16, 1, 0.3, 1)",
-									transform: isExpanded ? "rotate(180deg)" : "none",
-								}}
-							/>
-						</div>
-			</div>
-
-			{/* Window — a separate dropdown panel floating below the island */}
-			{isCardMounted && (
-				<div className={`island-panel ${isCardVisible ? "visible" : "hidden"}`}>
-						{/* Message & Execution Flow */}
-						<div className="island-body">
-							{feedItems.length === 0 && runningTools.length === 0 ? (
-								<div className="island-empty">
-									<Bot style={{ width: 32, height: 32, opacity: 0.6, color: "var(--accent)" }} />
-									<div className="island-empty-title">随时向 OpenPI 发送指令</div>
-									<div className="island-empty-desc">灵动岛将实时同步执行细节</div>
-									<div className="island-quick-chips">
-										{["总结当前代码变更", "执行 cargo check", "写一个快速测试"].map((prompt) => (
-											<button
-												type="button"
-												key={prompt}
-												onClick={() => setInput(prompt)}
-												className="island-chip"
-											>
-												{prompt}
-											</button>
-										))}
-									</div>
+								{/* Pulsing Energy/Audio Waveform |||||| */}
+								<div className="island-waveform">
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
 								</div>
-							) : (
-								feedItems.map((item, idx) => {
-									if (item.kind === "user") {
-										return (
-											<div key={item.id} className="island-msg-row user">
-												<div className="island-bubble-user">
-													{item.text}
-												</div>
-											</div>
-										);
-									}
 
-									if (item.kind === "actions") {
-										const isLast = idx === feedItems.length - 1;
-										return (
-											<div key={item.id} className="island-msg-row actions">
-												{item.reasoning && (
-													<ReasoningBlock
-														reasoning={item.reasoning}
-														isWorking={isBusy && isLast}
-													/>
-												)}
-												{(item.actions.length > 0 || (isLast && runningTools.length > 0)) && (
-													<AgentActionChain
-														actions={item.actions}
-														runningTools={isLast && isBusy ? runningTools : []}
-														isWorking={isBusy && isLast}
-														workspaceCwd={activeInstance?.cwd}
-													/>
-												)}
-											</div>
-										);
-									}
+								<span className="island-capsule-timer">{formatElapsedSec(hudElapsed)}</span>
+							</>
+						) : justCompleted ? (
+							<>
+								<span className="island-capsule-task">已完成</span>
+								<span className="island-capsule-check">✓</span>
+							</>
+						) : (
+							<>
+								<span className="island-capsule-task">
+									{capsuleTaskText}
+								</span>
+								<div className="island-waveform idle-wave">
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+								</div>
+								<span className="island-capsule-timer">{formatElapsedSec(hudElapsed)}</span>
+							</>
+						)}
+					</div>
+					<svg className="island-shoulder right" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+						<path d="M 0,16 V 0 H 16 C 7.163,0 0,7.163 0,16 Z" />
+					</svg>
+				</div>
+			) : (
+				/* ── Expanded Liquid HUD Card with Concave Bezier Shoulders ── */
+				<div
+					className="island-card-assembly"
+					onMouseEnter={handleCardMouseEnter}
+					onMouseLeave={handleCardMouseLeave}
+				>
+					<svg className="island-shoulder left card-shoulder" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+						<path d="M 0,0 H 20 V 20 C 20,8.954 11.046,0 0,0 Z" />
+					</svg>
+					<div className="island-hud-card" onClick={(e) => e.stopPropagation()}>
+						{/* 1. Header Row */}
+						<div className="hud-card-header">
+							<div className="hud-brand-group">
+								<svg className="hud-brand-logo" width="18" height="18" viewBox="0 0 24 24" fill="none">
+									<circle cx="12" cy="12" r="9" stroke="var(--hud-accent)" strokeWidth="2.8" strokeLinecap="round" strokeDasharray="42 16" />
+								</svg>
+								<span className="hud-brand-title">OpenPI</span>
+								<span className="hud-agent-badge">Agent</span>
+							</div>
 
-									if (item.kind === "assistant") {
-										const isLast = idx === feedItems.length - 1;
-										return (
-											<div key={item.id} className="island-msg-row assistant">
-												{item.reasoning && (
-													<ReasoningBlock
-														reasoning={item.reasoning}
-														isWorking={isBusy && isLast}
-													/>
-												)}
-												{item.text && (
-													<div className="island-bubble-assistant">
-														<MarkdownText
-															text={item.text}
-															streaming={isStreaming && isLast}
-														/>
-													</div>
-												)}
-											</div>
-										);
-									}
+							<div className="hud-header-right">
+								{/* Audio/Energy Waveform */}
+								<div className={`island-waveform card-wave ${!isBusy ? "idle-wave" : ""}`}>
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+									<span className="wave-bar" />
+								</div>
 
-									return null;
-								})
-							)}
-
-							{/* Standalone active running tools if actions block not yet flushed */}
-							{runningTools.length > 0 &&
-								!(feedItems.length > 0 && feedItems[feedItems.length - 1].kind === "actions") && (
-									<div className="island-msg-row actions">
-										<AgentActionChain
-											actions={[]}
-											runningTools={runningTools}
-											isWorking={isBusy}
-											workspaceCwd={activeInstance?.cwd}
-										/>
-									</div>
+								{totalTokens > 0 && (
+									<span className="hud-card-tokens" title={`当前上下文消耗 ${totalTokens.toLocaleString()} tokens`}>
+										{totalTokens.toLocaleString()} tokens
+									</span>
 								)}
 
-							{/* Non-tool progress (thinking / responding), identical to main window */}
-							{isBusy && runningTools.length === 0 && (
-								<div className="island-turn-progress">
-									{turnProgress ? (
-										<TurnProgressRow progress={turnProgress} />
-									) : (
-										<div className="turn-progress" role="status">
-											<span className="turn-progress-dots" aria-hidden="true">
-												<span />
-												<span />
-												<span />
-											</span>
-											<span className="turn-progress-label">正在处理中…</span>
-										</div>
-									)}
-								</div>
-							)}
-							<div ref={messagesEndRef} />
+								<span className="hud-card-timer">{formatElapsedSec(hudElapsed)}</span>
+							</div>
 						</div>
 
-						{/* Dialogue Input Floating Composer */}
-						<div className="island-footer">
-							<form
-								onSubmit={(e) => {
-									e.preventDefault();
-									handleSend();
-								}}
-								className="island-input-box"
-							>
-								<input
-									type="text"
-									value={input}
-									onChange={(e) => setInput(e.target.value)}
-									placeholder="输入消息或指令... (Enter 发送)"
-									disabled={isSending}
-									autoFocus
-									className="island-text-input"
-								/>
+						{/* 2. Hero Stage Banner */}
+						<div className="hud-hero-stage">
+							<div className="hud-hero-left">
+								{isBusy ? (
+									<div className="hud-spinner-ring" />
+								) : (
+									<div
+										style={{
+											width: 24,
+											height: 24,
+											borderRadius: "50%",
+											background: "rgba(63, 158, 106, 0.12)",
+											border: "1.5px solid rgba(63, 158, 106, 0.35)",
+											display: "flex",
+											alignItems: "center",
+											justifyContent: "center",
+											color: "var(--hud-ok)",
+											fontSize: 13,
+											fontWeight: 700,
+											flexShrink: 0,
+										}}
+									>
+										✓
+									</div>
+								)}
+								<div className="hud-hero-text">
+									<div className="hud-hero-title">{heroTitle}</div>
+									<div className="hud-hero-sub" title={heroSub}>{heroSub}</div>
+								</div>
+							</div>
+							<div className="hud-category-pill">{categoryPill}</div>
+						</div>
+
+						{/* 3. Progress Bar */}
+						<div className="hud-progress-section">
+							<div className="hud-progress-track">
+								<div className="hud-progress-bar" style={{ width: `${progressPercent}%` }} />
+							</div>
+							<span className="hud-progress-number">{progressPercent}%</span>
+						</div>
+
+						{/* 4. Structured Process Table (4 Rows) */}
+						<div className="hud-process-table">
+							{processRows.map((row) => (
+								<div key={row.id} className={`hud-process-row ${row.status}`}>
+									<div className="process-col-action">
+										<span className={`process-status-dot ${row.status}`} />
+										<span className="process-action-label">{row.actionType}</span>
+									</div>
+									<div className="process-col-path" title={row.path}>
+										{row.path}
+									</div>
+									<div className="process-col-duration">
+										{row.durationText}
+									</div>
+									<div className="process-col-state">
+										{row.status === "done" && <span className="process-check-mark">✓</span>}
+										{row.status === "running" && <span className="process-running-gear">⚙</span>}
+										{row.status === "pending" && <span className="process-pending-dot">○</span>}
+										{row.status === "error" && <span className="process-error-mark">×</span>}
+									</div>
+								</div>
+							))}
+						</div>
+
+						{/* 5. Inset Metric Card (3 Columns) */}
+						<div className="hud-metric-card">
+							<div className="metric-col">
+								<div className="metric-label">
+									<Terminal size={11} className="metric-icon" />
+									<span>当前命令</span>
+								</div>
+								<div className="metric-value code-font" title={currentCommandText}>
+									{currentCommandText}
+								</div>
+							</div>
+
+							<div className="metric-col">
+								<div className="metric-label">
+									<FileText size={11} className="metric-icon" />
+									<span>已处理文件</span>
+								</div>
+								<div className="metric-value">{processedFilesText}</div>
+							</div>
+
+							<div className="metric-col">
+								<div className="metric-label">
+									<Clock3 size={11} className="metric-icon" />
+									<span>运行时长</span>
+								</div>
+								<div className="metric-value">{formatElapsedSec(hudElapsed)}</div>
+							</div>
+						</div>
+
+						{/* 6. Bottom Controls Toolbar */}
+						<div className="hud-bottom-bar">
+							<div className="hud-bottom-left">
 								<button
-									type="submit"
-									disabled={!input.trim() || isSending}
-									className="island-send-btn"
-									title="发送 (Enter)"
+									type="button"
+									className="hud-action-pill-btn"
+									onClick={() => void handleTogglePause()}
 								>
-									<Send style={{ width: 13, height: 13 }} />
+									{isPaused ? <Play size={11} /> : <Pause size={11} />}
+									<span>{isPaused ? "继续" : "暂停"}</span>
 								</button>
-							</form>
-							<div className="island-shortcuts-bar">
-								<span>按 Esc 收起</span>
-								<span>Enter 发送 · Shift+Enter 换行</span>
+
+								<button
+									type="button"
+									className="hud-action-pill-btn"
+									onClick={() => void handleOpenMain()}
+								>
+									<FileText size={11} />
+									<span>查看详情</span>
+								</button>
+							</div>
+
+							<div className="hud-bottom-right">
+								<button
+									type="button"
+									className="hud-primary-open-btn"
+									onClick={() => void handleOpenMain()}
+								>
+									<ExternalLink size={12} />
+									<span>打开 OpenPI</span>
+								</button>
 							</div>
 						</div>
 					</div>
-				)}
+					<svg className="island-shoulder right card-shoulder" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+						<path d="M 0,20 V 0 H 20 C 8.954,0 0,8.954 0,20 Z" />
+					</svg>
+				</div>
+			)}
 		</div>
 	);
 }

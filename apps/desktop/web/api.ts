@@ -475,7 +475,8 @@ export const desktopApi = {
 		return api.onAutoPilotEvent(handler);
 	},
 	focusMainWindow: () => call<boolean>("focus_main_window"),
-	setIslandExpanded: (expanded: boolean) => call<boolean>("set_island_expanded", { expanded }),
+	setIslandExpanded: (expanded: boolean, mode?: "idle" | "working" | "expanded" | "attention") =>
+		call<boolean>("set_island_expanded", { expanded, mode }),
 	openMainFromIsland: () => call<boolean>("open_main_from_island"),
 	toggleIslandWindow: () => call<boolean>("toggle_island_window"),
 	showIslandWindow: () => call<boolean>("show_island_window"),

@@ -63,8 +63,10 @@ pub fn run() {
                                     let app_island = handle_events.clone();
                                     let _ = handle_events.run_on_main_thread(move || {
                                         if let Some(island) = app_island.get_webview_window("island") {
-                                            island_native::position_island_top_center(&island, 280.0, 25.0);
-                                            let _ = island.show();
+                                            if !island.is_visible().unwrap_or(false) {
+                                                island_native::position_island_top_center(&island, 360.0, 44.0);
+                                                let _ = island.show();
+                                            }
                                         }
                                     });
                                 }
@@ -83,7 +85,7 @@ pub fn run() {
 
             // Configure OpenPI Island window at top-center of screen (starts hidden)
             if let Some(island) = handle.get_webview_window("island") {
-                island_native::position_island_top_center(&island, 280.0, 25.0);
+                island_native::position_island_top_center(&island, 360.0, 44.0);
                 let _ = island.hide();
             }
 
@@ -152,7 +154,7 @@ pub fn run() {
                                         let app_island = handle_cmd.clone();
                                         let _ = handle_cmd.run_on_main_thread(move || {
                                             if let Some(island) = app_island.get_webview_window("island") {
-                                                island_native::position_island_top_center(&island, 460.0, 540.0);
+                                                island_native::position_island_top_center(&island, 560.0, 530.0);
                                                 let _ = island.show();
                                                 let _ = island.set_focus();
                                             }
@@ -162,7 +164,7 @@ pub fn run() {
                                         let app_island = handle_cmd.clone();
                                         let _ = handle_cmd.run_on_main_thread(move || {
                                             if let Some(island) = app_island.get_webview_window("island") {
-                                                island_native::position_island_top_center(&island, 280.0, 25.0);
+                                                island_native::position_island_top_center(&island, 360.0, 44.0);
                                                 let _ = island.show();
                                             }
                                         });
@@ -175,7 +177,7 @@ pub fn run() {
                                         let app_island = handle_cmd.clone();
                                         let _ = handle_cmd.run_on_main_thread(move || {
                                             if let Some(island) = app_island.get_webview_window("island") {
-                                                island_native::position_island_top_center(&island, 280.0, 25.0);
+                                                island_native::position_island_top_center(&island, 360.0, 44.0);
                                                 let _ = island.show();
                                             }
                                         });

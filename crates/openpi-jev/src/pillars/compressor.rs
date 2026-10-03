@@ -108,4 +108,75 @@ impl OutputCompressor {
             was_compressed: true,
         }
     }
+
+    /// 借鉴 caveman 思想：极简致密语法压缩（Dense Caveman Syntax），去除非必要样板字符
+    pub fn compress_dense(&self, raw: &str) -> CompressedOutput {
+        let base = self.compress(raw);
+
+        let mut dense_lines = Vec::new();
+        let re_rust_err = Regex::new(r"error(?:\[(E\d+)\])?: (.*)").unwrap();
+        let re_rust_loc = Regex::new(r"--> (.*?):(\d+):(\d+)").unwrap();
+        let mut last_loc = String::new();
+
+        for line in raw.lines() {
+            let trimmed = line.trim();
+            if let Some(caps) = re_rust_loc.captures(trimmed) {
+                last_loc = format!("{}:{}", &caps[1], &caps[2]);
+            } else if let Some(caps) = re_rust_err.captures(trimmed) {
+                let code = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                let msg = &caps[2];
+                if !last_loc.is_empty() {
+                    dense_lines.push(format!("FAIL loc:{} code:{} msg:{}", last_loc, code, msg));
+                    last_loc.clear();
+                } else {
+                    dense_lines.push(format!("FAIL code:{} msg:{}", code, msg));
+                }
+            } else if trimmed.starts_with("test ") && trimmed.ends_with("FAILED") {
+                dense_lines.push(format!("FAIL {}", trimmed));
+            } else if trimmed.contains("Panicked at") || trimmed.contains("panic:") {
+                dense_lines.push(format!("PANIC: {}", trimmed));
+            }
+        }
+
+        if dense_lines.is_empty() {
+            return base;
+        }
+
+        let dense_content = format!("[DENSE SYNTAX]\n{}", dense_lines.join("\n"));
+        let dense_chars = dense_content.len();
+        let original_chars = raw.len();
+        let extra_saved = (original_chars.saturating_sub(dense_chars) as f64 / 3.5).round() as usize;
+
+        CompressedOutput {
+            content: dense_content,
+            original_chars,
+            compressed_chars: dense_chars,
+            lines_truncated: base.lines_truncated,
+            estimated_tokens_saved: base.estimated_tokens_saved.max(extra_saved),
+            was_compressed: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dense_caveman_compressor() {
+        let compressor = OutputCompressor::new(10, 1000);
+        let verbose_log = r#"
+   Compiling openpi-tools v0.1.0 (/Users/huaan/openpi-next/crates/openpi-tools)
+error[E0425]: cannot find value `trimmed` in this scope
+   --> crates/openpi-jev/src/pillars/gate.rs:226:32
+    |
+226 |                 if re.is_match(trimmed) {
+    |                                ^^^^^^^ not found in this scope
+error: could not compile `openpi-jev` (lib) due to 1 previous error
+        "#;
+        let dense = compressor.compress_dense(verbose_log);
+        assert!(dense.was_compressed);
+        assert!(dense.content.contains("[DENSE SYNTAX]"));
+        assert!(dense.content.contains("FAIL loc:crates/openpi-jev/src/pillars/gate.rs:226"));
+    }
 }

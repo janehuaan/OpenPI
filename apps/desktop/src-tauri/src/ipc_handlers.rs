@@ -2289,15 +2289,22 @@ pub async fn handle_invoke(
 
         "set_island_expanded" => {
             let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
-            let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded }));
+            let mode = args.get("mode").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded, "mode": mode }));
             // AppKit NSWindow mutations must happen on the main thread; async IPC
             // handlers run on a tokio worker, so marshal the layout call over.
             let app_island = app.clone();
             let _ = app.run_on_main_thread(move || {
                 if let Some(island) = app_island.get_webview_window("island") {
-                    let (w, h) = if expanded { (460.0, 540.0) } else { (280.0, 25.0) };
+                    let mode_str = mode.as_deref();
+                    let is_expanded_state = expanded || mode_str == Some("expanded") || mode_str == Some("attention");
+                    let (w, h) = if is_expanded_state {
+                        (560.0, 530.0)
+                    } else {
+                        (360.0, 44.0)
+                    };
                     crate::island_native::position_island_top_center(&island, w, h);
-                    if expanded {
+                    if is_expanded_state {
                         let _ = island.show();
                         let _ = island.set_focus();
                     }
@@ -2323,7 +2330,7 @@ pub async fn handle_invoke(
                         if visible {
                             let _ = island.hide();
                         } else {
-                            crate::island_native::position_island_top_center(&island, 280.0, 25.0);
+                            crate::island_native::position_island_top_center(&island, 360.0, 44.0);
                             let _ = island.show();
                         }
                     }
@@ -2336,16 +2343,12 @@ pub async fn handle_invoke(
             let app_island = app.clone();
             let _ = app.run_on_main_thread(move || {
                 if let Some(island) = app_island.get_webview_window("island") {
-                    if let Ok(size) = island.inner_size() {
-                        let scale = island.scale_factor().unwrap_or(1.0);
-                        let h = size.height as f64 / scale;
-                        if h > 100.0 {
-                            let _ = island.show();
-                            return;
-                        }
+                    if island.is_visible().unwrap_or(false) {
+                        let _ = island.show();
+                        return;
                     }
-                    let _ = app_island.emit("openpi:island-state", serde_json::json!({ "expanded": false }));
-                    crate::island_native::position_island_top_center(&island, 280.0, 25.0);
+                    let _ = app_island.emit("openpi:island-state", serde_json::json!({ "expanded": false, "mode": "idle" }));
+                    crate::island_native::position_island_top_center(&island, 360.0, 44.0);
                     let _ = island.show();
                 }
             });
