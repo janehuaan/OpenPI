@@ -1,133 +1,221 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+
+use anyhow::{anyhow, Result};
 use ort::session::Session;
 use ort::value::Tensor;
+use tokio::sync::Mutex;
 use tokenizers::Tokenizer;
 
 use crate::types::{JevAnswer, JevQuestion, JevRequest, JevResponse};
 
+/// Native Rust ONNX Verdict Engine running local ModernBERT INT8
 pub struct LocalVerdictEngine {
     session: Arc<Mutex<Session>>,
-    tokenizer: Arc<Tokenizer>,
-    is_ready: bool,
+    tokenizer: Tokenizer,
 }
 
 impl LocalVerdictEngine {
-    pub fn new(model_path: &Path, tokenizer_path: &Path) -> anyhow::Result<Self> {
-        let dylib_path = std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".openpi/lib/onnxruntime-osx-x86_64-1.20.1/lib/libonnxruntime.dylib");
+    /// Attempts to load engine from ~/.openpi/models/verdict or custom path
+    pub fn try_load_default() -> Result<Self> {
+        let home = std::env::var("HOME").map_err(|_| anyhow!("HOME not set"))?;
+        let model_dir = PathBuf::from(home).join(".openpi").join("models").join("verdict");
+        Self::load_from_dir(&model_dir)
+    }
 
-        if dylib_path.exists() {
-            let _ = ort::init_from(dylib_path.to_str().unwrap()).map(|b| b.commit());
-        } else {
-            let _ = ort::init().commit();
+    pub fn load_from_dir(dir: &Path) -> Result<Self> {
+        let model_path = dir.join("model_int8.onnx");
+        let tokenizer_path = dir.join("tokenizer.json");
+
+        if !model_path.exists() || !tokenizer_path.exists() {
+            return Err(anyhow!("Model or tokenizer missing in {:?}", dir));
         }
 
-        let session = Session::builder()
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?
-            .with_intra_threads(2)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?
-            .commit_from_file(model_path)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
 
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        // NOTE: `ort` resolves to a 2.0.0-rc.x build whose builder error type is
+        // `ort::Error<SessionBuilder>`; that payload is not Send + Sync, so it
+        // cannot be converted with `?` into a Send + Sync error box. Convert anyhow.
+        let session = Session::builder()
+            .map_err(|e| anyhow!("ort session builder failed: {e}"))?
+            .with_intra_threads(2)
+            .map_err(|e| anyhow!("ort intra_threads failed: {e}"))?
+            .commit_from_file(&model_path)
+            .map_err(|e| anyhow!("ort commit_from_file failed: {e}"))?;
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
-            tokenizer: Arc::new(tokenizer),
-            is_ready: true,
+            tokenizer,
         })
     }
 
-    /// Try loading from default ~/.openpi paths (prefers INT8 quantized model if available)
-    pub fn try_load_default() -> anyhow::Result<Self> {
-        let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."));
-        let model_dir = home.join(".openpi/models/verdict");
-        let int8_path = model_dir.join("model_int8.onnx");
-        let model_path = if int8_path.exists() {
-            int8_path
+    /// Internal helper: encode text into token ids (truncated to max_len)
+    fn encode_tokens(&self, text: &str, max_len: usize) -> Result<Vec<i64>> {
+        let encoding = self
+            .tokenizer
+            .encode(text, true)
+            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+        let mut ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
+        if ids.len() > max_len {
+            ids.truncate(max_len);
+        }
+        if ids.is_empty() {
+            ids.push(0);
+        }
+        Ok(ids)
+    }
+
+    /// Run single forward pass to get pooled sentence representation (mean pooling over last hidden state)
+    async fn embed_text(&self, text: &str) -> Result<Vec<f32>> {
+        let ids = self.encode_tokens(text, 512)?;
+        let seq_len = ids.len();
+        let attention_mask: Vec<i64> = vec![1; seq_len];
+
+        let shape = [1usize, seq_len];
+        let input_ids_tensor = Tensor::from_array((shape, ids))
+            .map_err(|e| anyhow!("ort tensor input_ids failed: {e}"))?;
+        let attention_mask_tensor = Tensor::from_array((shape, attention_mask))
+            .map_err(|e| anyhow!("ort tensor attention_mask failed: {e}"))?;
+
+        let mut sess = self.session.lock().await;
+        let outputs = sess
+            .run(ort::inputs![
+                "input_ids" => input_ids_tensor,
+                "attention_mask" => attention_mask_tensor,
+            ])
+            .map_err(|e| anyhow!("ort run failed: {e}"))?;
+
+        // In ort 2.0.0-rc.x, `try_extract_tensor` yields `(&Shape, &[T])`.
+        let (_shape, data) = outputs[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| anyhow!("ort extract tensor failed: {e}"))?;
+
+        let hidden_dim = data.len() / seq_len;
+        if hidden_dim == 0 {
+            return Err(anyhow!("Invalid tensor output dimension"));
+        }
+
+        // Mean pooling over tokens to produce a robust dense sentence representation
+        let mut pooled = vec![0.0f32; hidden_dim];
+        for t in 0..seq_len {
+            let offset = t * hidden_dim;
+            for d in 0..hidden_dim {
+                pooled[d] += data[offset + d];
+            }
+        }
+        let inv_len = 1.0 / (seq_len as f32);
+        for d in 0..hidden_dim {
+            pooled[d] *= inv_len;
+        }
+
+        Ok(pooled)
+    }
+
+    /// Calculate cosine similarity between two dense vectors
+    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() || a.is_empty() {
+            return 0.0;
+        }
+        let mut dot = 0.0f32;
+        let mut norm_a = 0.0f32;
+        let mut norm_b = 0.0f32;
+        for i in 0..a.len() {
+            dot += a[i] * b[i];
+            norm_a += a[i] * a[i];
+            norm_b += b[i] * b[i];
+        }
+        let denom = norm_a.sqrt() * norm_b.sqrt();
+        if denom < 1e-9 {
+            0.0
         } else {
-            model_dir.join("model.onnx")
-        };
-        let tokenizer_path = model_dir.join("tokenizer.json");
-
-        Self::new(&model_path, &tokenizer_path)
+            (dot / denom).clamp(-1.0, 1.0)
+        }
     }
 
-    pub fn is_ready(&self) -> bool {
-        self.is_ready
-    }
-
-    pub fn engine_name(&self) -> &'static str {
-        "ModernBERT-Verdict-FP32"
-    }
-
-    pub async fn evaluate(&self, req: JevRequest) -> anyhow::Result<JevResponse> {
+    /// Evaluates the Jev request against the ONNX model using semantic pointer projection
+    pub async fn evaluate(&self, req: &JevRequest) -> Result<JevResponse> {
         let mut answers = Vec::with_capacity(req.questions.len());
 
         for question in &req.questions {
-            let (q_id, prompt_text) = match question {
-                JevQuestion::Noul { id, instructions } => (
-                    id.clone(),
-                    format!("Context:\n{}\nQuestion: {}\nAnswer (Yes/No):", req.state, instructions),
-                ),
-                JevQuestion::Choice { id, instructions, options } => (
-                    id.clone(),
-                    format!("Context:\n{}\nQuestion: {}\nOptions: {}\nAnswer:", req.state, instructions, options.join(", ")),
-                ),
-                JevQuestion::Score { id, instructions, levels } => (
-                    id.clone(),
-                    format!("Context:\n{}\nQuestion: {}\nLevels: {}\nScore:", req.state, instructions, levels.join(", ")),
-                ),
-            };
+            match question {
+                JevQuestion::Choice { id, instructions, options } => {
+                    let context_prompt = format!("Context:\n{}\nQuestion: {}", req.state, instructions);
+                    let context_emb = self.embed_text(&context_prompt).await?;
 
-            // Truncate to max 512 tokens to lock in 55ms latency guarantee
-            let encoding = self.tokenizer.encode(prompt_text, true).map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let mut ids: Vec<i64> = encoding.get_ids().iter().map(|&i| i as i64).collect();
-            if ids.len() > 512 {
-                ids.truncate(512);
-            }
-            let seq_len = ids.len();
-            let attention_mask = vec![1i64; seq_len];
+                    let mut best_opt = options.first().cloned().unwrap_or_default();
+                    let mut max_sim = -2.0f32;
 
-            let input_ids_tensor = Tensor::from_array(([1usize, seq_len], ids))
-                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-            let attention_mask_tensor = Tensor::from_array(([1usize, seq_len], attention_mask))
-                .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
-            let mut sess = self.session.lock().await;
-            let outputs = sess.run(ort::inputs![
-                "input_ids" => &input_ids_tensor,
-                "attention_mask" => &attention_mask_tensor
-            ])
-            .map_err(|e| anyhow::anyhow!("{:?}", e))?;
-
-            // Extract embeddings / logits from output
-            let output_name = outputs.keys().next().unwrap_or(&"last_hidden_state").to_string();
-            let (val, conf) = match outputs.get(&output_name) {
-                Some(val_ref) => {
-                    // ModernBERT embedding / logits extraction
-                    if let Ok((_shape, slice)) = val_ref.try_extract_tensor::<f32>() {
-                        let avg_logit: f32 = slice.iter().take(10).copied().sum::<f32>() / 10.0;
-                        let sigmoid: f32 = 1.0 / (1.0 + (-avg_logit).exp());
-                        (serde_json::Value::Bool(sigmoid > 0.5), (sigmoid * 100.0f32).round() / 100.0f32)
-                    } else {
-                        (serde_json::Value::Bool(false), 0.85)
+                    for opt in options {
+                        let opt_emb = self.embed_text(opt).await?;
+                        let sim = Self::cosine_similarity(&context_emb, &opt_emb);
+                        if sim > max_sim {
+                            max_sim = sim;
+                            best_opt = opt.clone();
+                        }
                     }
-                }
-                None => (serde_json::Value::Bool(false), 0.85),
-            };
 
-            answers.push(JevAnswer {
-                id: q_id,
-                value: val,
-                confidence: conf,
-                distribution: None,
-            });
+                    let confidence = ((max_sim + 1.0) / 2.0).clamp(0.0, 1.0);
+
+                    answers.push(JevAnswer {
+                        id: id.clone(),
+                        value: serde_json::Value::String(best_opt),
+                        confidence,
+                        distribution: None,
+                    });
+                }
+                JevQuestion::Noul { id, instructions } => {
+                    let context_prompt = format!("Context:\n{}\nQuestion: {}", req.state, instructions);
+                    let context_emb = self.embed_text(&context_prompt).await?;
+
+                    let yes_emb = self.embed_text("Yes, affirmed, true, confirmed.").await?;
+                    let no_emb = self.embed_text("No, negative, false, rejected.").await?;
+
+                    let sim_yes = Self::cosine_similarity(&context_emb, &yes_emb);
+                    let sim_no = Self::cosine_similarity(&context_emb, &no_emb);
+
+                    let is_yes = sim_yes >= sim_no;
+                    let prob = ((sim_yes - sim_no + 1.0) / 2.0).clamp(0.0, 1.0);
+
+                    answers.push(JevAnswer {
+                        id: id.clone(),
+                        value: serde_json::Value::Bool(is_yes),
+                        confidence: prob,
+                        distribution: None,
+                    });
+                }
+                JevQuestion::Score { id, instructions, levels } => {
+                    let context_prompt = format!("Context:\n{}\nQuestion: {}", req.state, instructions);
+                    let context_emb = self.embed_text(&context_prompt).await?;
+
+                    // Project the context against the caller-provided ordered levels;
+                    // the best-matching level maps to a normalized [0, 1] score.
+                    let n = levels.len();
+                    let mut best_idx = 0usize;
+                    let mut best_sim = -2.0f32;
+                    for (i, lvl) in levels.iter().enumerate() {
+                        let lvl_emb = self.embed_text(lvl).await?;
+                        let sim = Self::cosine_similarity(&context_emb, &lvl_emb);
+                        if sim > best_sim {
+                            best_sim = sim;
+                            best_idx = i;
+                        }
+                    }
+
+                    let score = if n > 1 { best_idx as f32 / (n - 1) as f32 } else { 0.5 };
+                    let confidence = ((best_sim + 1.0) / 2.0).clamp(0.0, 1.0);
+
+                    answers.push(JevAnswer {
+                        id: id.clone(),
+                        value: serde_json::Value::Number(
+                            serde_json::Number::from_f64(score as f64)
+                                .unwrap_or(serde_json::Number::from(0)),
+                        ),
+                        confidence,
+                        distribution: None,
+                    });
+                }
+            }
         }
 
         Ok(JevResponse { answers })

@@ -8,6 +8,7 @@ import "./speech.css";
 import { ErrorBoundary } from "./components/error-boundary";
 
 import { initTheme } from "./lib/theme-manager";
+import { initCloudSyncBridge } from "./lib/cloud-sync-bridge";
 
 import { IslandApp } from "./components/IslandApp";
 
@@ -24,6 +25,11 @@ if (isIsland) {
 if (typeof navigator !== "undefined" && /Macintosh|Mac OS X/i.test(navigator.userAgent)) {
 	document.documentElement.classList.add("platform-darwin");
 	document.body?.classList.add("platform-darwin");
+}
+
+// Main window only: forward the Supabase session to the daemon for cloud sync.
+if (!isIsland) {
+	initCloudSyncBridge();
 }
 
 createRoot(document.getElementById("root")!).render(

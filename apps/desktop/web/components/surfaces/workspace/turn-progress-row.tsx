@@ -32,12 +32,8 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 		return () => window.clearInterval(timer);
 	}, [progress, isWorking]);
 
-	if (!progress && !isWorking) return null;
-
 	const startedAt = progress?.startedAt || now;
 	const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-	const elapsedStr = formatElapsed(seconds);
-	const tokenStr = formatTokens(tokens);
 
 	// Contextual dynamic English verbs (Claude Code & elite developer agent runtime HUD)
 	const verb = useMemo(() => {
@@ -58,6 +54,11 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 		if (seconds >= 3) return "Analyzing";
 		return "Reasoning";
 	}, [progress, seconds]);
+
+	if (!progress && !isWorking) return null;
+
+	const elapsedStr = formatElapsed(seconds);
+	const tokenStr = formatTokens(tokens);
 
 	return (
 		<div className="agent-runtime-hud" role="status" aria-live="polite">

@@ -8,6 +8,7 @@ use openpi_proto::{ClientRequest, HealthInfo, ServerMessage};
 use openpi_scheduler::Scheduler;
 use openpi_storage::Storage;
 use crate::app_ops::handle_app_op;
+use crate::cloud_sync::CloudSync;
 use crate::supervisor::Supervisor;
 
 pub async fn run_ipc_server(
@@ -16,6 +17,7 @@ pub async fn run_ipc_server(
     storage: Storage,
     scheduler: Scheduler,
     pi_cli_path: String,
+    cloud: CloudSync,
 ) -> anyhow::Result<()> {
     if std::path::Path::new(socket_path).exists() {
         if tokio::net::UnixStream::connect(socket_path).await.is_ok() {
@@ -81,8 +83,9 @@ pub async fn run_ipc_server(
                 let pi_cli = pi_cli_path.clone();
                 let last_active_conn = last_active.clone();
                 let active_conns = active_connections.clone();
+                let cloud = cloud.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, supervisor, storage, scheduler, pi_cli, start_time, last_active_conn, active_conns).await {
+                    if let Err(e) = handle_connection(stream, supervisor, storage, scheduler, pi_cli, start_time, last_active_conn, active_conns, cloud).await {
                         warn!("Client connection error: {}", e);
                     }
                 });
@@ -110,6 +113,7 @@ async fn handle_connection(
     start_time: std::time::Instant,
     last_active: Arc<Mutex<std::time::Instant>>,
     active_connections: Arc<std::sync::atomic::AtomicUsize>,
+    cloud: CloudSync,
 ) -> anyhow::Result<()> {
     active_connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let _guard = ConnGuard(active_connections);
@@ -185,10 +189,11 @@ async fn handle_connection(
         let subscribed_sessions = subscribed_sessions.clone();
         let write_tx = write_tx.clone();
         let last_active = last_active.clone();
+        let cloud = cloud.clone();
         requests.spawn(async move {
             if let Err(e) = handle_request(
                 request, supervisor, storage, scheduler, pi_cli_path,
-                start_time, subscribed_sessions, write_tx, last_active,
+                start_time, subscribed_sessions, write_tx, last_active, cloud,
             ).await {
                 warn!("Client request error: {}", e);
             }
@@ -211,6 +216,7 @@ async fn handle_request(
     subscribed_sessions: Arc<Mutex<HashSet<String>>>,
     write_tx: tokio::sync::mpsc::Sender<String>,
     last_active: Arc<Mutex<std::time::Instant>>,
+    cloud: CloudSync,
 ) -> anyhow::Result<()> {
     let is_passive = match &request {
         ClientRequest::Health { .. }
@@ -348,7 +354,7 @@ async fn handle_request(
                 }
             }
             ClientRequest::App { id, op } => {
-                handle_app_op(&id, &op, &storage, &scheduler, &supervisor, &supervisor.memory).await?
+                handle_app_op(&id, &op, &storage, &scheduler, &supervisor, &supervisor.memory, &cloud).await?
             }
             ClientRequest::Shutdown { id } => {
                 supervisor.shutdown_all().await;

@@ -67,6 +67,13 @@ pub struct MemoryRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KvRecord {
+    pub key: String,
+    pub value: String,
+    pub updated_at: String,
+}
+
 impl Storage {
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -609,6 +616,129 @@ impl Storage {
             "INSERT INTO key_values (key, value, updated_at) VALUES (?1, ?2, ?3)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    // --- Cloud sync helpers (used by openpi-daemon::cloud_sync) ---
+
+    /// Upsert a key/value row preserving the caller-supplied `updated_at`
+    /// (used when applying rows pulled from the cloud, so LWW stays correct).
+    pub fn upsert_kv_raw(&self, key: &str, value: &str, updated_at: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO key_values (key, value, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![key, value, updated_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_kv(&self) -> anyhow::Result<Vec<KvRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT key, value, updated_at FROM key_values")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(KvRecord {
+                key: row.get(0)?,
+                value: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Upsert a task by id preserving the given `updated_at`/`created_at`.
+    pub fn upsert_task_raw(&self, task: &TaskRecord) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tasks (id, title, prompt, cwd, schedule, status, next_run_at, created_at, updated_at, model, steps)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                 title = excluded.title,
+                 prompt = excluded.prompt,
+                 cwd = excluded.cwd,
+                 schedule = excluded.schedule,
+                 status = excluded.status,
+                 next_run_at = excluded.next_run_at,
+                 updated_at = excluded.updated_at,
+                 model = excluded.model,
+                 steps = excluded.steps",
+            params![
+                task.id,
+                task.title,
+                task.prompt,
+                task.cwd,
+                task.schedule,
+                task.status,
+                task.next_run_at,
+                task.created_at,
+                task.updated_at,
+                task.model,
+                task.steps,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_all_runs(&self) -> anyhow::Result<Vec<TaskRunRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, task_id, status, trigger, created_at, started_at, finished_at, exit_code, result, error, attempt
+             FROM task_runs ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(TaskRunRecord {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                status: row.get(2)?,
+                trigger: row.get(3)?,
+                created_at: row.get(4)?,
+                started_at: row.get(5)?,
+                finished_at: row.get(6)?,
+                exit_code: row.get(7)?,
+                result: row.get(8)?,
+                error: row.get(9)?,
+                attempt: row.get(10)?,
+            })
+        })?;
+        let mut runs = Vec::new();
+        for r in rows {
+            runs.push(r?);
+        }
+        Ok(runs)
+    }
+
+    /// Upsert a task run by id preserving the given timestamps.
+    pub fn upsert_run_raw(&self, run: &TaskRunRecord) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO task_runs (id, task_id, status, trigger, created_at, started_at, finished_at, exit_code, result, error, attempt)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                 status = excluded.status,
+                 started_at = excluded.started_at,
+                 finished_at = excluded.finished_at,
+                 exit_code = excluded.exit_code,
+                 result = excluded.result,
+                 error = excluded.error,
+                 attempt = excluded.attempt",
+            params![
+                run.id,
+                run.task_id,
+                run.status,
+                run.trigger,
+                run.created_at,
+                run.started_at,
+                run.finished_at,
+                run.exit_code,
+                run.result,
+                run.error,
+                run.attempt,
+            ],
         )?;
         Ok(())
     }

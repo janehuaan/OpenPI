@@ -1681,6 +1681,21 @@ pub async fn handle_invoke(
             }
         }
 
+        // ── Cloud account data sync (Supabase) ─────────────────────────────
+        "cloud_set_auth" | "cloud_clear_auth" | "cloud_sync_now" | "cloud_status" => {
+            let mut op = args.clone();
+            if let Some(obj) = op.as_object_mut() {
+                obj.insert("name".to_string(), json!(channel));
+            } else {
+                op = json!({ "name": channel, "args": args });
+            }
+            let res = client.request(ClientRequest::App {
+                id: Uuid::new_v4().to_string(),
+                op,
+            }).await?;
+            Ok(res)
+        }
+
         // ── Ephemeral Subagent ──────────────────────────────────────────────
         "spawn_subagent" | "subagent" => {
             let mut op = args.clone();

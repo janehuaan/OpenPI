@@ -15,6 +15,7 @@ openpi-jev = { path = "../openpi-jev" }
 openpi-engine = { path = "../openpi-engine" }
 tokio.workspace = true
 tokio-util.workspace = true
+reqwest = { version = "0.12", features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

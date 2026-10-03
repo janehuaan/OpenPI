@@ -172,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
             ],
         };
         let t = Instant::now();
-        let resp = engine.evaluate(req).await?;
+        let resp = engine.evaluate(&req).await?;
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
         println!("  - 神经推理耗时: {:.2} ms", elapsed_ms);
         println!("  - 判定结果: id={}, value={}, 置信度={}", resp.answers[0].id, resp.answers[0].value, resp.answers[0].confidence);
