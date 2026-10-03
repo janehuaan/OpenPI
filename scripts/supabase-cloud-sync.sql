@@ -87,3 +87,42 @@ create policy own_rows on public.cloud_files
 -- 刷新 PostgREST schema 缓存
 notify pgrst, 'reload schema';
 
+-- ── 第三期：会话历史（脱敏后同步） ──
+create table if not exists public.cloud_conversations (
+  user_id    uuid        not null default auth.uid(),
+  id         text        not null,                 -- session id
+  name       text,
+  cwd        text,
+  model      text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  primary key (user_id, id)
+);
+
+create table if not exists public.cloud_messages (
+  user_id         uuid        not null default auth.uid(),
+  conversation_id text        not null,
+  message_id      text        not null,            -- JSONL 行 id
+  seq             int         not null,            -- 行序号
+  payload         jsonb       not null,            -- 已脱敏的 JSON entry
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  deleted_at      timestamptz,
+  primary key (user_id, conversation_id, message_id)
+);
+create index if not exists cloud_messages_conv_seq
+  on public.cloud_messages (user_id, conversation_id, seq);
+
+alter table public.cloud_conversations enable row level security;
+drop policy if exists own_rows on public.cloud_conversations;
+create policy own_rows on public.cloud_conversations
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+alter table public.cloud_messages enable row level security;
+drop policy if exists own_rows on public.cloud_messages;
+create policy own_rows on public.cloud_messages
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+notify pgrst, 'reload schema';
+

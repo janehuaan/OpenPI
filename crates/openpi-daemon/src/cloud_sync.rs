@@ -20,6 +20,8 @@ const KV_TABLE: &str = "cloud_kv";
 const TASKS_TABLE: &str = "cloud_tasks";
 const RUNS_TABLE: &str = "cloud_task_runs";
 const FILES_TABLE: &str = "cloud_files";
+const CONV_TABLE: &str = "cloud_conversations";
+const MSG_TABLE: &str = "cloud_messages";
 
 /// Only these `key_values` keys are ever pushed to the cloud (phase 1).
 const KV_ALLOWLIST: &[&str] = &["profile"];
@@ -53,6 +55,7 @@ pub struct CloudSync {
     auth: Arc<RwLock<Option<CloudAuth>>>,
     status: Arc<RwLock<CloudStatus>>,
     lock: Arc<tokio::sync::Mutex<()>>,
+    leak: Arc<openpi_jev::pillars::LeakHunter>,
 }
 
 impl CloudSync {
@@ -66,6 +69,7 @@ impl CloudSync {
             auth: Arc::new(RwLock::new(None)),
             status: Arc::new(RwLock::new(CloudStatus::default())),
             lock: Arc::new(tokio::sync::Mutex::new(())),
+            leak: Arc::new(openpi_jev::pillars::LeakHunter::new()),
         }
     }
 
@@ -140,6 +144,8 @@ impl CloudSync {
         step!(self.sync_runs(&auth).await);
         // files: memories / skills / preferences
         step!(self.sync_files(&auth).await);
+        // conversation transcripts (phase 3, redacted before upload)
+        step!(self.sync_conversations(&auth).await);
         // local deletions
         step!(self.push_tombstones(&auth).await);
 
@@ -524,6 +530,230 @@ impl CloudSync {
         Ok((pushed, pulled))
     }
 
+    // ── conversation transcripts (phase 3, redacted) ────────────
+    async fn sync_conversations(&self, auth: &CloudAuth) -> Result<(u64, u64)> {
+        let dir = openpi_root().join("sessions");
+        if !dir.is_dir() {
+            return Ok((0, 0));
+        }
+        let mut pushed = 0u64;
+        let mut pulled = 0u64;
+
+        // ---- push ----
+        let mut sessions: Vec<(String, std::path::PathBuf)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                if let Some(sid) = p.file_stem().and_then(|s| s.to_str()) {
+                    if is_user_session_id(sid) {
+                        sessions.push((sid.to_string(), p));
+                    }
+                }
+            }
+        }
+
+        for (sid, path) in sessions {
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let wm: i64 = self
+                .storage
+                .get_kv(&format!("cloud:conv:wm:{}", sid))
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(-1);
+
+            let mut rows: Vec<Value> = Vec::new();
+            let mut last_seq = wm;
+            let mut last_ts = String::new();
+            let mut first_user = String::new();
+            let mut model = String::new();
+
+            for (i, line) in content.lines().enumerate() {
+                let idx = i as i64;
+                if let Ok(v) = serde_json::from_str::<Value>(line) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("message") {
+                        let role = v
+                            .get("message")
+                            .and_then(|m| m.get("role"))
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("");
+                        if role == "user" && first_user.is_empty() {
+                            if let Some(txt) = v
+                                .get("message")
+                                .and_then(|m| m.get("content"))
+                                .and_then(|c| c.as_array())
+                                .and_then(|a| a.iter().find_map(|b| b.get("text").and_then(|t| t.as_str())))
+                            {
+                                first_user = txt.chars().take(48).collect();
+                            }
+                        }
+                        if let Some(m) = v.get("message").and_then(|m| m.get("model")).and_then(|m| m.as_str()) {
+                            model = m.to_string();
+                        }
+                    }
+                    if let Some(ts) = v.get("timestamp").and_then(|t| t.as_str()) {
+                        last_ts = ts.to_string();
+                    }
+                }
+
+                if idx <= wm {
+                    continue;
+                }
+                // Redact before it ever leaves the machine.
+                let redacted = self.leak.scan_and_sanitize(line).sanitized_text;
+                let payload: Value =
+                    serde_json::from_str(&redacted).unwrap_or_else(|_| json!({ "raw": redacted }));
+                let mid = payload
+                    .get("id")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("line-{}", idx));
+                let ts = payload.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
+                let ts_iso = if ts.is_empty() {
+                    now_iso()
+                } else if last_ts.is_empty() {
+                    to_iso(ts)
+                } else {
+                    to_iso(ts)
+                };
+                rows.push(json!({
+                    "conversation_id": sid,
+                    "message_id": mid,
+                    "seq": idx,
+                    "payload": payload,
+                    "updated_at": ts_iso,
+                }));
+                last_seq = idx;
+                if rows.len() >= 200 {
+                    pushed += self
+                        .push_rows(auth, MSG_TABLE, "user_id,conversation_id,message_id", &rows)
+                        .await?;
+                    rows.clear();
+                }
+            }
+            if !rows.is_empty() {
+                pushed += self
+                    .push_rows(auth, MSG_TABLE, "user_id,conversation_id,message_id", &rows)
+                    .await?;
+            }
+            if last_seq > wm {
+                let _ = self
+                    .storage
+                    .set_kv(&format!("cloud:conv:wm:{}", sid), &last_seq.to_string());
+            }
+
+            let conv_ts = if last_ts.is_empty() { now_iso() } else { to_iso(&last_ts) };
+            let conv = json!({
+                "id": sid,
+                "name": if first_user.is_empty() { Value::Null } else { json!(first_user) },
+                "model": if model.is_empty() { Value::Null } else { json!(model) },
+                "updated_at": conv_ts,
+            });
+            pushed += self
+                .push_rows(auth, CONV_TABLE, "user_id,id", std::slice::from_ref(&conv))
+                .await?;
+        }
+
+        // ---- pull ----
+        let conv_wm = self.wm("pull", CONV_TABLE);
+        let mut url = format!(
+            "{}/rest/v1/{}?select=id,updated_at&order=updated_at.asc&limit=500",
+            base_url(auth),
+            CONV_TABLE
+        );
+        if !conv_wm.is_empty() {
+            url.push_str(&format!("&updated_at=gt.{}", urlencoding(&to_iso(&conv_wm))));
+        }
+        let res = self
+            .http
+            .get(url)
+            .header("apikey", &auth.anon_key)
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send()
+            .await?;
+        let status = res.status();
+        if status.as_u16() == 401 {
+            return Err(anyhow!("401 auth_required"));
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(anyhow!("pull {} failed: {} {}", CONV_TABLE, status, body));
+        }
+        let convs: Vec<Value> = res.json().await.unwrap_or_default();
+        let mut max_conv_ts = conv_wm.clone();
+        for c in &convs {
+            let sid = c["id"].as_str().unwrap_or_default().to_string();
+            if sid.is_empty() || !is_user_session_id(&sid) {
+                continue;
+            }
+            if let Some(ts) = c["updated_at"].as_str() {
+                if newer(ts, &max_conv_ts) {
+                    max_conv_ts = ts.to_string();
+                }
+            }
+            if let Ok(n) = self.pull_messages(auth, &sid).await {
+                pulled += n;
+            }
+        }
+        if max_conv_ts != conv_wm {
+            let _ = self.set_wm("pull", CONV_TABLE, &max_conv_ts);
+        }
+
+        Ok((pushed, pulled))
+    }
+
+    async fn pull_messages(&self, auth: &CloudAuth, sid: &str) -> Result<u64> {
+        let path = openpi_root().join("sessions").join(format!("{}.jsonl", sid));
+        let local_count = std::fs::read_to_string(&path)
+            .map(|c| c.lines().count())
+            .unwrap_or(0);
+        let url = format!(
+            "{}/rest/v1/{}?conversation_id=eq.{}&seq=gte.{}&order=seq.asc&limit=1000&select=seq,payload",
+            base_url(auth),
+            MSG_TABLE,
+            urlencoding(sid),
+            local_count
+        );
+        let res = self
+            .http
+            .get(url)
+            .header("apikey", &auth.anon_key)
+            .header("Authorization", format!("Bearer {}", auth.access_token))
+            .send()
+            .await?;
+        let status = res.status();
+        if status.as_u16() == 401 {
+            return Err(anyhow!("401 auth_required"));
+        }
+        if !status.is_success() {
+            let body = res.text().await.unwrap_or_default();
+            return Err(anyhow!("pull {} failed: {} {}", MSG_TABLE, status, body));
+        }
+        let rows: Vec<Value> = res.json().await.unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        use std::io::Write;
+        let mut n = 0u64;
+        for r in &rows {
+            if let Some(payload) = r.get("payload") {
+                if writeln!(file, "{}", serde_json::to_string(payload).unwrap_or_default()).is_ok() {
+                    n += 1;
+                }
+            }
+        }
+        Ok(n)
+    }
+
     async fn patch_deleted(
         &self,
         auth: &CloudAuth,
@@ -733,6 +963,11 @@ fn is_allowed_rel(rel: &str) -> bool {
         rel,
         "agent/settings.json" | "agent/app_settings.json" | "agent/HANDBOOK.md" | "agent/MEMORY.md"
     )
+}
+
+/// Exclude internal sessions (subagents, scheduled-task runs) from cloud sync.
+fn is_user_session_id(sid: &str) -> bool {
+    !sid.starts_with("subagent-") && !sid.starts_with("task-session-")
 }
 
 fn collect_files(root: &std::path::Path) -> Vec<SyncFile> {
