@@ -193,6 +193,28 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![openpi_invoke])
-        .run(tauri::generate_context!())
-        .expect("error while running openpi desktop tauri application");
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Background residency: Prevent destroying windows on close (red X or Cmd+W).
+                // Instead, hide the window so the background agent continues uninterrupted,
+                // and the Dynamic Island and tray stay operational.
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building openpi desktop tauri application")
+        .run(|app_handle, event| {
+            match event {
+                tauri::RunEvent::Reopen { .. } => {
+                    // Clicking Dock icon re-opens and focuses main window
+                    if let Some(main) = app_handle.get_webview_window("main") {
+                        let _ = main.unminimize();
+                        let _ = main.show();
+                        let _ = main.set_focus();
+                    }
+                }
+                _ => {}
+            }
+        });
 }

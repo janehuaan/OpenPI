@@ -72,7 +72,21 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     let _ = app.emit("openpi:navigate", serde_json::json!({ "view": "tasks" }));
                 }
                 "quit" => {
-                    app.exit(0);
+                    let app_clone = app.clone();
+                    if let Some(client) = app.try_state::<crate::daemon_client::DaemonClient>() {
+                        let client = client.inner().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = tokio::time::timeout(
+                                std::time::Duration::from_millis(500),
+                                client.request(openpi_proto::ClientRequest::Shutdown {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                }),
+                            ).await;
+                            app_clone.exit(0);
+                        });
+                    } else {
+                        app_clone.exit(0);
+                    }
                 }
                 _ => {}
             }
