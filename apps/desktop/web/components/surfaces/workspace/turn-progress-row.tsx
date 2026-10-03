@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import type { TurnProgress } from "../../../lib/turn-progress";
-import { BrainCircuit } from "../../icons";
 
 export interface TurnProgressRowProps {
 	progress?: TurnProgress;
@@ -16,7 +15,14 @@ function formatElapsed(seconds: number): string {
 	return `${m}m ${s}s`;
 }
 
-export function TurnProgressRow({ progress, isWorking }: TurnProgressRowProps) {
+function formatTokens(count?: number): string {
+	if (!count || count <= 0) return "";
+	if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+	if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+	return String(count);
+}
+
+export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRowProps) {
 	const [now, setNow] = useState(() => Date.now());
 
 	useEffect(() => {
@@ -30,45 +36,50 @@ export function TurnProgressRow({ progress, isWorking }: TurnProgressRowProps) {
 
 	const startedAt = progress?.startedAt || now;
 	const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-	const isThinking = !progress || progress.stage === "thinking" || progress.stage === "starting" || progress.stage === "submitted";
-	const isLongThinking = isThinking && seconds >= 15;
+	const elapsedStr = formatElapsed(seconds);
+	const tokenStr = formatTokens(tokens);
 
-	// Authentic, context-aware status label from turn-progress
-	let displayLabel = progress?.label;
-	if (!displayLabel || displayLabel === "代理已启动，准备处理中…") {
-		displayLabel = "正在思考…";
-	}
-	if (isThinking) {
-		if (seconds >= 20) {
-			displayLabel = "云端模型正在深度推演与计算…";
-		} else if (seconds >= 10 && displayLabel === "正在思考…") {
-			displayLabel = "已连接云端，正在规划下一步…";
+	// Contextual dynamic English verbs (Claude Code & elite developer agent runtime HUD)
+	const verb = useMemo(() => {
+		if (!progress) return "Reasoning";
+		const stage = progress.stage;
+		if (stage === "tool") {
+			const t = (progress.toolName || "").toLowerCase();
+			if (t.includes("bash") || t.includes("terminal") || t.includes("exec")) return "Executing";
+			if (t.includes("read") || t.includes("find") || t.includes("grep") || t.includes("search")) return "Investigating";
+			if (t.includes("edit") || t.includes("write") || t.includes("patch")) return "Refactoring";
+			if (t.includes("subagent")) return "Orchestrating";
+			if (t.includes("mcp")) return "Interfacing";
+			return "Operating";
 		}
-	}
+		if (stage === "responding") return "Formulating";
+		if (seconds >= 12) return "Illuminating";
+		if (seconds >= 6) return "Synthesizing";
+		if (seconds >= 3) return "Analyzing";
+		return "Reasoning";
+	}, [progress, seconds]);
 
 	return (
-		<div className={`turn-progress ${isLongThinking ? "long-thinking" : ""}`} role="status" aria-live="polite">
-			{isThinking ? (
-				<BrainCircuit size={13} className="turn-progress-icon text-sky-400 animate-pulse" />
-			) : (
-				<span className="turn-progress-dot" aria-hidden="true" />
-			)}
+		<div className="agent-runtime-hud" role="status" aria-live="polite">
+			<div className="agent-runtime-main-bar">
+				<div className={`agent-runtime-badge ${verb.toLowerCase()}`}>
+					<span className="agent-runtime-badge-icon">⌘</span>
+					<span className="agent-runtime-badge-verb">{verb}...</span>
+				</div>
 
-			<span className="turn-progress-label">{displayLabel}</span>
+				<div className="agent-runtime-meta-stream">
+					<span className="agent-runtime-time">{elapsedStr}</span>
 
-			{progress?.step && progress.step > 1 && (
-				<span className="turn-progress-step-tag">
-					第 {progress.step} 步
-				</span>
-			)}
-
-			{seconds > 0 && <span className="turn-progress-elapsed">{formatElapsed(seconds)}</span>}
-
-			{isLongThinking && seconds >= 30 && (
-				<span className="turn-progress-hint" title="云端正在推演复杂逻辑，网络连接活跃">
-					(云端推演中，保持连接)
-				</span>
-			)}
+					{tokenStr && (
+						<>
+							<span className="agent-runtime-bullet">•</span>
+							<span className="agent-runtime-tokens" title={`当前上下文消耗约 ${tokens?.toLocaleString()} tokens`}>
+								↓ {tokenStr}
+							</span>
+						</>
+					)}
+				</div>
+			</div>
 		</div>
 	);
 }

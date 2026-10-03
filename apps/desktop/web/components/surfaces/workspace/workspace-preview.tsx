@@ -2447,9 +2447,7 @@ export function ReferenceWorkspacePreview({
 									/>
 								</div>
 							)}
-						{runningTools.length === 0 && (
-							<TurnProgressRow progress={turnProgress} isWorking={isWorking} />
-						)}
+						<TurnProgressRow progress={turnProgress} isWorking={isWorking} />
 						{isWorking && runningTools.length === 0 && !turnProgress && (
 							<div className="reference-streaming-indicator" aria-label="OpenPI 正在回复">
 								<span />
