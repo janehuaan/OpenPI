@@ -3367,18 +3367,6 @@ pub async fn handle_invoke(
             Ok(json!({ "name": name, "title": title }))
         }
 
-        "system_run_applescript" => {
-            let script = args.get("script").and_then(|v| v.as_str()).unwrap_or("");
-            let output = Command::new("osascript").arg("-e").arg(script).output();
-            match output {
-                Ok(out) => {
-                    let res = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    Ok(json!({ "ok": out.status.success(), "output": res }))
-                }
-                Err(e) => Ok(json!({ "ok": false, "error": e.to_string() })),
-            }
-        }
-
         "system_manage_clipboard" => {
             let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("read");
             if action == "write" {
@@ -3753,37 +3741,6 @@ pub async fn handle_invoke(
                 }
             }
             Ok(json!(true))
-        }
-
-        "run_terminal_command" => {
-            let cmd_str = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or(&home);
-            let output = std::process::Command::new("zsh")
-                .arg("-c")
-                .arg(cmd_str)
-                .current_dir(cwd)
-                .output();
-
-            match output {
-                Ok(out) => {
-                    let code = out.status.code().unwrap_or(0);
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({
-                        "exitCode": code,
-                        "stdout": stdout,
-                        "stderr": stderr
-                    }))
-                }
-                Err(e) => {
-                    Ok(json!({
-                        "exitCode": -1,
-                        "stdout": "",
-                        "stderr": e.to_string()
-                    }))
-                }
-            }
         }
 
         "log_error" => {
