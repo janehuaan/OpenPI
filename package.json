@@ -11,6 +11,9 @@
   },
   "scripts": {
     "build": "yarn --cwd apps/desktop build",
+    "homepage:dev": "yarn --cwd apps/homepage dev",
+    "homepage:build": "yarn --cwd apps/homepage build",
+    "homepage:preview": "yarn --cwd apps/homepage preview",
     "typecheck": "yarn --cwd apps/desktop typecheck",
     "test": "cargo test --workspace && yarn --cwd apps/desktop test",
     "check": "yarn typecheck && yarn test"
