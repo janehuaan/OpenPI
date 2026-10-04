@@ -5141,44 +5141,14 @@
 	display: flex;
 	align-items: flex-start;
 	gap: 6px;
-}
-.tool-live-diagnostic.info {
-	background: rgba(59, 130, 246, 0.08);
-	border: 1px solid rgba(59, 130, 246, 0.2);
-	color: #2563eb;
-}
-[data-theme="dark"] .tool-live-diagnostic.info {
-	background: rgba(59, 130, 246, 0.12);
-	border-color: rgba(59, 130, 246, 0.28);
-	color: #60a5fa;
-}
-
-.tool-live-diagnostic.warning {
 	background: rgba(245, 158, 11, 0.08);
 	border: 1px solid rgba(245, 158, 11, 0.25);
 	color: #b45309;
 }
-[data-theme="dark"] .tool-live-diagnostic.warning {
+[data-theme="dark"] .tool-live-diagnostic {
 	background: rgba(245, 158, 11, 0.15);
 	border-color: rgba(245, 158, 11, 0.35);
 	color: #fbbf24;
-}
-
-.tool-live-diagnostic.critical {
-	background: rgba(239, 68, 68, 0.1);
-	border: 1px solid rgba(239, 68, 68, 0.35);
-	color: #dc2626;
-	animation: tool-live-alert-pulse 1.8s ease-in-out infinite;
-}
-[data-theme="dark"] .tool-live-diagnostic.critical {
-	background: rgba(239, 68, 68, 0.18);
-	border-color: rgba(239, 68, 68, 0.45);
-	color: #f87171;
-}
-
-@keyframes tool-live-alert-pulse {
-	0%, 100% { border-color: rgba(239, 68, 68, 0.35); }
-	50% { border-color: rgba(239, 68, 68, 0.85); box-shadow: 0 0 8px rgba(239, 68, 68, 0.2); }
 }
 
 .tool-live-diagnostic .diagnostic-content {

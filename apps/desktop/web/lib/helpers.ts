@@ -1157,84 +1157,54 @@ export function getRunningToolDetail(tool: RunningTool): RunningToolDetail {
 	};
 }
 
+/**
+ * A card shown next to a running command, and only when the run actually needs
+ * the user's attention (it is taking unusually long). There is deliberately no
+ * severity: a normal command shows nothing, so every card is worth reading.
+ */
 export interface CommandDiagnostic {
-	/** `info` is intentionally not a level: a card is only worth showing when the
-	 *  command needs attention (a hang, or a long build/download/run). */
-	warningLevel: "warning" | "critical";
 	title: string;
 	detail: string;
 	suggestion?: string;
 }
 
-// Shapes a non-interactive process can actually print while waiting on input.
-// Password prompts are deliberately absent: there is no tty, so `sudo` fails with
-// "a terminal is required..." (and a real "Password:" goes to the tty, never to
-// the captured stream), so such a pattern could never match.
-const INTERACTIVE_PATTERNS = [
-	/(?:\[[Yy]\/[Nn]\]|\([yY]\/[nN]\))\s*$/,
-	/Do you want to continue\?\s*$/i,
-	/Press\s+\[?Enter\]?\s+to\s+continue/i,
-	/Select\s+an?\s+option:\s*$/i,
-	/Enter\s+(?:your\s+)?choice:\s*$/i,
-	/\(default\s+[^)]+\):\s*$/,
-];
-
 const BUILD_PATTERNS = /\b(cargo\s+(build|check|clippy|run)|rustc|mvn|gradle|cmake|make|tsc|vite\s+build|webpack|next\s+build|go\s+build|swift\s+build|bazel\s+build|ninja)\b/i;
 const INSTALL_PATTERNS = /\b(npm\s+(i|install|add)|pnpm\s+(i|install|add)|yarn\s+(add|install)|pip\s+install|cargo\s+fetch|go\s+mod\s+download|git\s+clone|docker\s+pull|curl|wget)\b/i;
 
 export function analyzeCommandExecutionState(
-	toolName: string,
 	commandText: string,
 	elapsedSeconds: number,
-	liveOutput?: string,
 ): CommandDiagnostic | undefined {
-	const trimmedOutput = (liveOutput || "").trim();
-	const tail = trimmedOutput.slice(-300);
-
-	// 1. Critical Check: Interactive prompt blocking
-	for (const pattern of INTERACTIVE_PATTERNS) {
-		if (pattern.test(tail)) {
-			return {
-				warningLevel: "critical",
-				title: "终端疑似等待交互输入确认",
-				detail: "控制台末尾输出了交互式询问（如 [y/n] 确认或密码等待）。智能体运行在非交互式管道中，进程将持续挂起阻塞。",
-				suggestion: "请点击右侧“终止执行”，并提醒模型附加非交互免确认参数（例如 -y / --yes / --batch）重新运行。",
-			};
-		}
-	}
-
-	// 2. Heavy Compilation / Build
+	// Heavy compilation / build
 	if (BUILD_PATTERNS.test(commandText) && elapsedSeconds >= 90) {
 		return {
-			warningLevel: "warning",
 			title: `大型项目编译中 (已耗时 ${elapsedSeconds}s)`,
 			detail: "大型工程冷启动编译或跨模块构建可能需要数分钟。若长时间没有任何新的编译器输出，可检查依赖或随时终止。",
 			suggestion: "若怀疑编译卡死，可点击终止后分模块编译或检查目标缓存。",
 		};
 	}
 
-	// 3. Network Dependency Download / Package Install
+	// Dependency download / package install
 	if (INSTALL_PATTERNS.test(commandText) && elapsedSeconds >= 60) {
 		return {
-			warningLevel: "warning",
 			title: `网络依赖下载耗时较长 (已耗时 ${elapsedSeconds}s)`,
 			detail: "依赖下载受当前网络带宽与源延迟影响。若长时间无输出，可能遇到镜像源连接超时。",
 			suggestion: "可检查网络或国内镜像源配置（如 npm registry / crates.io 镜像）。",
 		};
 	}
 
-	// 4. Generic Long-running Command
+	// Anything else that just keeps running
 	if (elapsedSeconds >= 45) {
 		return {
-			warningLevel: "warning",
 			title: `命令持续运行中 (已耗时 ${elapsedSeconds}s)`,
 			detail: "该命令已运行超过 45 秒。智能体将在后台持续等待返回，您可以随时点击“终止执行”强行中断当前命令。",
 			suggestion: "若命令不需要继续运行，可点击“终止执行”。",
 		};
 	}
 
-	// Nothing actionable: a normal command needs no card. The row already shows the
-	// command and elapsed time, and "it is still running" is visible from the badge.
+	// A normal command needs no card: the row already shows the command and its
+	// elapsed time. Waiting on interactive input is not detected either — bash runs
+	// with stdin bound to /dev/null, so such a command gets EOF and exits.
 	return undefined;
 }
 

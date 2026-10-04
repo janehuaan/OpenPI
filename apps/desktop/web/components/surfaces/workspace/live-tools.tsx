@@ -42,12 +42,7 @@ export function ChatLiveTools({ tools }: { tools: RunningTool[] }) {
 				const seconds = Math.max(0, Math.floor((now - tool.startedAt) / 1_000));
 				const detail = getRunningToolDetail(tool);
 				const output = getRunningToolOutput(tool);
-				const diagnostic = analyzeCommandExecutionState(
-					tool.toolName,
-					detail.command || detail.summary,
-					seconds,
-					output,
-				);
+				const diagnostic = analyzeCommandExecutionState(detail.command || detail.summary, seconds);
 
 				const isBash = detail.isCommand;
 				const IconComp = isBash
@@ -143,7 +138,7 @@ export function ChatLiveTools({ tools }: { tools: RunningTool[] }) {
 
 						{/* "Why It Takes So Long" diagnostic — only when actionable */}
 						{diagnostic && (
-							<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+							<div className="tool-live-diagnostic">
 								<AlertCircle size={14} />
 								<div className="diagnostic-content">
 									<div className="diagnostic-title">

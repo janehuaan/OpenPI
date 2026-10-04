@@ -133,12 +133,7 @@ export function AgentActionChain({
 						const commandText = toolDetail?.command || item.target;
 
 						const diagnostic = isCurrentlyRunning
-							? analyzeCommandExecutionState(
-									matchedTool?.toolName || item.name,
-									commandText || "",
-									seconds ?? 0,
-									effectiveOutput,
-							  )
+							? analyzeCommandExecutionState(commandText || "", seconds ?? 0)
 							: undefined;
 
 						const IconComp =
@@ -187,7 +182,7 @@ export function AgentActionChain({
 
 								{/* Running command diagnostics & explanation */}
 								{isCurrentlyRunning && diagnostic && (
-									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+									<div className="tool-live-diagnostic">
 										<AlertCircle size={13} />
 										<div className="diagnostic-content">
 											<div className="diagnostic-title">{diagnostic.title}</div>
@@ -256,12 +251,7 @@ export function AgentActionChain({
 							? Search
 							: FileText;
 
-						const diagnostic = analyzeCommandExecutionState(
-							tool.toolName,
-							detail.command || detail.summary,
-							seconds,
-							liveOutput,
-						);
+						const diagnostic = analyzeCommandExecutionState(detail.command || detail.summary, seconds);
 
 						return (
 							<div className="trajectory-item" key={key}>
@@ -280,7 +270,7 @@ export function AgentActionChain({
 
 								{/* Running command diagnostic — only when there is something actionable */}
 								{diagnostic && (
-									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+									<div className="tool-live-diagnostic">
 										<AlertCircle size={13} />
 										<div className="diagnostic-content">
 											<div className="diagnostic-title">{diagnostic.title}</div>
