@@ -1577,3 +1577,83 @@ fn walk_dir(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<SyncFil
         out.push(SyncFile { rel, content, mtime });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_derivation_is_deterministic() {
+        let salt = random_b64(16);
+        let a = derive_key("correct horse battery staple", &salt).unwrap();
+        let b = derive_key("correct horse battery staple", &salt).unwrap();
+        assert_eq!(a, b);
+        assert_ne!(a, derive_key("different passphrase", &salt).unwrap());
+    }
+
+    #[test]
+    fn encrypt_decrypt_round_trip() {
+        let salt = random_b64(16);
+        let key = derive_key("hunter2", &salt).unwrap();
+        let nonce = random_b64(12);
+        let plain = r#"{"hello":"世界","key":"sk-secret"}"#;
+        let ct = encrypt(&key, &nonce, plain.as_bytes()).unwrap();
+        assert_ne!(ct, plain);
+        assert_eq!(decrypt(&key, &nonce, &ct).unwrap(), plain);
+    }
+
+    #[test]
+    fn wrong_passphrase_cannot_decrypt() {
+        let salt = random_b64(16);
+        let nonce = random_b64(12);
+        let ct = encrypt(&derive_key("right", &salt).unwrap(), &nonce, b"payload").unwrap();
+        assert!(decrypt(&derive_key("wrong", &salt).unwrap(), &nonce, &ct).is_err());
+    }
+
+    #[test]
+    fn tampered_ciphertext_is_rejected() {
+        let salt = random_b64(16);
+        let key = derive_key("pw", &salt).unwrap();
+        let nonce = random_b64(12);
+        let ct = encrypt(&key, &nonce, b"payload").unwrap();
+        let mut bytes = unb64(&ct).unwrap();
+        bytes[0] ^= 0xff;
+        assert!(decrypt(&key, &nonce, &b64(&bytes)).is_err()); // GCM auth tag catches it
+    }
+
+    #[test]
+    fn project_key_matches_across_checkout_paths() {
+        let tmp = std::env::temp_dir().join(format!("openpi-proj-{}", uuid::Uuid::new_v4()));
+        let setup = |dir: &std::path::Path| {
+            std::fs::create_dir_all(dir).ok()?;
+            for args in [
+                vec!["init"],
+                vec!["remote", "add", "origin", "https://example.com/acme/rocket.git"],
+            ] {
+                let ok = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(&args)
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if !ok {
+                    return None;
+                }
+            }
+            Some(())
+        };
+        let a = tmp.join("a");
+        let b = tmp.join("b");
+        if setup(&a).is_none() || setup(&b).is_none() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return; // git unavailable — skip
+        }
+        let key_a = project_key(a.to_str().unwrap());
+        let key_b = project_key(b.to_str().unwrap());
+        // Same remote, different checkout paths -> same key, so another machine matches.
+        assert_eq!(key_a, key_b);
+        assert!(key_a.starts_with("rocket-"), "unexpected key: {}", key_a);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}

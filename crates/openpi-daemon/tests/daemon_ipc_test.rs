@@ -21,7 +21,8 @@ async fn test_daemon_full_lifecycle() {
         let storage = Storage::in_memory().unwrap();
         let scheduler = Scheduler::new(storage.clone());
         let supervisor = Supervisor::new();
-        let _ = run_ipc_server(&sock_clone, supervisor, storage, scheduler, "dummy-pi-path".to_string()).await;
+        let cloud = openpi_daemon::CloudSync::new(storage.clone());
+        let _ = run_ipc_server(&sock_clone, supervisor, storage, scheduler, "dummy-pi-path".to_string(), cloud).await;
     });
 
     // Wait for socket to become available
