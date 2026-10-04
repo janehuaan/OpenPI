@@ -523,6 +523,26 @@ export function App() {
 		return () => window.clearInterval(timer);
 	}, [refresh, isStreaming, snapshot.daemonRunning, snapshot.health?.sessionsIndexed]);
 
+	// Open external links in the system browser. The webview does not handle
+	// target="_blank" on its own, so an <a> in a rendered message either did nothing
+	// or opened a bare in-app window. Anchors are intercepted here once for every
+	// surface, instead of every renderer wiring it up separately.
+	useEffect(() => {
+		const handleClick = (event: MouseEvent) => {
+			if (event.defaultPrevented || event.button !== 0) return;
+			const anchor = (event.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+			if (!anchor) return;
+			const href = anchor.getAttribute("href") || "";
+			if (!/^(https?:|mailto:)/i.test(href)) return;
+			event.preventDefault();
+			void desktopApi.openExternal(href).catch((caught: unknown) => {
+				console.warn("Failed to open external link:", caught);
+			});
+		};
+		document.addEventListener("click", handleClick);
+		return () => document.removeEventListener("click", handleClick);
+	}, []);
+
 	useEffect(() => {
 		let disposed = false;
 		const loadInitialData = async (): Promise<void> => {
