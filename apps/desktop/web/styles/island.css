@@ -368,37 +368,79 @@ body.dark,
 	flex-shrink: 0;
 }
 
-/* Layer 3: Progress Bar Section */
-.hud-progress-section {
+/* Layer 3: Live console — the running command and its output tail */
+.hud-console {
+	border-radius: 10px;
+	border: 1px solid var(--hud-border-light);
+	background: var(--hud-inset-bg);
+	padding: 8px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	min-width: 0;
+}
+
+.hud-console-cmd {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	font-family: var(--mono, ui-monospace, Menlo, monospace);
+	font-size: 11.5px;
+	color: var(--hud-fg);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.hud-console-prompt {
+	color: var(--hud-accent);
+	font-weight: 700;
+	flex-shrink: 0;
+}
+
+.hud-console-out {
+	margin: 0;
+	font-family: var(--mono, ui-monospace, Menlo, monospace);
+	font-size: 10.5px;
+	line-height: 1.5;
+	color: var(--hud-fg-muted);
+	white-space: pre-wrap;
+	word-break: break-all;
+	max-height: 60px;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
+	mask-image: linear-gradient(to bottom, #000 62%, transparent);
+}
+
+/* Layer 4: Ledger — a label plus the actions that really happened */
+.hud-ledger {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.hud-ledger-label {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: 6px;
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--hud-fg-subtle);
 }
 
-.hud-progress-track {
-	flex: 1;
-	height: 5px;
-	border-radius: 9999px;
-	background: rgba(43, 38, 32, 0.08);
-	overflow: hidden;
-	position: relative;
-}
-
-.hud-progress-bar {
-	height: 100%;
-	border-radius: 9999px;
-	background: var(--hud-accent);
-	box-shadow: 0 0 8px var(--hud-accent-glow);
-	transition: width 300ms var(--ease-spring);
-}
-
-.hud-progress-number {
-	font-size: 12px;
+.hud-ledger-count {
 	font-family: var(--mono, ui-monospace, Menlo, monospace);
 	font-weight: 600;
-	color: var(--hud-fg);
-	min-width: 34px;
-	text-align: right;
+	letter-spacing: 0;
+	color: var(--hud-fg-muted);
+}
+
+.hud-ledger-empty {
+	font-size: 11.5px;
+	color: var(--hud-fg-subtle);
+	padding: 2px 0;
 }
 
 /* Layer 4: Structured Process Table (4 Rows) */
