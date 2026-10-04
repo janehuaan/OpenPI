@@ -1086,11 +1086,20 @@ fn scan_skills(agent_dir: &std::path::Path, openpi_dir: &std::path::Path) -> Vec
                     }
                 }
 
+                let mut scripts_dir_str = None;
+                if let Some(parent) = skill_file.parent() {
+                    let potential_scripts = parent.join("scripts");
+                    if potential_scripts.is_dir() {
+                        scripts_dir_str = Some(potential_scripts.to_string_lossy().to_string());
+                    }
+                }
+
                 skills.push(serde_json::json!({
                     "name": name,
                     "description": description,
                     "filePath": skill_file.to_string_lossy().to_string(),
-                    "content": skill_content
+                    "content": skill_content,
+                    "scriptsDir": scripts_dir_str
                 }));
             }
         }

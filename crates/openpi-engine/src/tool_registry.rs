@@ -28,6 +28,23 @@ impl ToolRegistry {
         Self { jev, memory }
     }
 
+    pub fn tool_names(&self) -> Vec<&'static str> {
+        vec![
+            "read",
+            "write",
+            "search_replace",
+            "edit",
+            "grep",
+            "find",
+            "bash",
+            "code_search",
+            "repo_map",
+            "jev_sentinel_status",
+            "save_skill",
+            "skill_scan",
+        ]
+    }
+
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition::new(
@@ -525,12 +542,14 @@ impl ToolRegistry {
                     });
                 }
 
-                let findings: Vec<_> = openpi_security::scan_content(
+                let registered_tool_names = self.tool_names();
+                let findings: Vec<_> = openpi_security::scan_content_with_tools(
                     std::path::Path::new(&format!("{}.md", name)),
                     content,
+                    &registered_tool_names,
                 )
                 .into_iter()
-                .filter(|f| f.severity >= openpi_security::Severity::High)
+                .filter(|f| f.severity >= openpi_security::Severity::High || f.rule_id == "TOOL-ALIGN-01")
                 .collect();
                 if !findings.is_empty() {
                     let detail: Vec<String> = findings
@@ -547,7 +566,7 @@ impl ToolRegistry {
                         .collect();
                     return Ok(ToolExecutionResult {
                         output: format!(
-                            "Refused: skill '{}' contains {} high-risk pattern(s) and was NOT persisted:\n{}\n\nFix the flagged content (prompt injection / exfiltration / destructive commands) and retry.",
+                            "Refused: skill '{}' contains {} high-risk or unaligned pattern(s) and was NOT persisted:\n{}\n\nFix the flagged content (prompt injection / tool hallucination / destructive commands) and retry.",
                             name,
                             findings.len(),
                             detail.join("\n")
@@ -592,11 +611,13 @@ impl ToolRegistry {
                 let mut report = if let Some(content) =
                     args.get("content").and_then(|v| v.as_str())
                 {
+                    let registered_tool_names = self.tool_names();
                     openpi_security::ScanReport {
                         files_scanned: 1,
-                        findings: openpi_security::scan_content(
+                        findings: openpi_security::scan_content_with_tools(
                             std::path::Path::new("<inline>"),
                             content,
+                            &registered_tool_names,
                         ),
                     }
                 } else {

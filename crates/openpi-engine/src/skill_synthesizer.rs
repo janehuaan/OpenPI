@@ -11,6 +11,7 @@ pub struct SynthesizedSkill {
     pub content: String,
     pub file_path: PathBuf,
     pub synthesized: bool,
+    pub scripts_dir: Option<PathBuf>,
 }
 
 /// Directory where synthesized skills are stored
@@ -138,12 +139,21 @@ pub fn scan_all_skills() -> Vec<SynthesizedSkill> {
                     }
                 }
 
+                let mut scripts_dir = None;
+                if let Some(parent) = skill_file.parent() {
+                    let potential_scripts = parent.join("scripts");
+                    if potential_scripts.is_dir() {
+                        scripts_dir = Some(potential_scripts);
+                    }
+                }
+
                 skills.push(SynthesizedSkill {
                     name,
                     description: desc,
                     content,
                     file_path: skill_file,
                     synthesized: is_synth,
+                    scripts_dir,
                 });
             }
         }
@@ -161,7 +171,12 @@ pub fn format_skills_prompt_directive(skills: &[SynthesizedSkill]) -> String {
     let mut lines = Vec::new();
     for s in skills.iter().take(12) {
         let desc = if s.description.is_empty() { "标准执行规约" } else { s.description.as_str() };
-        lines.push(format!("- **{}**: {} (规约定义: skills/{}/SKILL.md)", s.name, desc, s.name));
+        let scripts_info = if let Some(ref sdir) = s.scripts_dir {
+            format!(" [含确定性资产脚本: {}]", sdir.display())
+        } else {
+            String::new()
+        };
+        lines.push(format!("- **{}**: {} (规约定义: ~/.openpi/memories/skills/{}/SKILL.md){}", s.name, desc, s.name, scripts_info));
     }
 
     format!(
@@ -226,6 +241,7 @@ pub fn evaluate_and_distill_skill(topic: &str, decisions: &str) -> Option<Synthe
         content,
         file_path: PathBuf::new(),
         synthesized: true,
+        scripts_dir: None,
     })
 }
 
@@ -249,6 +265,7 @@ mod tests {
                 content: "# TDD".to_string(),
                 file_path: PathBuf::from("skills/tdd/SKILL.md"),
                 synthesized: false,
+                scripts_dir: None,
             },
         ];
         let directive = format_skills_prompt_directive(&skills);

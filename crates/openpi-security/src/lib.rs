@@ -8,4 +8,4 @@ pub mod rules;
 pub mod scanner;
 
 pub use rules::{rule_count, compiled_rules, Rule, Severity};
-pub use scanner::{scan_content, scan_dir, scan_file, skills_dir, Finding, ScanReport};
+pub use scanner::{scan_content, scan_content_with_tools, scan_dir, scan_file, skills_dir, Finding, ScanReport};
