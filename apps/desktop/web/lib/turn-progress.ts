@@ -145,3 +145,27 @@ export function turnProgressFromEvent(
 ): TurnProgress | undefined {
 	return reduceTurnProgress(current, event, now);
 }
+
+/**
+ * The short English activity verb for a turn. Both the main window's progress row
+ * and the island render this, so the two surfaces always name the same activity
+ * the same way — the Chinese `label` above is diagnostic copy, not display copy.
+ */
+export function turnVerb(progress: TurnProgress | undefined, seconds: number): string {
+	if (!progress) return "Reasoning";
+	if (progress.stage === "tool") {
+		const tool = (progress.toolName || "").toLowerCase();
+		if (tool.includes("bash") || tool.includes("terminal") || tool.includes("exec")) return "Executing";
+		if (tool.includes("read") || tool.includes("find") || tool.includes("grep") || tool.includes("search"))
+			return "Investigating";
+		if (tool.includes("edit") || tool.includes("write") || tool.includes("patch")) return "Refactoring";
+		if (tool.includes("subagent")) return "Orchestrating";
+		if (tool.includes("mcp")) return "Interfacing";
+		return "Operating";
+	}
+	if (progress.stage === "responding") return "Formulating";
+	if (seconds >= 12) return "Illuminating";
+	if (seconds >= 6) return "Synthesizing";
+	if (seconds >= 3) return "Analyzing";
+	return "Reasoning";
+}
