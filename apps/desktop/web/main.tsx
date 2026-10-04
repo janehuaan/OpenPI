@@ -11,11 +11,15 @@ import { initTheme } from "./lib/theme-manager";
 import { initCloudSyncBridge } from "./lib/cloud-sync-bridge";
 
 import { IslandApp } from "./components/IslandApp";
+import { MobileApp } from "./mobile/MobileApp";
 
 // Synchronously initialize theme attributes on <html> to prevent flash of wrong theme
 initTheme();
 
 const isIsland = typeof window !== "undefined" && window.location.search.includes("window=island");
+// The mobile companion is the same bundle behind a different shell: it reads the
+// synced cloud data instead of talking to the daemon.
+const isMobile = typeof window !== "undefined" && window.location.search.includes("shell=mobile");
 
 if (isIsland) {
 	document.documentElement.classList.add("island-mode");
@@ -35,7 +39,7 @@ if (!isIsland) {
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<ErrorBoundary>
-			{isIsland ? <IslandApp /> : <App />}
+			{isIsland ? <IslandApp /> : isMobile ? <MobileApp /> : <App />}
 		</ErrorBoundary>
 	</StrictMode>,
 );
