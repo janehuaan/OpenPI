@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New Tab</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23818cf8' stroke-width='2.2'><circle cx='12' cy='12' r='9'/><path d='M12 7v5l3 3'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <!-- 柔和微弱的环境景深，无冗余数据干扰 -->
+  <div class="ambient-canvas"></div>
+
+  <div class="zen-viewport">
+    
+    <!-- 顶部状态栏：仅保留当前时间日期 -->
+    <header class="zen-header">
+      <div class="date-capsule" id="headerDate">
+        2026年10月4日 星期日
+      </div>
+    </header>
+
+    <!-- 中心主舞台：大时钟 + Raycast 极简搜索框 + 精炼快捷导航 -->
+    <main class="zen-center">
+      
+      <!-- 极简高质感大时钟 -->
+      <section class="clock-monolith">
+        <div class="hero-digits" id="heroTime">01:52</div>
+      </section>
+
+      <!-- Raycast 纯粹命令行搜索框 -->
+      <section class="command-box-wrap">
+        <form id="searchForm" class="command-box" role="search">
+          <button type="button" class="engine-pill" id="engineBtn" title="切换引擎 (快捷键: Tab)">
+            <img id="engineIcon" src="https://www.google.com/favicon.ico" alt="" />
+            <span id="engineLabel">Google</span>
+            <span class="chevron">▾</span>
+          </button>
+
+          <!-- 引擎选择浮层 -->
+          <div class="engine-menu" id="engineMenu">
+            <div class="engine-item active" data-url="https://www.google.com/search?q=" data-name="Google" data-icon="https://www.google.com/favicon.ico">
+              <img src="https://www.google.com/favicon.ico" alt="" />
+              <span>Google</span>
+            </div>
+            <div class="engine-item" data-url="https://github.com/search?q=" data-name="GitHub" data-icon="https://github.githubassets.com/favicons/favicon.svg">
+              <img src="https://github.githubassets.com/favicons/favicon.svg" alt="" />
+              <span>GitHub</span>
+            </div>
+            <div class="engine-item" data-url="https://www.bing.com/search?q=" data-name="Bing" data-icon="https://www.bing.com/favicon.ico">
+              <img src="https://www.bing.com/favicon.ico" alt="" />
+              <span>Bing</span>
+            </div>
+            <div class="engine-item" data-url="https://search.bilibili.com/all?keyword=" data-name="Bilibili" data-icon="https://www.bilibili.com/favicon.ico">
+              <img src="https://www.bilibili.com/favicon.ico" alt="" />
+              <span>Bilibili</span>
+            </div>
+            <div class="engine-item" data-url="https://www.baidu.com/s?wd=" data-name="百度" data-icon="https://www.baidu.com/favicon.ico">
+              <img src="https://www.baidu.com/favicon.ico" alt="" />
+              <span>百度</span>
+            </div>
+          </div>
+
+          <input
+            type="text"
+            id="searchInput"
+            class="command-input"
+            placeholder="搜索或键入网址直达..."
+            autocomplete="off"
+            spellcheck="false"
+            autofocus
+          />
+
+          <div class="command-actions">
+            <span class="kbd-badge" title="按 Tab 切换搜索源">Tab 源</span>
+            <button type="submit" class="command-submit" aria-label="搜索">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+                <polyline points="12 5 19 12 12 19"></polyline>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- 纯粹常用站点快捷 Dock (极简黑曜石磁贴) -->
+      <section class="shortcuts-rack">
+        <div class="rack-grid" id="rackGrid">
+          <!-- 动态渲染快捷站点 -->
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 底部极简快捷键指引 -->
+    <footer class="zen-footer">
+      <div class="shortcut-hints">
+        <span><kbd>/</kbd> 聚焦搜索</span>
+        <span><kbd>Tab</kbd> 切换引擎</span>
+        <span><kbd>Esc</kbd> 取消</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- 添加快捷站点模态弹窗 -->
+  <div class="modal-layer" id="siteModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>添加常用站点</h3>
+        <button class="modal-close" id="modalCloseBtn">✕</button>
+      </div>
+      <form id="siteForm">
+        <div class="form-group">
+          <label>站点名称</label>
+          <input type="text" id="siteNameInput" placeholder="例如: Linear" required autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label>网址 URL</label>
+          <input type="text" id="siteUrlInput" placeholder="https://linear.app" required autocomplete="off" />
+        </div>
+        <div class="modal-buttons">
+          <button type="button" class="btn-cancel" id="modalCancelBtn">取消</button>
+          <button type="submit" class="btn-save">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
