@@ -95,6 +95,11 @@ pub fn run() {
                 let cmd_file = daemon_client::openpi_dir().join("desktop.cmd");
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    // This file can drive the UI, so ignore it when another user on
+                    // the machine could write to it too.
+                    if !control_file_is_trusted(&cmd_file) {
+                        continue;
+                    }
                     if let Ok(content) = std::fs::read_to_string(&cmd_file) {
                         let trimmed = content.trim();
                         if !trimmed.is_empty() {
@@ -138,13 +143,6 @@ pub fn run() {
                                 "toggle-context" | "context" => {
                                     if let Some(main) = handle_cmd.get_webview_window("main") {
                                         let _ = main.eval("window.dispatchEvent(new CustomEvent('openpi:toggle-context'))");
-                                    }
-                                }
-                                "eval" => {
-                                    if let Some(js) = parts.get(1) {
-                                        if let Some(main) = handle_cmd.get_webview_window("main") {
-                                            let _ = main.eval(*js);
-                                        }
                                     }
                                 }
                                 "island" => {
@@ -217,4 +215,19 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+/// The `desktop.cmd` control channel can drive the UI, so it is only honoured
+/// while no other user on the machine can write to the file.
+#[cfg(unix)]
+fn control_file_is_trusted(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o002 == 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn control_file_is_trusted(_path: &std::path::Path) -> bool {
+    true
 }

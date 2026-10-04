@@ -380,8 +380,6 @@ export const desktopApi = {
 		call<{ path: string; dataUrl?: string }>("system_capture_screen", opts),
 	getActiveApp: () =>
 		call<{ name: string; title: string; url?: string }>("system_get_active_app"),
-	runAppleScript: (script: string) =>
-		call<{ ok: boolean; output?: string; error?: string }>("system_run_applescript", { script }),
 	manageClipboard: (opts: { action: "read" | "write"; text?: string }) =>
 		call<{ text?: string; hasImage?: boolean; ok?: boolean; length?: number }>("system_manage_clipboard", opts),
 	toggleHud: () =>
@@ -492,8 +490,6 @@ export const desktopApi = {
 	toggleIslandWindow: () => call<boolean>("toggle_island_window"),
 	showIslandWindow: () => call<boolean>("show_island_window"),
 	hideIslandWindow: () => call<boolean>("hide_island_window"),
-	runTerminalCommand: (opts: { cwd?: string; command: string; timeoutMs?: number }) =>
-		call<{ exitCode: number; stdout: string; stderr: string }>("run_terminal_command", opts),
 
 	// ── Cloud account data sync ──────────────────────────────────────────────
 	cloudSetAuth: (input: {

@@ -106,7 +106,6 @@ pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
 
     let home = std::env::var("HOME").unwrap_or_default();
     let candidates = [
-        PathBuf::from("/Users/huaan/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
         PathBuf::from(format!("{}/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js", home)),
         openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
         openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js"),
@@ -957,7 +956,14 @@ impl Supervisor {
             std::env::var("PATH").unwrap_or_default()
         );
         cmd.env("PATH", default_path);
-        cmd.env("NODE_PATH", "/Users/huaan/openpi-next/node_modules");
+        // Derive NODE_PATH from the entry we actually resolved rather than baking in
+        // one machine's checkout path.
+        if let Some(node_modules) = rpc_entry
+            .ancestors()
+            .find(|p| p.file_name().is_some_and(|n| n == "node_modules"))
+        {
+            cmd.env("NODE_PATH", node_modules);
+        }
         cmd.env("PI_CODING_AGENT_DIR", openpi_dir().join("agent"));
         cmd.env("PI_CODING_AGENT_SESSION_DIR", sessions_dir());
 
