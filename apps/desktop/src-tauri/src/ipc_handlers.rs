@@ -2632,6 +2632,12 @@ pub async fn handle_invoke(
                     }
                 }
             }
+            // Keep the previous contents as a rollback point, before overwriting them.
+            // This file carries two independent groups of fields, so a bad write is
+            // expensive to rebuild.
+            if let Ok(previous) = fs::read(&profile_path) {
+                let _ = fs::write(agent_dir().join("profile.json.bak"), previous);
+            }
             let _ = fs::write(&profile_path, serde_json::to_string_pretty(&merged).unwrap_or_default());
             Ok(merged)
         }
