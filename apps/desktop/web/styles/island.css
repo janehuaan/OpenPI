@@ -193,18 +193,22 @@ body.dark,
 	width: 536px;
 	margin-top: 0;
 	border-radius: 0 0 26px 26px;
-	background: var(--hud-canvas-bg);
+	/* Dark glass needs something to catch: a lit top edge, a surface that falls off
+	   with depth, and a defined bottom rim. A flat fill reads as a black box. */
+	background-color: var(--hud-canvas-bg);
+	background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 160px);
 	-webkit-backdrop-filter: blur(40px) saturate(190%);
 	backdrop-filter: blur(40px) saturate(190%);
 	border: 1px solid var(--hud-border);
-	border-top: none;
+	border-top: 1px solid var(--hud-border-light);
 	box-shadow:
 		0 24px 64px var(--hud-shadow-color),
-		0 4px 16px rgba(0, 0, 0, 0.08);
+		0 4px 16px rgba(0, 0, 0, 0.08),
+		inset 0 -1px 0 rgba(255, 255, 255, 0.05);
 	padding: 16px 22px 18px;
 	display: flex;
 	flex-direction: column;
-	gap: 13px;
+	gap: 14px;
 	cursor: default;
 	animation: hud-card-reveal 240ms var(--ease-spring);
 }
@@ -335,10 +339,10 @@ body.dark,
 }
 
 .hud-hero-title {
-	font-size: 15px;
+	font-size: 16px;
 	font-weight: 650;
 	color: var(--hud-fg);
-	letter-spacing: -0.2px;
+	letter-spacing: -0.25px;
 	line-height: 1.25;
 	white-space: nowrap;
 	overflow: hidden;
@@ -447,17 +451,25 @@ body.dark,
 .hud-process-table {
 	display: flex;
 	flex-direction: column;
-	gap: 7px;
-	padding: 3px 0;
+	gap: 1px;
+	padding: 0;
 }
 
 .hud-process-row {
 	display: grid;
-	grid-template-columns: 108px 1fr 48px 24px;
+	/* Hug the verb so the target starts right after it instead of leaving a void. */
+	grid-template-columns: minmax(48px, max-content) minmax(0, 1fr) max-content 16px;
 	align-items: center;
-	gap: 8px;
+	gap: 10px;
 	font-size: 12px;
 	line-height: 1.4;
+	padding: 5px 8px;
+	margin: 0 -8px;
+	border-radius: 7px;
+}
+
+.hud-process-row.running {
+	background: color-mix(in srgb, var(--hud-accent) 10%, transparent);
 }
 
 .process-col-action {
@@ -509,8 +521,9 @@ body.dark,
 
 .process-col-duration {
 	font-family: var(--mono, ui-monospace, Menlo, monospace);
-	font-size: 11px;
-	color: var(--hud-fg-muted);
+	font-size: 10.5px;
+	font-variant-numeric: tabular-nums;
+	color: var(--hud-fg-subtle);
 	text-align: right;
 }
 
@@ -549,10 +562,12 @@ body.dark,
 	display: grid;
 	grid-template-columns: 1.3fr 1fr 1fr;
 	gap: 12px;
-	padding: 9px 14px;
+	padding: 10px 14px;
 	border-radius: 12px;
-	background: var(--hud-inset-bg);
+	/* Reads as inset: darker than the plate, with the shadow falling inward. */
+	background: color-mix(in srgb, var(--hud-fg) 4%, transparent);
 	border: 1px solid var(--hud-border-light);
+	box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
 .metric-col {
@@ -575,7 +590,7 @@ body.dark,
 }
 
 .metric-value {
-	font-size: 11.5px;
+	font-size: 12.5px;
 	font-weight: 600;
 	color: var(--hud-fg);
 	font-family: var(--mono, ui-monospace, Menlo, monospace);
