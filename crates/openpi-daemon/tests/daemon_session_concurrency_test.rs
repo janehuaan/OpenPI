@@ -73,10 +73,11 @@ async fn abort_and_old_stdout_do_not_block_or_reset_new_process() {
     let storage = Storage::in_memory().unwrap();
     let scheduler = Scheduler::new(storage.clone());
     let supervisor = Supervisor::new();
+    let cloud = openpi_daemon::CloudSync::new(storage.clone());
     let server = tokio::spawn({
         let supervisor = supervisor.clone();
         async move {
-            run_ipc_server(&socket_str, supervisor, storage, scheduler, "unused".into()).await
+            run_ipc_server(&socket_str, supervisor, storage, scheduler, "unused".into(), cloud).await
         }
     });
     for _ in 0..500 {

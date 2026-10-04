@@ -5,8 +5,10 @@
 --   * 每张表都带 user_id，主键 (user_id, id)，靠 RLS `auth.uid() = user_id` 隔离。
 --   * anon key 是公开的；真正的隔离完全由 RLS 保证，所以每条策略都必须带 with check。
 --   * updated_at 用于 Last-Write-Wins 合并；deleted_at 用于删除传播（软删）。
---   * 只同步：本地档案(key_values.profile) / 定时任务(tasks) / 运行记录(task_runs)。
---     API Key、会话历史、记忆等敏感数据不进云。
+--   * 只同步用户数据：档案(key_values.profile) / 定时任务(tasks) / 运行记录(task_runs)
+--     / 文件(memories/**、skills/**、偏好、项目 .pi/memory) / 会话历史 / 加密密钥。
+--   * 会话历史默认脱敏后上传；设置同步口令后改为端到端加密原文。
+--   * API Key 等密钥始终端到端加密（cloud_secrets 只存密文），口令不出本机。
 
 -- ── 本地档案 / 偏好（镜像 SQLite key_values） ──
 create table if not exists public.cloud_kv (
