@@ -1187,7 +1187,7 @@ export function analyzeCommandExecutionState(
 	commandText: string,
 	elapsedSeconds: number,
 	liveOutput?: string,
-): CommandDiagnostic {
+): CommandDiagnostic | undefined {
 	const trimmedOutput = (liveOutput || "").trim();
 	const tail = trimmedOutput.slice(-300);
 
@@ -1274,19 +1274,9 @@ export function analyzeCommandExecutionState(
 		};
 	}
 
-	if (elapsedSeconds >= 15) {
-		return {
-			warningLevel: "info",
-			title: `正在执行命令 (已耗时 ${elapsedSeconds}s)`,
-			detail: "后台进程正在执行，输出流已连接并实时更新中...",
-		};
-	}
-
-	return {
-		warningLevel: "info",
-		title: "正在执行命令",
-		detail: "实时标准输出流已建立...",
-	};
+	// Nothing actionable to report: the row already shows the command and elapsed
+	// time, so a generic "command is running" card would be pure noise.
+	return undefined;
 }
 
 export function getRunningToolOutput(tool: RunningTool): string | undefined {

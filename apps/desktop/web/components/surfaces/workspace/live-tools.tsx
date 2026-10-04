@@ -141,29 +141,31 @@ export function ChatLiveTools({ tools }: { tools: RunningTool[] }) {
 							</div>
 						) : null}
 
-						{/* Intelligent "Why It Takes So Long" Diagnostic Clue */}
-						<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
-							{diagnostic.warningLevel === "critical" ? (
-								<AlertCircle size={14} />
-							) : diagnostic.warningLevel === "warning" ? (
-								<AlertCircle size={14} />
-							) : (
-								<Info size={14} />
-							)}
-							<div className="diagnostic-content">
-								<div className="diagnostic-title">
-									{diagnostic.title}
-								</div>
-								<div className="diagnostic-detail">
-									{diagnostic.detail}
-								</div>
-								{diagnostic.suggestion && (
-									<div className="diagnostic-suggestion">
-										{diagnostic.suggestion}
-									</div>
+						{/* "Why It Takes So Long" diagnostic — only when actionable */}
+						{diagnostic && (
+							<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+								{diagnostic.warningLevel === "critical" ? (
+									<AlertCircle size={14} />
+								) : diagnostic.warningLevel === "warning" ? (
+									<AlertCircle size={14} />
+								) : (
+									<Info size={14} />
 								)}
+								<div className="diagnostic-content">
+									<div className="diagnostic-title">
+										{diagnostic.title}
+									</div>
+									<div className="diagnostic-detail">
+										{diagnostic.detail}
+									</div>
+									{diagnostic.suggestion && (
+										<div className="diagnostic-suggestion">
+											{diagnostic.suggestion}
+										</div>
+									)}
+								</div>
 							</div>
-						</div>
+						)}
 
 						{/* Streaming Output preview */}
 						{output && (
