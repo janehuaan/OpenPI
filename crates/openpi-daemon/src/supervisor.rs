@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{broadcast, Mutex};
-use tracing::{info, warn};
 use serde_json::Value;
 use openpi_proto::{SessionInfo, SessionMode};
 use openpi_engine::config::{default_project_workspace, is_forbidden_workspace_dir};
@@ -20,8 +16,6 @@ pub fn openpi_dir() -> PathBuf {
         PathBuf::from(home).join(".openpi")
     }
 }
-
-const JEV_SENTINEL_JS: &str = include_str!("../assets/sentinel.js");
 
 pub fn instances_path() -> PathBuf {
     openpi_dir().join("instances.json")
@@ -59,136 +53,8 @@ pub fn find_session_file(sid: &str) -> PathBuf {
     direct
 }
 
-pub fn resolve_node_executable() -> (PathBuf, bool) {
-    if let Ok(p) = std::env::var("OPENPI_NODE_PATH") {
-        let pb = PathBuf::from(&p);
-        if pb.is_file() && pb.exists() {
-            let is_electron = p.to_lowercase().contains("openpi") || p.to_lowercase().contains("electron");
-            return (pb, is_electron);
-        }
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        PathBuf::from(format!("{}/.local/bin/node", home)),
-        PathBuf::from("/opt/local/bin/node"),
-        PathBuf::from("/opt/homebrew/bin/node"),
-        PathBuf::from("/usr/local/bin/node"),
-        PathBuf::from("/usr/bin/node"),
-    ];
-
-    for c in &candidates {
-        if c.is_file() && c.exists() {
-            return (c.clone(), false);
-        }
-    }
-
-    if let Ok(output) = std::process::Command::new("which").arg("node").output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let p = PathBuf::from(&path_str);
-            if p.is_file() && p.exists() {
-                return (p, false);
-            }
-        }
-    }
-
-    (PathBuf::from("node"), false)
-}
-
-pub fn resolve_pi_rpc_entry(pi_cli_path: &str) -> PathBuf {
-    if let Ok(p) = std::env::var("OPENPI_PI_RPC_ENTRY") {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return pb;
-        }
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        PathBuf::from(format!("{}/openpi-next/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js", home)),
-        openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
-        openpi_dir().join("runtime/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js"),
-        PathBuf::from("/Applications/OpenPI.app/Contents/Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js"),
-    ];
-
-    for c in &candidates {
-        if c.exists() {
-            return c.clone();
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let bundle = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js");
-            if bundle.exists() {
-                return bundle;
-            }
-            let rpc = dir.join("node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js");
-            if rpc.exists() {
-                return rpc;
-            }
-            if let Some(res) = dir.parent() {
-                let res_rpc = res.join("Resources/openpi/node_modules/@earendil-works/pi-coding-agent/dist/rpc-entry.js");
-                if res_rpc.exists() {
-                    return res_rpc;
-                }
-            }
-        }
-    }
-
-    let cli = PathBuf::from(pi_cli_path);
-    if cli.exists() {
-        if cli.to_string_lossy().ends_with("rpc-entry.js") {
-            return cli;
-        }
-        if let Some(parent) = cli.parent() {
-            let bundle = parent.join("bundle").join("rpc-entry.js");
-            if bundle.exists() {
-                return bundle;
-            }
-            let rpc = parent.join("rpc-entry.js");
-            if rpc.exists() {
-                return rpc;
-            }
-        }
-    }
-
-    cli
-}
-
-const CODE_MODE_TOOLS: &str = "\
-read,bash,edit,write,search_replace,grep,find,ls,code_search,semantic_search,repo_map,memory,session_search,\
-system_os,system_screen,system_process,\
-browser,web_search,web_fetch,\
-subagent,spawn_subagent,subagent_status,subagent_stop,subagent_risk,\
-task,mcp,mcpScript";
-
-const SUBAGENT_TOOLS: &str = "\
-read,grep,find,ls,code_search,semantic_search,repo_map,\
-system_os,system_process,memory,session_search";
-
-const SUBAGENT_DIRECTIVE: &str = "\
-【OpenPI Ephemeral Subagent Runtime】\n\
-You are an ephemeral exploration and investigation subagent running in an isolated, read-only sub-process.\n\
-Principles:\n\
-1. You have strictly read-only tools (read, grep, find, ls, code_search, repo_map).\n\
-2. Thoroughly investigate the assigned goal with precise, targeted tool calls.\n\
-3. Conclude with a clear, high-density Markdown summary (under 400 words) containing exact file paths, line ranges, and factual findings.\n\
-4. Be factual, concise, and structured. Do not output conversational filler.";
-
-const CODE_MODE_UNATTENDED_DIRECTIVE: &str = "\
-【OpenPI 敏捷研发与自愈准则】：\n\
-1. 敏捷内联先行（严禁杀鸡用牛刀）：项目初始化、脚手架创建（如 Package.swift/Cargo.toml）、单文件编写、常规配置与局部修复，必须在当前主会话直接调用 write/edit 工具秒级交付，严禁无谓派发 subagent 造成空等与膨胀！\n\
-2. 杜绝官僚式反问：严禁停下来询问用户“请确认执行方式：1. 子代理驱动 2. 内联顺序”等伪选择题。需求明确直接执行，不把内部运行机制甩锅给用户打断心流。\n\
-3. 目标导向与按需验证：仅在代码实质修改后执行针对性验证；严禁在普通问答或只读探索中盲目触发大型全局编译与重构。\n\
-4. 缺陷收敛闭环：若自己引入了编译报错或测试失败，必须主动定位源码根因并实施修复，直至消除当前变更引入的缺陷。\n\
-5. 权衡合理委派：仅在遇到真正的大规模跨文件检索、独立多模块并行构建或超长耗时任务时，才在后台静默委派 subagent。";
-
 pub struct ManagedSession {
     pub info: SessionInfo,
-    pub child_stdin: Arc<Mutex<Option<ChildStdin>>>,
-    pub child: Option<Child>,
     pub pending: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>>,
 }
 
@@ -219,8 +85,6 @@ impl Supervisor {
                             r.session_id.clone(),
                             ManagedSession {
                                 info: r,
-                                child_stdin: Arc::new(Mutex::new(None)),
-                                child: None,
                                 pending: Arc::new(Mutex::new(HashMap::new())),
                             },
                         );
@@ -258,8 +122,6 @@ impl Supervisor {
                                             sid.clone(),
                                             ManagedSession {
                                                 info,
-                                                child_stdin: Arc::new(Mutex::new(None)),
-                                                child: None,
                                                 pending: Arc::new(Mutex::new(HashMap::new())),
                                             },
                                         );
@@ -439,11 +301,7 @@ impl Supervisor {
         let mut records: Vec<SessionInfo> = Vec::with_capacity(sessions.len());
         for s in sessions.values() {
             let mut info = s.info.clone();
-            if Self::use_native_engine() {
-                info.running = self.engine.is_running(&info.session_id).await;
-            } else {
-                info.running = s.child.is_some() && s.info.running;
-            }
+            info.running = self.engine.is_running(&info.session_id).await;
             records.push(info);
         }
         records.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -460,11 +318,7 @@ impl Supervisor {
         let mut list: Vec<SessionInfo> = Vec::with_capacity(sessions.len());
         for s in sessions.values() {
             let mut info = s.info.clone();
-            if Self::use_native_engine() {
-                info.running = self.engine.is_running(&info.session_id).await;
-            } else {
-                info.running = s.child.is_some() && s.info.running;
-            }
+            info.running = self.engine.is_running(&info.session_id).await;
             list.push(info);
         }
         list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -475,11 +329,7 @@ impl Supervisor {
         let sessions = self.sessions.lock().await;
         if let Some(s) = sessions.get(id) {
             let mut info = s.info.clone();
-            if Self::use_native_engine() {
-                info.running = self.engine.is_running(&info.session_id).await;
-            } else {
-                info.running = s.child.is_some() && s.info.running;
-            }
+            info.running = self.engine.is_running(&info.session_id).await;
             Some(info)
         } else {
             None
@@ -508,11 +358,7 @@ impl Supervisor {
     ) -> anyhow::Result<String> {
         let subagent_id = format!("subagent-{}", uuid::Uuid::new_v4());
         let mode = SessionMode::Code;
-        let mut pi_cli = self.get_pi_cli_path().await;
-        if pi_cli.is_empty() {
-            let rpc = resolve_pi_rpc_entry("");
-            pi_cli = rpc.to_string_lossy().to_string();
-        }
+        let pi_cli = self.get_pi_cli_path().await;
 
         // 1. Create in-memory ephemeral session (no disk session files)
         let _info = self.create_session(
@@ -658,8 +504,6 @@ impl Supervisor {
                 id.clone(),
                 ManagedSession {
                     info: info.clone(),
-                    child_stdin: Arc::new(Mutex::new(None)),
-                    child: None,
                     pending: Arc::new(Mutex::new(HashMap::new())),
                 },
             );
@@ -720,24 +564,13 @@ impl Supervisor {
     }
 
     pub async fn is_session_running(&self, session_id: &str) -> bool {
-        if Self::use_native_engine() {
-            return self.engine.is_running(session_id).await;
-        }
-        let sessions = self.sessions.lock().await;
-        sessions.get(session_id).map(|s| s.info.running).unwrap_or(false)
-    }
-
-    pub fn use_native_engine() -> bool {
-        if let Ok(v) = std::env::var("OPENPI_ENGINE") {
-            return v.to_lowercase() != "node";
-        }
-        true
+        self.engine.is_running(session_id).await
     }
 
     pub async fn ensure_process(
         &self,
         session_id: &str,
-        pi_cli_path: &str,
+        _pi_cli_path: &str,
     ) -> anyhow::Result<()> {
         let mut sessions = self.sessions.lock().await;
         if !sessions.contains_key(session_id) {
@@ -775,575 +608,116 @@ impl Supervisor {
                 session_id.to_string(),
                 ManagedSession {
                     info,
-                    child_stdin: Arc::new(Mutex::new(None)),
-                    child: None,
                     pending: Arc::new(Mutex::new(HashMap::new())),
                 },
             );
         }
 
-        let session = sessions.get_mut(session_id).unwrap();
-
-        if Self::use_native_engine() {
-            let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({ "type": "rpc_ready" })));
-            return Ok(());
-        }
-
-        if session.child.is_some() {
-            return Ok(());
-        }
-
-        let (node_bin, is_electron) = resolve_node_executable();
-        let rpc_entry = resolve_pi_rpc_entry(pi_cli_path);
-        let session_file = find_session_file(session_id);
-
-        let _ = std::fs::create_dir_all(sessions_dir());
-        let _ = std::fs::create_dir_all(openpi_dir().join("agent"));
-        let extensions_dir = openpi_dir().join("agent").join("extensions");
-        let _ = std::fs::create_dir_all(&extensions_dir);
-        let sentinel_path = extensions_dir.join("sentinel.js");
-        let _ = std::fs::write(&sentinel_path, JEV_SENTINEL_JS);
-
-        info!(
-            "Spawning pi subprocess for session {}: node={:?} entry={:?}",
-            session_id, node_bin, rpc_entry
-        );
-
-        let mut cmd = Command::new(&node_bin);
-
-        #[cfg(target_os = "macos")]
-        {
-            cmd.arg("--import")
-                .arg("data:text/javascript,Object.defineProperty(process,'title',{get:()=>'openpi',set:()=>{},configurable:true});");
-        }
-
-        cmd.arg(&rpc_entry)
-            .arg("--mode")
-            .arg("rpc");
-
-        if session.info.in_memory == Some(true) {
-            cmd.arg("--no-session")
-                .arg("--session-id")
-                .arg(session_id);
-        } else {
-            cmd.arg("--session")
-                .arg(&session_file);
-        }
-
-        let mut model_arg: Option<String> = None;
-        let mut provider_arg: Option<String> = None;
-
-        if let Some(m) = &session.info.model {
-            if let Some((prov, mid)) = m.split_once('/') {
-                provider_arg = Some(prov.to_string());
-                model_arg = Some(mid.to_string());
-            } else {
-                model_arg = Some(m.to_string());
-                // Look up provider in ~/.openpi/agent/models.json
-                let models_file = openpi_dir().join("agent").join("models.json");
-                if let Ok(c) = std::fs::read_to_string(&models_file) {
-                    if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                        if let Some(providers) = val.get("providers").and_then(|p| p.as_object()) {
-                            for (prov_name, prov_val) in providers {
-                                if let Some(models) = prov_val.get("models").and_then(|arr| arr.as_array()) {
-                                    if models.iter().any(|item| item.get("id").and_then(|id| id.as_str()) == Some(m)) {
-                                        provider_arg = Some(prov_name.clone());
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if provider_arg.is_none() {
-                    let settings_file = openpi_dir().join("agent").join("settings.json");
-                    if let Ok(c) = std::fs::read_to_string(&settings_file) {
-                        if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                            if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
-                                provider_arg = Some(p.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            let settings_file = openpi_dir().join("agent").join("settings.json");
-            if let Ok(c) = std::fs::read_to_string(&settings_file) {
-                if let Ok(val) = serde_json::from_str::<Value>(&c) {
-                    if let Some(m) = val.get("defaultModel").and_then(|v| v.as_str()) {
-                        model_arg = Some(m.to_string());
-                        if let Some(p) = val.get("defaultProvider").and_then(|v| v.as_str()) {
-                            provider_arg = Some(p.to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(p) = provider_arg {
-            cmd.arg("--provider").arg(p);
-        }
-        if let Some(m) = model_arg {
-            cmd.arg("--model").arg(m);
-        }
-
-        if session.info.in_memory == Some(true) {
-            cmd.arg("--tools")
-                .arg(SUBAGENT_TOOLS)
-                .arg("--append-system-prompt")
-                .arg(SUBAGENT_DIRECTIVE);
-        } else if session.info.mode == SessionMode::Code {
-            let session_title = session.info.name.as_deref().unwrap_or("");
-            let title_lower = session_title.to_lowercase();
-            
-            // 自动推断情境与获取对应的 Contextual Beta*
-            let (ctx_key, ctx_label) = if title_lower.contains("fix") || title_lower.contains("bug") || title_lower.contains("报错") || title_lower.contains("修复") || title_lower.contains("异常") {
-                ("quick_fix", "缺陷自愈（QuickFix）")
-            } else if title_lower.contains("refactor") || title_lower.contains("重构") || title_lower.contains("迁移") || title_lower.contains("rewrite") {
-                ("refactor", "架构重构（Refactor）")
-            } else if title_lower.contains("explore") || title_lower.contains("search") || title_lower.contains("调研") || title_lower.contains("查看") {
-                ("exploration", "环境探索（Exploration）")
-            } else {
-                ("general", "综合稳健（General）")
-            };
-
-            let beta = self.jev.contextual_beta(ctx_key).await;
-            let dynamic_prompt = if ctx_key == "quick_fix" || beta <= 0.3 {
-                format!(
-                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 深度收敛型）】：\n\
-                     系统历史做梦演化显示当前任务倾向于手术刀式精准收敛：\n\
-                     - 优先使用 read 确认行号后，使用 edit 进行极小原子修改，遵循 MDL 极简代码律；\n\
-                     - 每次修改后运行单测快速验证，以最少交互轮次和最小代码变动（Low Churn）完成交付；\n\
-                     - 避免无目的的分支探索或扩散排查，切忌大面积重写无关代码。",
-                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
-                )
-            } else if ctx_key == "refactor" || beta >= 0.7 {
-                format!(
-                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 广度探索型）】：\n\
-                     系统历史做梦演化显示当前任务具有跨文件依赖与架构复杂度：\n\
-                     - 在实施核心修改前，请优先阅读相关类型定义、接口契约与上下文调用链路；\n\
-                     - 分步骤按模块推进，针对潜在边界情况设计防御性改动，变更后务必运行全量编译；\n\
-                     - 避免盲目单点修改引入次生回归缺陷，保持多分支试错与自愈耐心。",
-                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
-                )
-            } else {
-                format!(
-                    "{}\n\n【Dream-RSI 神经先验指示（情境: {} | Beta* = {:.2} 平衡稳健型）】：\n\
-                     系统历史做梦演化显示当前任务处于最优平衡区间：\n\
-                     - 采取“快速定位 -> 局部自愈 -> 针对性验证”的稳健步频；\n\
-                     - 保持代码修改与自愈闭环的高效推进，兼顾修改紧凑度与探索深度。",
-                    CODE_MODE_UNATTENDED_DIRECTIVE, ctx_label, beta
-                )
-            };
-
-            let persona = openpi_engine::PersonaConfig::load();
-            let persona_directive = persona.to_prompt_directive();
-            let final_prompt = format!("{}{}", dynamic_prompt, persona_directive);
-
-            cmd.arg("--tools")
-                .arg(CODE_MODE_TOOLS)
-                .arg("--append-system-prompt")
-                .arg(final_prompt);
-        }
-
-        if is_electron {
-            cmd.env("ELECTRON_RUN_AS_NODE", "1");
-        }
-
-        let default_path = format!(
-            "{}/.local/bin:/opt/local/bin:/opt/local/sbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{}",
-            std::env::var("HOME").unwrap_or_default(),
-            std::env::var("PATH").unwrap_or_default()
-        );
-        cmd.env("PATH", default_path);
-        // Derive NODE_PATH from the entry we actually resolved rather than baking in
-        // one machine's checkout path.
-        if let Some(node_modules) = rpc_entry
-            .ancestors()
-            .find(|p| p.file_name().is_some_and(|n| n == "node_modules"))
-        {
-            cmd.env("NODE_PATH", node_modules);
-        }
-        cmd.env("PI_CODING_AGENT_DIR", openpi_dir().join("agent"));
-        cmd.env("PI_CODING_AGENT_SESSION_DIR", sessions_dir());
-
-        let cwd_path = PathBuf::from(&session.info.cwd);
-        let actual_cwd = if cwd_path.exists() {
-            cwd_path
-        } else {
-            openpi_dir()
-        };
-
-        cmd.current_dir(&actual_cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-
-        let mut child = cmd.spawn()?;
-        let stdin = child.stdin.take().expect("child stdin piped");
-        let stdout = child.stdout.take().expect("child stdout piped");
-
-        // Each spawn owns its RPC state; old stdout readers must not affect a replacement.
-        session.child_stdin = Arc::new(Mutex::new(Some(stdin)));
-        session.pending = Arc::new(Mutex::new(HashMap::new()));
-        session.child = Some(child);
-        session.info.running = true;
-
-        let tx = self.event_tx.clone();
-        let sid = session_id.to_string();
-        let pending = session.pending.clone();
-        let sessions_clone = self.sessions.clone();
-        let child_stdin_clone = session.child_stdin.clone();
-        let jev_clone = self.jev.clone();
-
-        tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                match serde_json::from_str::<Value>(&line) {
-                    Ok(mut event) => {
-                        let ev_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        if ev_type == "response" {
-                            if let Some(req_id) = event.get("id").and_then(|v| v.as_str()) {
-                                let mut p = pending.lock().await;
-                                if let Some(sender) = p.remove(req_id) {
-                                    let success = event.get("success").and_then(|v| v.as_bool()).unwrap_or(true);
-                                    if success {
-                                        let data = event.get("data").cloned().unwrap_or(Value::Null);
-                                        let _ = sender.send(Ok(data));
-                                    } else {
-                                        let err = event.get("error").and_then(|v| v.as_str()).unwrap_or("RPC command failed").to_string();
-                                        let _ = sender.send(Err(err));
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-
-                        // Jev Hook 1: Pre-Execution Safety Gate on tool start
-                        if ev_type == "tool_execution_start" {
-                            let cmd = event.get("args").and_then(|a| a.get("command")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-                            if !cmd.is_empty() {
-                                let verdict = jev_clone.pre_check_command(&cmd);
-                                match verdict {
-                                    openpi_jev::types::GateVerdict::Deny { reason } => {
-                                        tracing::warn!("🛑 [Jev SafetyGate] Intercepted high-risk command: `{}`. Reason: {}", cmd, reason);
-                                        event["jev_blocked"] = serde_json::json!({
-                                            "blocked": true,
-                                            "reason": reason,
-                                        });
-                                    }
-                                    openpi_jev::types::GateVerdict::RequireConfirmation { prompt, reasons, risk_score } => {
-                                        tracing::warn!("⚠️ [Jev SafetyGate] High-risk command needs confirmation: `{}`", cmd);
-                                        event["jev_confirmation"] = serde_json::json!({
-                                            "prompt": prompt,
-                                            "reasons": reasons,
-                                            "risk_score": risk_score,
-                                        });
-                                    }
-                                    openpi_jev::types::GateVerdict::ModifyCommand { safe_command, reason } => {
-                                        tracing::info!("💡 [Jev SafetyGate] Auto-patched command: `{}` -> `{}`", cmd, safe_command);
-                                        event["jev_modified"] = serde_json::json!({
-                                            "safe_command": safe_command,
-                                            "reason": reason,
-                                        });
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-
-                        // Jev Hook 2: Process tool outputs (compress logs, mask leaks, check loop breaks)
-                        if ev_type == "tool_execution_end" || ev_type == "tool_output" {
-                            let cmd = event.get("args").and_then(|a| a.get("command")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-                            let is_error = event.get("isError").and_then(|b| b.as_bool()).unwrap_or(false);
-                            let original_result = event.get("result").and_then(|v| v.as_str()).map(|s| s.to_string());
-
-                            if let Some(res_str) = original_result {
-                                let (compressed, leak) = jev_clone.process_command_output(&res_str);
-                                if leak.has_leaks || compressed.was_compressed {
-                                    event["result"] = serde_json::Value::String(compressed.content);
-                                    event["jev_meta"] = serde_json::json!({
-                                        "tokens_saved": compressed.estimated_tokens_saved,
-                                        "lines_truncated": compressed.lines_truncated,
-                                        "leaks_redacted": leak.leak_count,
-                                    });
-                                }
-
-                                // Loop Breaker & Stop Decider hooks
-                                if let Some(loop_res) = jev_clone.record_command_result(&cmd, !is_error, &res_str).await {
-                                    if loop_res.should_break {
-                                        tracing::warn!("🛑 [Jev LoopBreaker] Hard circuit breaker tripped! Count: {}", loop_res.loop_count);
-                                        event["jev_loop_breaker"] = serde_json::json!({
-                                            "should_break": true,
-                                            "loop_count": loop_res.loop_count,
-                                            "corrective_hint": loop_res.corrective_hint,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-
-                        let sessions = sessions_clone.lock().await;
-                        if sessions.get(&sid).is_some_and(|s| Arc::ptr_eq(&s.pending, &pending) && s.child.is_some()) {
-                            let _ = tx.send((sid.clone(), event));
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse line from pi session {}: {}", sid, e);
-                    }
-                }
-            }
-            info!("Subprocess stdout stream ended for session {}", sid);
-
-            // Reaping & cleanup: mark session dead so it can cleanly respawn on demand
-            let mut sessions = sessions_clone.lock().await;
-            if let Some(s) = sessions.get_mut(&sid) {
-                if !Arc::ptr_eq(&s.pending, &pending) || s.child.is_none() {
-                    return;
-                }
-                *child_stdin_clone.lock().await = None;
-                s.info.running = false;
-                if let Some(mut c) = s.child.take() {
-                    tokio::spawn(async move {
-                        let _ = c.wait().await;
-                    });
-                }
-                let mut p = s.pending.lock().await;
-                for (_, sender) in p.drain() {
-                    let _ = sender.send(Err("Subprocess exited unexpectedly".to_string()));
-                }
-            }
-        });
-
+        let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({ "type": "rpc_ready" })));
         Ok(())
     }
 
-    async fn mark_session_dead(&self, session_id: &str, generation: &Arc<Mutex<Option<ChildStdin>>>) {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get_mut(session_id) {
-            if !Arc::ptr_eq(&session.child_stdin, generation) {
-                return;
-            }
-            session.info.running = false;
-            *session.child_stdin.lock().await = None;
-            if let Some(mut child) = session.child.take() {
-                tokio::spawn(async move {
-                    let _ = child.wait().await;
-                });
-            }
-            let mut p = session.pending.lock().await;
-            for (_, tx) in p.drain() {
-                let _ = tx.send(Err("Session process died".into()));
-            }
-        }
-    }
-
     pub async fn send_rpc(&self, session_id: &str, command: &Value) -> anyhow::Result<Value> {
-        if Self::use_native_engine() {
-            let cmd_type = command.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match cmd_type {
-                "prompt" => {
-                    let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                    let cwd = {
-                        let sessions = self.sessions.lock().await;
-                        sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
-                    };
-                    let model_override = {
-                        let sessions = self.sessions.lock().await;
-                        sessions.get(session_id).and_then(|s| s.info.model.clone())
-                    };
+        let cmd_type = command.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match cmd_type {
+            "prompt" => {
+                let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                let cwd = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
+                };
+                let model_override = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(session_id).and_then(|s| s.info.model.clone())
+                };
 
-                    let needs_name = {
-                        let sessions = self.sessions.lock().await;
-                        sessions.get(session_id).map(|s| {
-                            s.info.name.is_none()
-                                || s.info.name.as_deref().unwrap_or("").trim().is_empty()
-                                || s.info.name.as_deref() == Some("新对话")
-                        }).unwrap_or(false)
-                    };
-                    if needs_name && !msg.trim().is_empty() {
-                        let fast_title = openpi_engine::title_summarizer::summarize_title_heuristic(msg, &cwd);
-                        if !fast_title.is_empty() && fast_title != "新对话" {
-                            let _ = self.rename_session(session_id, Some(fast_title.clone())).await;
-                            let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({
-                                "type": "session_renamed",
-                                "sessionId": session_id,
-                                "name": fast_title,
-                            })));
-                        }
-                    }
-
-                    self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
-                    return Ok(serde_json::json!(true));
-                }
-                "abort" => {
-                    self.engine.abort(session_id).await?;
-                    return Ok(serde_json::json!(true));
-                }
-                "set_model" => {
-                    if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
-                        let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
-                        let name = command.get("name").and_then(|v| v.as_str()).unwrap_or(m);
-                        let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
-                        self.engine.set_model(session_id, prov, m, name).await;
-                        let _ = self.update_session_model(session_id, model_str).await;
-
-                        return Ok(serde_json::json!({
-                            "model": {
-                                "id": m,
-                                "name": name,
-                                "provider": prov
-                            },
+                let needs_name = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(session_id).map(|s| {
+                        s.info.name.is_none()
+                            || s.info.name.as_deref().unwrap_or("").trim().is_empty()
+                            || s.info.name.as_deref() == Some("新对话")
+                    }).unwrap_or(false)
+                };
+                if needs_name && !msg.trim().is_empty() {
+                    let fast_title = openpi_engine::title_summarizer::summarize_title_heuristic(msg, &cwd);
+                    if !fast_title.is_empty() && fast_title != "新对话" {
+                        let _ = self.rename_session(session_id, Some(fast_title.clone())).await;
+                        let _ = self.event_tx.send((session_id.to_string(), serde_json::json!({
+                            "type": "session_renamed",
                             "sessionId": session_id,
-                            "isStreaming": false,
-                            "isCompacting": false
-                        }));
+                            "name": fast_title,
+                        })));
                     }
-                    return Ok(serde_json::json!(true));
                 }
-                "set_thinking_level" => {
-                    let level = command.get("level").and_then(|v| v.as_str()).unwrap_or("medium");
-                    let mut journal = openpi_engine::session_journal::SessionJournal::open(session_id);
-                    let _ = journal.append_thinking_level_change(level);
+
+                self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
+                return Ok(serde_json::json!(true));
+            }
+            "abort" => {
+                self.engine.abort(session_id).await?;
+                return Ok(serde_json::json!(true));
+            }
+            "set_model" => {
+                if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
+                    let prov = command.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                    let name = command.get("name").and_then(|v| v.as_str()).unwrap_or(m);
+                    let model_str = if prov.is_empty() { m.to_string() } else { format!("{}/{}", prov, m) };
+                    self.engine.set_model(session_id, prov, m, name).await;
+                    let _ = self.update_session_model(session_id, model_str).await;
+
                     return Ok(serde_json::json!({
-                        "thinkingLevel": level,
-                        "sessionId": session_id
+                        "model": {
+                            "id": m,
+                            "name": name,
+                            "provider": prov
+                        },
+                        "sessionId": session_id,
+                        "isStreaming": false,
+                        "isCompacting": false
                     }));
                 }
-                "steer" => {
-                    let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
-                    let cwd = {
-                        let sessions = self.sessions.lock().await;
-                        sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
-                    };
-                    let model_override = {
-                        let sessions = self.sessions.lock().await;
-                        sessions.get(session_id).and_then(|s| s.info.model.clone())
-                    };
-                    let _ = self.engine.abort(session_id).await;
-                    self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
-                    return Ok(serde_json::json!(true));
-                }
-                "get_commands" => {
-                    return Ok(serde_json::json!({ "commands": ["/help", "/compact", "/reset", "/model"] }));
-                }
-                "extension_ui_response" => {
-                    return Ok(serde_json::json!(true));
-                }
-                _ => {
-                    return Ok(serde_json::json!(true));
-                }
+                return Ok(serde_json::json!(true));
+            }
+            "set_thinking_level" => {
+                let level = command.get("level").and_then(|v| v.as_str()).unwrap_or("medium");
+                let mut journal = openpi_engine::session_journal::SessionJournal::open(session_id);
+                let _ = journal.append_thinking_level_change(level);
+                return Ok(serde_json::json!({
+                    "thinkingLevel": level,
+                    "sessionId": session_id
+                }));
+            }
+            "steer" => {
+                let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                let cwd = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(session_id).map(|s| s.info.cwd.clone()).unwrap_or_else(|| ".".into())
+                };
+                let model_override = {
+                    let sessions = self.sessions.lock().await;
+                    sessions.get(session_id).and_then(|s| s.info.model.clone())
+                };
+                let _ = self.engine.abort(session_id).await;
+                self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
+                return Ok(serde_json::json!(true));
+            }
+            "get_commands" => {
+                return Ok(serde_json::json!({ "commands": ["/help", "/compact", "/reset", "/model"] }));
+            }
+            "extension_ui_response" => {
+                return Ok(serde_json::json!(true));
+            }
+            _ => {
+                return Ok(serde_json::json!(true));
             }
         }
-
-        let (child_stdin, pending) = {
-            let mut sessions = self.sessions.lock().await;
-            let session = match sessions.get_mut(session_id) {
-                Some(s) => s,
-                None => anyhow::bail!("Session not found: {}", session_id),
-            };
-            (session.child_stdin.clone(), session.pending.clone())
-        };
-
-        let mut stdin_guard = child_stdin.lock().await;
-        let stdin = match stdin_guard.as_mut() {
-            Some(s) => s,
-            None => anyhow::bail!("Session {} has no running process", session_id),
-        };
-
-        let mut cmd = command.clone();
-        let cmd_type = cmd.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-        if cmd_type == "extension_ui_response" {
-            let mut line = serde_json::to_string(&cmd)?;
-            line.push('\n');
-            if let Err(e) = stdin.write_all(line.as_bytes()).await {
-                drop(stdin_guard);
-                self.mark_session_dead(session_id, &child_stdin).await;
-                anyhow::bail!("Failed to write to session stdin (process died): {}", e);
-            }
-            if let Err(e) = stdin.flush().await {
-                drop(stdin_guard);
-                self.mark_session_dead(session_id, &child_stdin).await;
-                anyhow::bail!("Failed to flush session stdin (process died): {}", e);
-            }
-            drop(stdin_guard);
-            return Ok(serde_json::json!(true));
-        }
-
-        let req_id = match cmd.get("id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                let new_id = uuid::Uuid::new_v4().to_string();
-                if let Some(obj) = cmd.as_object_mut() {
-                    obj.insert("id".to_string(), Value::String(new_id.clone()));
-                }
-                new_id
-            }
-        };
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        {
-            let mut p = pending.lock().await;
-            p.insert(req_id, tx);
-        }
-
-        let mut line = serde_json::to_string(&cmd)?;
-        line.push('\n');
-
-        if let Err(e) = stdin.write_all(line.as_bytes()).await {
-            drop(stdin_guard);
-            self.mark_session_dead(session_id, &child_stdin).await;
-            anyhow::bail!("Failed to write to session stdin (process died): {}", e);
-        }
-        if let Err(e) = stdin.flush().await {
-            drop(stdin_guard);
-            self.mark_session_dead(session_id, &child_stdin).await;
-            anyhow::bail!("Failed to flush session stdin (process died): {}", e);
-        }
-        drop(stdin_guard);
-
-        let timeout_duration = if cmd_type == "prompt" {
-            std::time::Duration::from_secs(600) // 10 minutes for autonomous agent prompt execution
-        } else {
-            std::time::Duration::from_secs(60)
-        };
-
-        let rpc_res = match tokio::time::timeout(timeout_duration, rx).await {
-            Ok(Ok(Ok(data))) => Ok(data),
-            Ok(Ok(Err(err_msg))) => anyhow::bail!(err_msg),
-            Ok(Err(_)) => anyhow::bail!("RPC channel dropped"),
-            Err(_) => anyhow::bail!("RPC command timed out"),
-        };
-
-        // 自动触发：当用户发起的一轮研发/问答任务圆满完成时，后台静默做梦自我演化！
-        if cmd_type == "prompt" && rpc_res.is_ok() {
-            let jev_bg = self.jev.clone();
-            tokio::spawn(async move {
-                // 等待 1 秒确保会话日志完整刷盘
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let dir = crate::supervisor::sessions_dir();
-                let _ = jev_bg.trigger_offline_dreaming(&dir).await;
-            });
-        }
-
-        rpc_res
     }
 
     pub async fn stop_session(&self, session_id: &str) -> anyhow::Result<()> {
+        let _ = self.engine.abort(session_id).await;
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get_mut(session_id) {
-            *session.child_stdin.lock().await = None;
-            if let Some(mut child) = session.child.take() {
-                let _ = child.kill().await;
-                tokio::spawn(async move {
-                    let _ = child.wait().await;
-                });
-            }
             session.info.running = false;
             let mut p = session.pending.lock().await;
             for (_, tx) in p.drain() {
@@ -1355,20 +729,14 @@ impl Supervisor {
 
     pub async fn shutdown_all(&self) {
         let mut sessions = self.sessions.lock().await;
-        for (_sid, session) in sessions.iter_mut() {
-            *session.child_stdin.lock().await = None;
-            if let Some(mut child) = session.child.take() {
-                let _ = child.kill().await;
-                tokio::spawn(async move {
-                    let _ = child.wait().await;
-                });
-            }
+        for (sid, session) in sessions.iter_mut() {
+            let _ = self.engine.abort(sid).await;
             session.info.running = false;
             let mut p = session.pending.lock().await;
             for (_, tx) in p.drain() {
                 let _ = tx.send(Err("Daemon shutting down".into()));
             }
         }
-        tracing::info!("All managed session subprocesses cleanly terminated.");
+        tracing::info!("All managed sessions stopped.");
     }
 }
