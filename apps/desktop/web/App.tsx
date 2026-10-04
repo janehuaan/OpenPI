@@ -267,6 +267,9 @@ export function App() {
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
 	const turnStartTimesRef = useRef<Record<string, number>>({});
 	const lastStreamActivityRef = useRef<Record<string, number>>({});
+	/** Live token stream per instance, so text renders as it arrives instead of in
+	 *  poll-sized chunks (the poll only runs every few seconds while streaming). */
+	const liveStreamRef = useRef<Record<string, { text: string }>>({});
 	selectedInstanceIdRef.current = selectedInstanceId;
 	const clearRunningTools = useCallback((instanceId?: string): void => {
 		if (instanceId !== undefined && runningToolsInstanceIdRef.current !== instanceId) return;
@@ -622,6 +625,39 @@ export function App() {
 								: undefined,
 					}
 				: undefined;
+
+			// Consume the live token stream. Without this the assistant text only
+			// advanced on the periodic poll, so it arrived in large chunks and the
+			// reveal animation lurched trying to catch up every few seconds.
+			const streamEvent = isRecord(event.assistantMessageEvent) ? event.assistantMessageEvent : undefined;
+			const streamEventType = typeof streamEvent?.type === "string" ? streamEvent.type : undefined;
+			if (eventType === "message_update" && streamEventType) {
+				const streamInstanceId = payload.instanceId;
+				const live = (liveStreamRef.current[streamInstanceId] ??= { text: "" });
+				if (streamEventType === "text_start") {
+					live.text = "";
+				} else if (streamEventType === "text_delta") {
+					const delta = typeof streamEvent?.delta === "string" ? streamEvent.delta : "";
+					if (delta) live.text += delta;
+					setConversation((current) => {
+						if (current?.instance?.id !== streamInstanceId) return current;
+						if (!live.text) return current;
+						const messages = [...current.messages];
+						const lastIndex = messages.length - 1;
+						const last = messages[lastIndex];
+						// Only extend a materialized assistant message; until the poll
+						// creates one there is nothing to attach the deltas to.
+						if (!last || last.role !== "assistant") return current;
+						const pollText = contentText(last.content);
+						// Adopt the poll's text when it is ahead, so later deltas keep building on it.
+						if (pollText.length > live.text.length) live.text = pollText;
+						if (live.text === pollText) return current;
+						messages[lastIndex] = { ...last, content: [{ type: "text", text: live.text }] };
+						return { ...current, state: { ...current.state, isStreaming: true }, messages };
+					});
+				}
+			}
+
 			setTurnProgress((current) =>
 				reduceTurnProgress(current, {
 					instanceId: payload.instanceId,
@@ -754,6 +790,7 @@ export function App() {
 			}
 			if (eventType === "agent_start") {
 				turnStartTimesRef.current[payload.instanceId] = Date.now();
+				liveStreamRef.current[payload.instanceId] = { text: "" };
 				clearRunningTools();
 				setStreamConnectedInstanceId(payload.instanceId);
 				setStreamingInstances((prev) => new Set(prev).add(payload.instanceId));
@@ -788,6 +825,8 @@ export function App() {
 				return;
 			}
 			if (eventType === "agent_settled" || eventType === "turn_end") {
+				// The authoritative message arrives via the fetch below.
+				delete liveStreamRef.current[payload.instanceId];
 				clearRunningTools(payload.instanceId);
 				setStreamingInstances((prev) => {
 					const next = new Set(prev);
