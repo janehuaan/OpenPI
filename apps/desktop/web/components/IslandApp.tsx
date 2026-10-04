@@ -122,8 +122,17 @@ export function IslandApp() {
 			const conv = await desktopApi.getConversation(instanceId);
 			if (conv?.instance) {
 				setConversation(conv);
-				setIsStreaming(Boolean(conv.state?.isStreaming));
+				const streaming = Boolean(conv.state?.isStreaming);
+				setIsStreaming(streaming);
 				setActiveInstance(conv.instance);
+				if (!streaming) {
+					// The daemon owns the run state. Once it reports the run as over, drop
+					// the transient working state as well — otherwise the HUD keeps showing
+					// a finished run as if it were still going, contradicting the main
+					// window (which polls and sees the same daemon state).
+					setRunningTools([]);
+					setTurnProgress(undefined);
+				}
 			}
 		} catch (err) {
 			console.error("Failed to load conversation:", err);
@@ -172,6 +181,19 @@ export function IslandApp() {
 		if (isBusy) return "working";
 		return "idle";
 	}, [isExpanded, isBusy]);
+
+	// Reconcile with the daemon on a timer. The island used to refresh only on a
+	// handful of events, so one missed event (window hidden, island started late)
+	// left it stuck on a stale run while the main window — which polls — moved on.
+	useEffect(() => {
+		const interval = window.setInterval(
+			() => {
+				void refreshSnapshot();
+			},
+			isBusy ? 3_000 : 12_000,
+		);
+		return () => window.clearInterval(interval);
+	}, [isBusy, refreshSnapshot]);
 
 	useEffect(() => {
 		const syncWindow = async () => {
@@ -998,10 +1020,10 @@ export function IslandApp() {
 							<div className="metric-col">
 								<div className="metric-label">
 									<Terminal size={11} className="metric-icon" />
-									<span>当前命令</span>
+									<span>{isBusy ? "当前命令" : "上次命令"}</span>
 								</div>
 								<div className="metric-value code-font" title={currentCommandText}>
-									{currentCommandText}
+									{currentCommandText || "—"}
 								</div>
 							</div>
 
