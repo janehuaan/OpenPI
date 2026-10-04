@@ -117,5 +117,18 @@ async fn skill_security_gate_end_to_end() {
         .unwrap();
     assert!(r.is_error, "非法 min 应报错");
 
+    // 7) save_skill 工具对齐拦截（未注册工具名）
+    let unaligned_content = "# Test\n\nStep 1: use_tool: non_existent_cloud_tool\nDone.";
+    let r = reg
+        .execute(
+            "save_skill",
+            &json!({"name": "unaligned-tool-skill", "description": "工具幻觉测试", "content": unaligned_content}),
+            ".",
+        )
+        .await
+        .unwrap();
+    assert!(r.is_error, "未对齐工具引用的技能必须被拒绝: {}", r.output);
+    assert!(r.output.contains("TOOL-ALIGN-01") || r.output.contains("unaligned"), "应拦截工具幻觉: {}", r.output);
+
     let _ = std::fs::remove_dir_all(&tmp);
 }
