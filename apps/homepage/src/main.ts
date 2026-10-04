@@ -1,4 +1,4 @@
-// Zen Command Startpage - Pure, Fast, Zero-Clutter Architecture
+// Apple HIG & macOS Native Startpage Controller
 
 interface Engine {
   id: string;
@@ -7,7 +7,7 @@ interface Engine {
   icon: string;
 }
 
-interface ShortcutItem {
+interface DockSite {
   id: string;
   name: string;
   url: string;
@@ -21,69 +21,69 @@ const ENGINES: Engine[] = [
   { id: 'baidu', name: '百度', url: 'https://www.baidu.com/s?wd=', icon: 'https://www.baidu.com/favicon.ico' },
 ];
 
-const DEFAULT_SHORTCUTS: ShortcutItem[] = [
-  { id: 's1', name: 'GitHub', url: 'https://github.com' },
-  { id: 's2', name: 'Claude', url: 'https://claude.ai' },
-  { id: 's3', name: 'ChatGPT', url: 'https://chatgpt.com' },
-  { id: 's4', name: 'Linear', url: 'https://linear.app' },
-  { id: 's5', name: 'YouTube', url: 'https://www.youtube.com' },
-  { id: 's6', name: 'Bilibili', url: 'https://www.bilibili.com' },
-  { id: 's7', name: 'V2EX', url: 'https://www.v2ex.com' },
-  { id: 's8', name: 'Rust Docs', url: 'https://doc.rust-lang.org/book/' },
+const DEFAULT_SITES: DockSite[] = [
+  { id: 'd1', name: 'GitHub', url: 'https://github.com' },
+  { id: 'd2', name: 'Claude', url: 'https://claude.ai' },
+  { id: 'd3', name: 'ChatGPT', url: 'https://chatgpt.com' },
+  { id: 'd4', name: 'Linear', url: 'https://linear.app' },
+  { id: 'd5', name: 'YouTube', url: 'https://www.youtube.com' },
+  { id: 'd6', name: 'Bilibili', url: 'https://www.bilibili.com' },
+  { id: 'd7', name: 'V2EX', url: 'https://www.v2ex.com' },
+  { id: 'd8', name: 'Rust Docs', url: 'https://doc.rust-lang.org/book/' },
 ];
 
-class ZenStartpage {
+class AppleStartpage {
   private activeEngineIndex = 0;
-  private shortcuts: ShortcutItem[] = [];
+  private dockSites: DockSite[] = [];
 
   constructor() {
     this.loadState();
     this.initClock();
     this.renderEngine();
-    this.renderShortcuts();
+    this.renderDock();
     this.initSearch();
-    this.initModal();
+    this.initSheet();
     this.initKeybindings();
   }
 
   private loadState() {
     try {
-      const savedEngine = localStorage.getItem('zen_engine');
+      const savedEngine = localStorage.getItem('apple_engine');
       if (savedEngine) {
         const idx = ENGINES.findIndex(e => e.id === savedEngine);
         if (idx !== -1) this.activeEngineIndex = idx;
       }
 
-      const savedShortcuts = localStorage.getItem('zen_shortcuts');
-      if (savedShortcuts) {
-        this.shortcuts = JSON.parse(savedShortcuts);
+      const savedSites = localStorage.getItem('apple_sites');
+      if (savedSites) {
+        this.dockSites = JSON.parse(savedSites);
       } else {
-        this.shortcuts = [...DEFAULT_SHORTCUTS];
-        this.saveShortcuts();
+        this.dockSites = [...DEFAULT_SITES];
+        this.saveSites();
       }
     } catch {
-      this.shortcuts = [...DEFAULT_SHORTCUTS];
+      this.dockSites = [...DEFAULT_SITES];
     }
   }
 
-  private saveShortcuts() {
-    localStorage.setItem('zen_shortcuts', JSON.stringify(this.shortcuts));
+  private saveSites() {
+    localStorage.setItem('apple_sites', JSON.stringify(this.dockSites));
   }
 
-  // 大时钟与日期
+  // 1. Apple Ultralight Clock & Date
   private initClock() {
-    const timeEl = document.getElementById('heroTime');
-    const dateEl = document.getElementById('headerDate');
+    const clockEl = document.getElementById('liveClock');
+    const dateEl = document.getElementById('liveDate');
 
     const update = () => {
       const now = new Date();
       const pad = (n: number) => String(n).padStart(2, '0');
-      if (timeEl) {
-        timeEl.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      if (clockEl) {
+        clockEl.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
       }
       if (dateEl) {
-        const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '��期五', '星期六'];
-        dateEl.textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${days[now.getDay()]}`;
+        const days = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+        dateEl.textContent = `${now.getMonth() + 1}月${now.getDate()}日 ${days[now.getDay()]}`;
       }
     };
 
@@ -91,18 +91,18 @@ class ZenStartpage {
     setInterval(update, 1000);
   }
 
-  // 搜索引擎切换
+  // 2. Spotlight Engine Switcher
   private renderEngine() {
     const current = ENGINES[this.activeEngineIndex];
     const iconEl = document.getElementById('engineIcon') as HTMLImageElement | null;
     const labelEl = document.getElementById('engineLabel');
-    const inputEl = document.getElementById('searchInput') as HTMLInputElement | null;
+    const inputEl = document.getElementById('spotlightInput') as HTMLInputElement | null;
 
     if (iconEl) iconEl.src = current.icon;
     if (labelEl) labelEl.textContent = current.name;
-    if (inputEl) inputEl.placeholder = `在 ${current.name} 中搜索或直达网址...`;
+    if (inputEl) inputEl.placeholder = `在 ${current.name} 聚焦搜索或输入网址...`;
 
-    const items = document.querySelectorAll('.engine-item');
+    const items = document.querySelectorAll('.menu-item');
     items.forEach((item, idx) => {
       if (idx === this.activeEngineIndex) item.classList.add('active');
       else item.classList.remove('active');
@@ -111,13 +111,13 @@ class ZenStartpage {
 
   private cycleEngine() {
     this.activeEngineIndex = (this.activeEngineIndex + 1) % ENGINES.length;
-    localStorage.setItem('zen_engine', ENGINES[this.activeEngineIndex].id);
+    localStorage.setItem('apple_engine', ENGINES[this.activeEngineIndex].id);
     this.renderEngine();
   }
 
   private initSearch() {
-    const form = document.getElementById('searchForm');
-    const input = document.getElementById('searchInput') as HTMLInputElement | null;
+    const form = document.getElementById('spotlightForm');
+    const input = document.getElementById('spotlightInput') as HTMLInputElement | null;
     const engineBtn = document.getElementById('engineBtn');
     const menu = document.getElementById('engineMenu');
 
@@ -128,11 +128,11 @@ class ZenStartpage {
 
     document.addEventListener('click', () => menu?.classList.remove('open'));
 
-    const items = document.querySelectorAll('.engine-item');
+    const items = document.querySelectorAll('.menu-item');
     items.forEach((item, idx) => {
       item.addEventListener('click', () => {
         this.activeEngineIndex = idx;
-        localStorage.setItem('zen_engine', ENGINES[idx].id);
+        localStorage.setItem('apple_engine', ENGINES[idx].id);
         this.renderEngine();
         menu?.classList.remove('open');
         input?.focus();
@@ -156,134 +156,141 @@ class ZenStartpage {
     });
   }
 
-  // 快捷磁贴
+  // 3. Apple Squircle Dock
   private getDomainMeta(url: string) {
     try {
       const u = new URL(url.startsWith('http') ? url : `https://${url}`);
       return {
         host: u.hostname.replace('www.', ''),
-        icon: `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=48`,
+        icon: `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=64`,
       };
     } catch {
       return { host: url, icon: '' };
     }
   }
 
-  private renderShortcuts() {
-    const grid = document.getElementById('rackGrid');
-    if (!grid) return;
-    grid.innerHTML = '';
+  private renderDock() {
+    const shelf = document.getElementById('dockShelf');
+    if (!shelf) return;
+    shelf.innerHTML = '';
 
-    this.shortcuts.forEach(item => {
-      const card = document.createElement('a');
-      card.className = 'rack-card';
-      card.href = item.url;
+    this.dockSites.forEach(site => {
+      const tile = document.createElement('a');
+      tile.className = 'dock-tile';
+      tile.href = site.url;
 
-      const meta = this.getDomainMeta(item.url);
-      const initial = item.name.charAt(0).toUpperCase();
+      const meta = this.getDomainMeta(site.url);
+      const initial = site.name.charAt(0).toUpperCase();
 
-      card.innerHTML = `
-        <div class="rack-icon-wrap">
-          <img class="rack-favicon" src="${meta.icon}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-          <span style="display:none; font-weight:700; color:#fff;">${initial}</span>
+      tile.innerHTML = `
+        <div class="app-squircle">
+          <img class="app-icon" src="${meta.icon}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" />
+          <span class="app-initial" style="display:none;">${initial}</span>
         </div>
-        <span class="rack-title" title="${item.name}">${item.name}</span>
-        <span class="rack-domain">${meta.host}</span>
-        <button type="button" class="rack-del-btn" title="删除该捷径">✕</button>
+        <div class="app-info">
+          <span class="app-name">${site.name}</span>
+          <span class="app-domain">${meta.host}</span>
+        </div>
+        <button type="button" class="tile-delete-btn" title="移除">✕</button>
       `;
 
-      const delBtn = card.querySelector('.rack-del-btn');
+      const delBtn = tile.querySelector('.tile-delete-btn');
       delBtn?.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this.shortcuts = this.shortcuts.filter(s => s.id !== item.id);
-        this.saveShortcuts();
-        this.renderShortcuts();
+        this.dockSites = this.dockSites.filter(s => s.id !== site.id);
+        this.saveSites();
+        this.renderDock();
       });
 
-      grid.appendChild(card);
+      shelf.appendChild(tile);
     });
 
-    // 末尾添加按钮
-    const addCard = document.createElement('div');
-    addCard.className = 'rack-card add-card';
-    addCard.title = '添加自定义捷径';
-    addCard.innerHTML = `
-      <div class="rack-icon-wrap">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    // Add Tile
+    const addTile = document.createElement('div');
+    addTile.className = 'dock-tile dock-tile-add';
+    addTile.title = '添加自定义站点';
+    addTile.innerHTML = `
+      <div class="app-squircle">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </div>
-      <span class="rack-title">添加站点</span>
-      <span class="rack-domain">Shortcut</span>
+      <div class="app-info">
+        <span class="app-name">添��站点</span>
+        <span class="app-domain">Shortcut</span>
+      </div>
     `;
 
-    addCard.addEventListener('click', () => {
-      this.openModal();
+    addTile.addEventListener('click', () => {
+      this.openSheet();
     });
 
-    grid.appendChild(addCard);
+    shelf.appendChild(addTile);
   }
 
-  // 模态弹窗
-  private openModal() {
-    const modal = document.getElementById('siteModal');
-    const form = document.getElementById('siteForm') as HTMLFormElement | null;
+  // 4. macOS Sheet Dialog
+  private openSheet() {
+    const scrim = document.getElementById('sheetScrim');
+    const form = document.getElementById('sheetForm') as HTMLFormElement | null;
     form?.reset();
-    modal?.classList.add('open');
-    (document.getElementById('siteNameInput') as HTMLInputElement)?.focus();
+    scrim?.classList.add('open');
+    (document.getElementById('siteTitleInput') as HTMLInputElement)?.focus();
   }
 
-  private closeModal() {
-    document.getElementById('siteModal')?.classList.remove('open');
+  private closeSheet() {
+    document.getElementById('sheetScrim')?.classList.remove('open');
   }
 
-  private initModal() {
-    const cancelBtn = document.getElementById('modalCancelBtn');
-    const closeBtn = document.getElementById('modalCloseBtn');
-    const form = document.getElementById('siteForm') as HTMLFormElement | null;
+  private initSheet() {
+    const cancelBtn = document.getElementById('sheetCancelBtn');
+    const closeBtn = document.getElementById('sheetCloseBtn');
+    const form = document.getElementById('sheetForm') as HTMLFormElement | null;
 
-    cancelBtn?.addEventListener('click', () => this.closeModal());
-    closeBtn?.addEventListener('click', () => this.closeModal());
+    cancelBtn?.addEventListener('click', () => this.closeSheet());
+    closeBtn?.addEventListener('click', () => this.closeSheet());
 
     form?.addEventListener('submit', (e) => {
       e.preventDefault();
-      const name = (document.getElementById('siteNameInput') as HTMLInputElement).value.trim();
+      const name = (document.getElementById('siteTitleInput') as HTMLInputElement).value.trim();
       let url = (document.getElementById('siteUrlInput') as HTMLInputElement).value.trim();
 
       if (name && url) {
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           url = `https://${url}`;
         }
-        this.shortcuts.push({ id: `s-${Date.now()}`, name, url });
-        this.saveShortcuts();
-        this.renderShortcuts();
-        this.closeModal();
+        this.dockSites.push({ id: `site-${Date.now()}`, name, url });
+        this.saveSites();
+        this.renderDock();
+        this.closeSheet();
       }
     });
   }
 
-  // 键盘快捷键
+  // 5. Keybindings & Haptics
   private initKeybindings() {
-    const input = document.getElementById('searchInput') as HTMLInputElement | null;
+    const input = document.getElementById('spotlightInput') as HTMLInputElement | null;
 
     window.addEventListener('keydown', (e) => {
       const activeEl = document.activeElement;
       const isInput = activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA';
 
+      // Tab cycles search engine
       if (e.key === 'Tab' && (!isInput || activeEl === input)) {
         e.preventDefault();
         this.cycleEngine();
         return;
       }
 
-      if (e.key === '/' && !isInput) {
+      // / or Space focuses spotlight if not typing
+      if ((e.key === '/' || e.code === 'Space') && !isInput) {
         e.preventDefault();
         input?.focus();
         input?.select();
         return;
       }
 
+      // Esc dismisses sheet / dropdown
       if (e.key === 'Escape') {
-        this.closeModal();
+        this.closeSheet();
         document.getElementById('engineMenu')?.classList.remove('open');
       }
     });
@@ -291,5 +298,5 @@ class ZenStartpage {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  new ZenStartpage();
+  new AppleStartpage();
 });

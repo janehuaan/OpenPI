@@ -1,88 +1,155 @@
 /* 
-  ZEN COMMAND STARTPAGE - PURE, FAST, IMMERSIVE
-  Stripped of all noisy/stale feed data.
-  Focus on ergonomics, typography, and clean shortcut access.
+  APPLE HIG & MACOS SEQUOIA NATIVE DESIGN SYSTEM
+  Crafted specifically for Janehuaan
+  - True Specular Highlights (物理顶光高光发丝线)
+  - Continuous Curvature Squircle (苹果连续曲率超椭圆)
+  - Translucent Liquid Glass Vibrancy (-webkit-backdrop-filter)
+  - SF Pro Ultralight & Haptic Spring Motion (0.16, 1, 0.3, 1)
 */
 
 :root {
-  --bg-base: #090a0f;
-  --bg-card: rgba(18, 22, 33, 0.65);
-  --bg-card-hover: rgba(26, 32, 48, 0.9);
+  /* Apple Midnight Palette */
+  --apple-bg: #0b0c10;
+  --apple-midnight-tint: #0f111a;
 
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-hover: rgba(255, 255, 255, 0.2);
-  --border-focus: rgba(99, 102, 241, 0.55);
+  /* Glass Material Tokens */
+  --glass-surface: rgba(30, 32, 45, 0.48);
+  --glass-surface-hover: rgba(45, 48, 68, 0.65);
+  --glass-elevated: rgba(35, 38, 54, 0.78);
 
-  --text-main: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent: #6366f1;
+  /* Apple Specular Inset Highlights (模拟真实晶体边缘物理折射) */
+  --specular-top: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0.5px 0 rgba(255, 255, 255, 0.28);
+  --specular-subtle: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  /* Precise Physical Shadows */
+  --shadow-dock: 0 20px 48px -8px rgba(0, 0, 0, 0.5), 0 8px 20px -4px rgba(0, 0, 0, 0.35);
+  --shadow-spotlight: 0 24px 64px -12px rgba(0, 0, 0, 0.65), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-icon: 0 6px 16px -2px rgba(0, 0, 0, 0.35);
+
+  /* Apple Typography Hierarchy */
+  --sf-text: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --sf-mono: "SF Mono", Monaco, Menlo, ui-monospace, monospace;
+
+  --label-primary: #ffffff;
+  --label-secondary: rgba(235, 235, 245, 0.75);
+  --label-tertiary: rgba(235, 235, 245, 0.45);
+  --label-quaternary: rgba(235, 235, 245, 0.25);
+
+  --apple-accent: #2997ff;
+  --apple-accent-press: #147ce5;
+
+  /* Apple Spring Physics */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring-press: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 * {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  background-color: var(--bg-base);
-  color: var(--text-main);
-  font-family: var(--font-sans);
-  min-height: 100vh;
-  position: relative;
+html, body {
+  width: 100%;
+  height: 100%;
+  background-color: var(--apple-bg);
+  color: var(--label-primary);
+  font-family: var(--sf-text);
   overflow: hidden;
   user-select: none;
-  -webkit-font-smoothing: antialiased;
 }
 
-/* 纯净暗色背景景深，无噪点 */
-.ambient-canvas {
+/* 纯正 macOS 动态深空壁纸与次表层光影折射 */
+.wallpaper-substrate {
   position: fixed;
   inset: 0;
-  pointer-events: none;
   z-index: 1;
-  background: 
-    radial-gradient(circle at 50% 30%, rgba(99, 102, 241, 0.07) 0%, transparent 60%),
-    radial-gradient(circle at 50% 80%, rgba(139, 92, 246, 0.04) 0%, transparent 50%);
+  pointer-events: none;
+  background: radial-gradient(120% 100% at 50% 0%, #161a29 0%, #0d0f17 50%, #07080c 100%);
+  overflow: hidden;
 }
 
-.zen-viewport {
+.aurora-beam {
+  position: absolute;
+  filter: blur(90px);
+  opacity: 0.35;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.beam-1 {
+  width: 650px;
+  height: 380px;
+  top: -80px;
+  left: 20%;
+  background: radial-gradient(circle, rgba(64, 105, 225, 0.38) 0%, rgba(99, 102, 241, 0) 70%);
+  animation: floatBeam1 18s ease-in-out infinite alternate;
+}
+
+.beam-2 {
+  width: 520px;
+  height: 340px;
+  top: 10%;
+  right: 18%;
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.28) 0%, rgba(168, 85, 247, 0) 70%);
+  animation: floatBeam2 22s ease-in-out infinite alternate;
+}
+
+@keyframes floatBeam1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(60px, 40px) scale(1.1); }
+}
+
+@keyframes floatBeam2 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-50px, 30px) scale(0.95); }
+}
+
+.ambient-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* 主视口容器 */
+.stage-container {
   position: relative;
   z-index: 2;
   width: 100%;
-  max-width: 900px;
-  min-height: 100vh;
-  margin: 0 auto;
-  padding: 36px 24px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  padding: 24px 36px 32px;
+  max-width: 1080px;
+  margin: 0 auto;
 }
 
-/* 顶部状态 */
-.zen-header {
+/* 顶部轻量 MenuBar 状态 */
+.macos-menubar {
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
-.date-capsule {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-subtle);
-  padding: 5px 14px;
-  border-radius: 20px;
+.status-date {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--label-secondary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  box-shadow: var(--specular-subtle);
+  padding: 4px 14px;
+  border-radius: 9999px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 /* 中心舞台区 */
-.zen-center {
+.macos-center-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -91,265 +158,332 @@ body {
   width: 100%;
 }
 
-/* 纯粹大时钟 */
-.clock-monolith {
+/* 纯正 Apple Ultralight 大时钟 */
+.time-container {
   text-align: center;
 }
 
-.hero-digits {
-  font-size: clamp(5rem, 11vw, 7.5rem);
-  font-weight: 700;
-  letter-spacing: -0.05em;
+.time-clock {
+  font-size: clamp(5.5rem, 12vw, 8.2rem);
+  font-weight: 200; /* Apple 标志性极细质感 */
+  letter-spacing: -0.045em;
   line-height: 0.95;
-  background: linear-gradient(180deg, #ffffff 40%, rgba(255, 255, 255, 0.6) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.5));
+  color: #ffffff;
+  text-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  font-feature-settings: "tnum" 1;
 }
 
-/* Raycast 极简 Command 搜索框 */
-.command-box-wrap {
+/* Spotlight 搜索胶囊 */
+.spotlight-wrapper {
   width: 100%;
-  max-width: 680px;
+  max-width: 620px;
   position: relative;
 }
 
-.command-box {
+.spotlight-bar {
+  width: 100%;
+  height: 52px;
+  background: var(--glass-surface);
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px; /* Continuous corner */
+  box-shadow: var(--specular-top), var(--shadow-spotlight);
+  backdrop-filter: blur(48px) saturate(190%);
+  -webkit-backdrop-filter: blur(48px) saturate(190%);
   display: flex;
   align-items: center;
-  background: rgba(18, 22, 33, 0.85);
-  border: 1px solid var(--border-subtle);
-  border-radius: 30px;
-  height: 58px;
-  padding: 0 10px 0 14px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(28px);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0 8px 0 10px;
+  transition: all 0.24s var(--ease-spring);
 }
 
-.command-box:focus-within {
-  border-color: var(--border-focus);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55), 0 0 24px rgba(99, 102, 241, 0.25);
-  background: rgba(22, 27, 40, 0.95);
-  transform: translateY(-2px);
+.spotlight-bar:focus-within {
+  background: rgba(38, 41, 58, 0.75);
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 0 3px rgba(41, 151, 255, 0.28), var(--shadow-spotlight);
+  transform: translateY(-1px);
 }
 
-.engine-pill {
+/* 引擎切换药丸 (macOS 物理微触感) */
+.spotlight-engine-pill {
   display: flex;
   align-items: center;
-  gap: 7px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: var(--text-main);
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 5px 9px;
+  color: var(--label-primary);
+  font-family: var(--sf-text);
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
-  margin-right: 12px;
-  transition: all 0.18s ease;
+  outline: none;
+  transition: all 0.15s ease;
 }
 
-.engine-pill:hover {
-  background: rgba(255, 255, 255, 0.12);
+.spotlight-engine-pill:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-.engine-pill img {
-  width: 15px;
-  height: 15px;
+.spotlight-engine-pill:active {
+  transform: scale(0.96);
+}
+
+.spotlight-engine-pill img {
+  width: 14px;
+  height: 14px;
   border-radius: 3px;
 }
 
-.chevron {
-  font-size: 0.65rem;
-  color: var(--text-muted);
+.chevron-svg {
+  color: var(--label-tertiary);
+  margin-left: 1px;
 }
 
-/* 引擎下拉列表 */
-.engine-menu {
+/* 引擎下拉菜单 (macOS 纯净弹出面板) */
+.spotlight-menu {
   display: none;
   position: absolute;
   top: calc(100% + 10px);
-  left: 12px;
-  background: rgba(20, 24, 38, 0.98);
-  border: 1px solid var(--border-hover);
+  left: 0;
+  background: rgba(28, 30, 42, 0.88);
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  box-shadow: var(--specular-top), 0 18px 48px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(50px) saturate(200%);
+  -webkit-backdrop-filter: blur(50px) saturate(200%);
   border-radius: 14px;
   padding: 6px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(30px);
-  z-index: 50;
-  min-width: 170px;
+  min-width: 200px;
+  z-index: 60;
 }
 
-.engine-menu.open {
+.spotlight-menu.open {
   display: block;
+  animation: menuIn 0.15s var(--ease-spring);
 }
 
-.engine-item {
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.menu-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
   border-radius: 8px;
-  font-size: 0.86rem;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--label-secondary);
   cursor: pointer;
-  color: var(--text-secondary);
-  transition: all 0.15s ease;
+  transition: all 0.12s ease;
 }
 
-.engine-item img {
+.menu-item img {
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
-.engine-item:hover, .engine-item.active {
-  background: rgba(99, 102, 241, 0.2);
-  color: #fff;
+.menu-item span {
+  flex: 1;
 }
 
-.command-input {
+.menu-kbd {
+  font-family: var(--sf-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.menu-item:hover, .menu-item.active {
+  background: var(--apple-accent);
+  color: #ffffff;
+}
+
+.menu-item:hover .menu-kbd, .menu-item.active .menu-kbd {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.spotlight-input {
   flex: 1;
   background: transparent;
   border: none;
   outline: none;
-  font-family: inherit;
-  font-size: 1.05rem;
-  color: #fff;
+  font-family: var(--sf-text);
+  font-size: 15px;
+  font-weight: 400;
+  color: #ffffff;
+  padding: 0 14px;
+  letter-spacing: -0.01em;
   user-select: text;
 }
 
-.command-input::placeholder {
-  color: var(--text-muted);
+.spotlight-input::placeholder {
+  color: var(--label-tertiary);
 }
 
-.command-actions {
+.spotlight-trailing {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.kbd-badge {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
+.spotlight-shortcut {
+  font-family: var(--sf-mono);
+  font-size: 11px;
+  color: var(--label-tertiary);
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--text-muted);
-  padding: 3px 8px;
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 7px;
   border-radius: 6px;
 }
 
-.command-submit {
-  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+.spotlight-go-btn {
+  background: var(--apple-accent);
   border: none;
   color: #fff;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.15s ease;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 12px rgba(41, 151, 255, 0.35);
+  transition: all 0.16s var(--ease-spring);
 }
 
-.command-submit:hover {
-  transform: scale(1.08);
+.spotlight-go-btn:hover {
+  background: #3da4ff;
+  transform: scale(1.04);
 }
 
-/* 常用快捷 Dock */
-.shortcuts-rack {
+.spotlight-go-btn:active {
+  background: var(--apple-accent-press);
+  transform: scale(0.96);
+}
+
+/* macOS Launchpad 级精致常用应用 Dock */
+.dock-cluster {
   width: 100%;
-  max-width: 760px;
+  max-width: 680px;
 }
 
-.rack-grid {
+.dock-shelf {
+  background: var(--glass-surface);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px; /* Apple Squircle Shelf */
+  padding: 16px 18px;
+  box-shadow: var(--specular-top), var(--shadow-dock);
+  backdrop-filter: blur(48px) saturate(190%);
+  -webkit-backdrop-filter: blur(48px) saturate(190%);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 
-.rack-card {
+.dock-tile {
   position: relative;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
-  padding: 16px 12px 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  padding: 12px 14px;
   text-decoration: none;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--specular-subtle);
+  transition: all 0.22s var(--ease-spring);
 }
 
-.rack-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border-hover);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+.dock-tile:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: var(--specular-top), 0 8px 24px rgba(0, 0, 0, 0.4);
+  transform: translateY(-2px);
 }
 
-.rack-icon-wrap {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+.dock-tile:active {
+  transform: scale(0.97) translateY(0);
+}
+
+/* Squircle 超椭圆 App 图标 */
+.app-squircle {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px; /* Apple continuous corner */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.04) 100%);
+  border: 0.5px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), var(--shadow-icon);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 10px;
-  transition: all 0.2s ease;
+  flex-shrink: 0;
+  transition: transform 0.2s var(--ease-spring);
 }
 
-.rack-card:hover .rack-icon-wrap {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.4);
+.dock-tile:hover .app-squircle {
   transform: scale(1.06);
 }
 
-.rack-favicon {
-  width: 22px;
-  height: 22px;
+.app-icon {
+  width: 20px;
+  height: 20px;
   border-radius: 4px;
 }
 
-.rack-title {
-  font-size: 0.86rem;
+.app-initial {
+  font-size: 15px;
   font-weight: 600;
-  color: var(--text-main);
-  max-width: 100%;
+  color: #ffffff;
+}
+
+.app-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.app-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--label-primary);
+  letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.rack-domain {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  max-width: 100%;
+.app-domain {
+  font-family: var(--sf-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  margin-top: 1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
 }
 
-.rack-del-btn {
+/* 删除微按钮 */
+.tile-delete-btn {
   opacity: 0;
   position: absolute;
-  top: 6px;
+  top: 5px;
   right: 6px;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  background: rgba(255, 255, 255, 0.12);
   border: none;
-  font-size: 0.68rem;
+  color: var(--label-secondary);
+  font-size: 9px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -357,146 +491,192 @@ body {
   transition: all 0.15s ease;
 }
 
-.rack-card:hover .rack-del-btn {
+.dock-tile:hover .tile-delete-btn {
   opacity: 1;
 }
 
-.rack-del-btn:hover {
-  background: #ef4444;
+.tile-delete-btn:hover {
+  background: #ff453a;
   color: #fff;
 }
 
-/* 添加卡片 */
-.add-card {
-  cursor: pointer;
+/* 添加磁贴 */
+.dock-tile-add {
   border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
 }
 
-.add-card .rack-icon-wrap {
-  color: var(--text-muted);
+.dock-tile-add:hover {
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
-.add-card:hover .rack-icon-wrap {
-  color: var(--accent);
+.dock-tile-add .app-squircle {
+  color: var(--label-tertiary);
 }
 
-/* 底部快捷键提示 */
-.zen-footer {
+.dock-tile-add:hover .app-squircle {
+  color: var(--apple-accent);
+}
+
+/* 底部状态 */
+.macos-footer {
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
-.shortcut-hints {
+.footer-legend {
   display: flex;
-  gap: 16px;
-  font-family: var(--font-mono);
-  font-size: 0.74rem;
-  color: var(--text-muted);
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--label-tertiary);
 }
 
-.shortcut-hints kbd {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
+.footer-legend kbd {
+  font-family: var(--sf-mono);
+  font-size: 10.5px;
+  color: var(--label-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 0.5px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
   padding: 2px 6px;
   border-radius: 5px;
-  color: var(--text-secondary);
 }
 
-/* 模态框 */
-.modal-layer {
+.legend-dot {
+  color: var(--label-quaternary);
+}
+
+/* Apple 原生 Sheet 弹窗 */
+.macos-sheet-scrim {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(10px);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   z-index: 100;
   justify-content: center;
   align-items: center;
 }
 
-.modal-layer.open {
+.macos-sheet-scrim.open {
   display: flex;
 }
 
-.modal-card {
-  background: rgba(18, 22, 33, 0.98);
-  border: 1px solid var(--border-hover);
-  border-radius: 18px;
+.macos-sheet {
+  background: rgba(30, 33, 46, 0.92);
+  border: 0.5px solid rgba(255, 255, 255, 0.18);
+  box-shadow: var(--specular-top), 0 24px 64px rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(50px) saturate(200%);
+  -webkit-backdrop-filter: blur(50px) saturate(200%);
+  border-radius: 20px;
   width: 90%;
-  max-width: 400px;
-  padding: 24px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+  max-width: 380px;
+  padding: 22px 24px;
+  animation: sheetPop 0.2s var(--ease-spring);
 }
 
-.modal-header {
+@keyframes sheetPop {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.sheet-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
-.modal-close {
+.sheet-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--label-primary);
+}
+
+.sheet-close {
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--label-tertiary);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 13px;
+  padding: 4px;
 }
 
-.form-group {
+.sheet-input-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
-.form-group label {
-  font-size: 0.82rem;
-  color: var(--text-secondary);
+.sheet-input-group label {
+  font-size: 12px;
+  color: var(--label-secondary);
 }
 
-.form-group input {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-subtle);
+.sheet-input-group input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 9px 12px;
   color: #fff;
-  font-size: 0.92rem;
+  font-family: var(--sf-text);
+  font-size: 14px;
   outline: none;
 }
 
-.form-group input:focus {
-  border-color: var(--accent);
+.sheet-input-group input:focus {
+  border-color: var(--apple-accent);
+  box-shadow: 0 0 0 2px rgba(41, 151, 255, 0.25);
 }
 
-.modal-buttons {
+.sheet-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 22px;
+  gap: 8px;
+  margin-top: 20px;
 }
 
-.btn-cancel {
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  padding: 8px 16px;
+.btn-macos-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 0.5px solid rgba(255, 255, 255, 0.1);
+  color: var(--label-secondary);
+  padding: 7px 14px;
   border-radius: 8px;
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.12s ease;
 }
 
-.btn-save {
-  background: var(--accent);
+.btn-macos-secondary:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.btn-macos-primary {
+  background: var(--apple-accent);
   border: none;
   color: #fff;
-  padding: 8px 18px;
+  padding: 7px 16px;
   border-radius: 8px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(41, 151, 255, 0.35);
+  transition: all 0.12s ease;
 }
 
-@media (max-width: 640px) {
-  .rack-grid { grid-template-columns: repeat(3, 1fr); }
-  .shortcut-hints { display: none; }
+.btn-macos-primary:hover {
+  background: #3da4ff;
+}
+
+@media (max-width: 680px) {
+  .stage-container { padding: 18px; }
+  .dock-shelf { grid-template-columns: repeat(2, 1fr); padding: 12px; }
+  .footer-legend { display: none; }
 }
