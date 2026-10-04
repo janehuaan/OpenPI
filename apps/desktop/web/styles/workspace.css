@@ -6,6 +6,9 @@
 	min-height: 0;
 	overflow: auto;
 	padding: 14px 0 16px;
+	/* The stream pins the view to the bottom every frame; the browser's own
+	   scroll anchoring otherwise fights it and the view visibly jitters. */
+	overflow-anchor: none;
 }
 .message-thread {
 	width: min(860px, 100%);

@@ -17,7 +17,9 @@ export function nextStreamingTextOffset(currentOffset: number, target: string, e
 					? STREAM_SPEED_FAST
 					: STREAM_SPEED_CATCH_UP;
 	const timedStep = Math.ceil((charactersPerSecond * Math.min(Math.max(elapsedMs, 16), 50)) / 1_000);
-	const backlogStep = remaining > 480 ? Math.ceil(remaining * 0.08) : 0;
+	// Catch-up is bounded: an unbounded 8% step dumped hundreds of characters in a
+	// single frame on long messages, which reads as the text lurching forward.
+	const backlogStep = remaining > 480 ? Math.min(Math.ceil(remaining * 0.08), 96) : 0;
 	const step = Math.max(1, timedStep, backlogStep);
 	let nextOffset = Math.min(target.length, currentOffset + step);
 
