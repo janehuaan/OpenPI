@@ -11,6 +11,8 @@ import {
 	shortWorkspacePath,
 	cleanPath,
 	formatDuration,
+	getRunningToolDetail,
+	getRunningToolOutput,
 	type ActionChainItem,
 	type ToolCallBlock,
 } from "../lib/helpers";
@@ -644,103 +646,23 @@ export function IslandApp() {
 			};
 		});
 
-		const combined = [...allActions, ...liveRunningRows];
+		// Real activity only. The island used to pad this list with invented
+		// "workflow stage" rows and stand-in placeholder tables, which rendered as
+		// if they were live telemetry.
+		return [...allActions, ...liveRunningRows].slice(-5);
+	}, [allActions, runningTools]);
 
-		if (combined.length > 0) {
-			const recent = combined.slice(-4);
-			// If fewer than 4 actions while active, pad with genuine live workflow stages
-			if (recent.length < 4 && isBusy) {
-				const padded = [...recent];
-				if (padded.length === 1) {
-					padded.push({
-						id: "flow-plan",
-						actionType: "Analyzing",
-						path: "Reviewing the output to plan the next step",
-						durationText: "running",
-						status: "running",
-					});
-					padded.push({
-						id: "flow-exec",
-						actionType: "Queueing",
-						path: "Waiting for the next step",
-						durationText: "waiting",
-						status: "pending",
-					});
-					padded.push({
-						id: "flow-verify",
-						actionType: "Verifying",
-						path: "Checking for a clean, converged result",
-						durationText: "waiting",
-						status: "pending",
-					});
-				} else if (padded.length === 2) {
-					padded.push({
-						id: "flow-plan",
-						actionType: "Assessing",
-						path: "Reviewing progress and the remaining plan",
-						durationText: "running",
-						status: "running",
-					});
-					padded.push({
-						id: "flow-reply",
-						actionType: "Summarizing",
-						path: "Preparing the final response",
-						durationText: "waiting",
-						status: "pending",
-					});
-				} else if (padded.length === 3) {
-					padded.push({
-						id: "flow-verify",
-						actionType: "Verifying",
-						path: "Confirming the goal was met",
-						durationText: "running",
-						status: "running",
-					});
-				}
-				return padded.slice(-4);
-			}
-			return recent;
-		}
-
-		// When 0 tool actions have executed yet:
-		if (isBusy) {
-			const goalText = lastUserPrompt ? cleanActionTarget(lastUserPrompt.slice(0, 36)) : "Parsing the current goal";
-			return [
-				{ id: "s1", actionType: "Understanding", path: goalText, durationText: `${hudElapsed}s`, status: "done" },
-				{ id: "s2", actionType: "Planning", path: "Analyzing context and the execution strategy", durationText: "running", status: "running" },
-				{ id: "s3", actionType: "Tool call", path: "Preparing terminal or code operations", durationText: "waiting", status: "pending" },
-				{ id: "s4", actionType: "Verifying", path: "Validating the output and converging", durationText: "waiting", status: "pending" },
-			];
-		}
-
-		// When idle / settled with no prior actions
-		const wsName = shortWorkspacePath(cwd) || "openpi-next";
-		const modelTitle = conversation?.state?.model?.name || conversation?.state?.model?.id || "Not selected";
-		return [
-			{ id: "i1", actionType: "Workspace", path: wsName, durationText: "ready", status: "done" },
-			{ id: "i2", actionType: "Engine", path: "OpenPI Daemon (Active)", durationText: "online", status: "done" },
-			{ id: "i3", actionType: "Model", path: modelTitle, durationText: "ready", status: "done" },
-			{ id: "i4", actionType: "Awaiting", path: "Send a task to start", durationText: "standby", status: "pending" },
-		];
-	}, [allActions, runningTools, isBusy, cwd, lastUserPrompt, hudElapsed, conversation?.state?.model]);
-
-	// Progress percentage
-	const progressPercent = useMemo(() => {
-		const step = turnProgress?.step;
-		const max = turnProgress?.maxSteps;
-		if (step && max && max > 0) {
-			return Math.min(100, Math.round((step / max) * 100));
-		}
-		if (justCompleted) return 100;
-		if (!isBusy) return allActions.length > 0 ? 100 : 0;
-
-		const stage = turnProgress?.stage;
-		if (stage === "starting") return 15;
-		if (stage === "thinking") return 35;
-		if (stage === "tool") return Math.min(88, 45 + (turnProgress?.toolCount || 1) * 12);
-		if (stage === "responding") return 95;
-		return 50;
-	}, [turnProgress?.step, turnProgress?.maxSteps, turnProgress?.stage, turnProgress?.toolCount, isBusy, justCompleted, allActions.length]);
+	// Live console: the command that is running right now, with its output tail.
+	// Real telemetry replaces the invented progress percentage the card used to show.
+	const liveConsole = useMemo(() => {
+		if (!isBusy || !activeTool) return undefined;
+		const detail = getRunningToolDetail(activeTool);
+		const output = getRunningToolOutput(activeTool);
+		const tail = output ? output.split("\n").slice(-4).join("\n") : "";
+		const command = detail.command || detail.summary || "";
+		if (!command && !tail) return undefined;
+		return { command, output: tail };
+	}, [isBusy, activeTool]);
 
 	// Current Command Text
 	const currentCommandText = useMemo(() => {
@@ -798,7 +720,8 @@ export function IslandApp() {
 		return allActions.length > 0 ? "STANDBY" : "READY";
 	}, [isBusy, activeTool, turnProgress?.stage, justCompleted, allActions.length]);
 
-	// Hero Title
+	// Hero Title. Idle shows the state, not the session name: this surface is a
+	// monitor, and a session title says nothing about what is happening.
 	const heroTitle = useMemo(() => {
 		if (isBusy) {
 			const verb = turnVerb(turnProgress, hudElapsed);
@@ -808,14 +731,8 @@ export function IslandApp() {
 		if (justCompleted) {
 			return "Task completed";
 		}
-		if (sessionTitle) {
-			return sessionTitle;
-		}
-		if (lastUserPrompt) {
-			return lastUserPrompt.length > 22 ? `${lastUserPrompt.slice(0, 22)}…` : lastUserPrompt;
-		}
-		return "OpenPI Agent";
-	}, [isBusy, turnProgress, hudElapsed, activeToolTarget, justCompleted, sessionTitle, lastUserPrompt]);
+		return "Ready";
+	}, [isBusy, turnProgress, hudElapsed, activeToolTarget, justCompleted]);
 
 	// Hero Subtitle
 	const heroSub = useMemo(() => {
@@ -834,11 +751,12 @@ export function IslandApp() {
 		if (justCompleted) {
 			return `${allActions.length} actions · ready for the next instruction`;
 		}
-		if (activeInstance?.cwd) {
-			return `Workspace: ${shortWorkspacePath(activeInstance.cwd)} · ready for a task`;
-		}
-		return "Ready";
-	}, [isBusy, activeTool, activeToolTarget, turnProgress?.stage, latestReasoningSnippet, activeInstance?.cwd, justCompleted, allActions.length]);
+		// Idle: name the session and workspace as supporting detail under the state.
+		const workspace = activeInstance?.cwd ? shortWorkspacePath(activeInstance.cwd) : "";
+		const context = [sessionTitle, workspace].filter(Boolean).join(" · ");
+		if (context) return context;
+		return lastUserPrompt ? `Last: ${lastUserPrompt.slice(0, 40)}` : "Ready for a task";
+	}, [isBusy, activeTool, activeToolTarget, turnProgress?.stage, latestReasoningSnippet, activeInstance?.cwd, justCompleted, allActions.length, sessionTitle, lastUserPrompt]);
 
 	// Capsule Pill Task. Shows what the agent is doing right now — never the session
 	// title, which says nothing about the current activity.
@@ -976,36 +894,49 @@ export function IslandApp() {
 							<div className="hud-category-pill">{categoryPill}</div>
 						</div>
 
-						{/* 3. Progress Bar */}
-						<div className="hud-progress-section">
-							<div className="hud-progress-track">
-								<div className="hud-progress-bar" style={{ width: `${progressPercent}%` }} />
-							</div>
-							<span className="hud-progress-number">{progressPercent}%</span>
-						</div>
-
-						{/* 4. Structured Process Table (4 Rows) */}
-						<div className="hud-process-table">
-							{processRows.map((row) => (
-								<div key={row.id} className={`hud-process-row ${row.status}`}>
-									<div className="process-col-action">
-										<span className={`process-status-dot ${row.status}`} />
-										<span className="process-action-label">{row.actionType}</span>
-									</div>
-									<div className="process-col-path" title={row.path}>
-										{row.path}
-									</div>
-									<div className="process-col-duration">
-										{row.durationText}
-									</div>
-									<div className="process-col-state">
-										{row.status === "done" && <span className="process-check-mark">✓</span>}
-										{row.status === "running" && <span className="process-running-gear">⚙</span>}
-										{row.status === "pending" && <span className="process-pending-dot">○</span>}
-										{row.status === "error" && <span className="process-error-mark">×</span>}
-									</div>
+						{/* 3. Live console — the running command and its output tail */}
+						{liveConsole && (
+							<div className="hud-console">
+								<div className="hud-console-cmd" title={liveConsole.command}>
+									<span className="hud-console-prompt">›</span>
+									{liveConsole.command}
 								</div>
-							))}
+								{liveConsole.output && <pre className="hud-console-out">{liveConsole.output}</pre>}
+							</div>
+						)}
+
+						{/* 4. Ledger — what actually happened, newest last */}
+						<div className="hud-ledger">
+							<div className="hud-ledger-label">
+								<span>{isBusy ? "Activity" : "Last run"}</span>
+								{processRows.length > 0 && <span className="hud-ledger-count">{processRows.length}</span>}
+							</div>
+							{processRows.length === 0 ? (
+								<div className="hud-ledger-empty">No activity yet</div>
+							) : (
+								<div className="hud-process-table">
+									{processRows.map((row) => (
+										<div key={row.id} className={`hud-process-row ${row.status}`}>
+											<div className="process-col-action">
+												<span className={`process-status-dot ${row.status}`} />
+												<span className="process-action-label">{row.actionType}</span>
+											</div>
+											<div className="process-col-path" title={row.path}>
+												{row.path}
+											</div>
+											<div className="process-col-duration">
+												{row.durationText}
+											</div>
+											<div className="process-col-state">
+												{row.status === "done" && <span className="process-check-mark">✓</span>}
+												{row.status === "running" && <span className="process-running-gear">⚙</span>}
+												{row.status === "pending" && <span className="process-pending-dot">○</span>}
+												{row.status === "error" && <span className="process-error-mark">×</span>}
+											</div>
+										</div>
+									))}
+								</div>
+							)}
 						</div>
 
 						{/* 5. Inset Metric Card (3 Columns) */}
@@ -1031,9 +962,15 @@ export function IslandApp() {
 							<div className="metric-col">
 								<div className="metric-label">
 									<Clock3 size={11} className="metric-icon" />
-									<span>Elapsed</span>
+									<span>{isBusy ? "Elapsed" : "Last run"}</span>
 								</div>
-								<div className="metric-value">{formatElapsedSec(hudElapsed)}</div>
+								<div className="metric-value">
+									{isBusy
+										? formatElapsedSec(hudElapsed)
+										: lastTurnDuration !== null
+											? formatElapsedSec(lastTurnDuration)
+											: "—"}
+								</div>
 							</div>
 						</div>
 
