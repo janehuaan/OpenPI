@@ -55,9 +55,27 @@ LAUNCHER
 chmod +x "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
 bash -n "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
 
-echo "🔏 5. Re-signing application bundle..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+echo "🔏 5. Signing application bundle..."
+# Prefer a real identity over ad-hoc. An ad-hoc signature has no Team ID, so macOS
+# keys the Full Disk Access grant to a hash of the binary and every rebuild
+# silently invalidates it. With a development identity the grant is keyed to
+# TeamID + bundle id and survives rebuilds.
+IDENTITY="${OPENPI_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 -oE '"Apple Development: [^"]+"' | tr -d '"')}"
+if [ -n "$IDENTITY" ]; then
+    echo "   identity: $IDENTITY"
+    SIGN=(--force --timestamp=none --sign "$IDENTITY")
+else
+    echo "   ⚠️  no signing identity found — falling back to ad-hoc; Full Disk Access will reset on every rebuild"
+    SIGN=(--force --sign -)
+fi
+
+# Nested code first, bundle last. --deep does not reach Resources/openpi/bin, which
+# is why the daemon used to ship unsigned (and unsigned code cannot hold a grant).
+codesign "${SIGN[@]}" "$RUNTIME/bin/openpi-daemon"
+codesign "${SIGN[@]}" "$APP_BUNDLE/Contents/MacOS/openpi-daemon"
+codesign "${SIGN[@]}" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
+echo "   signed by: $(codesign -dv "$APP_BUNDLE" 2>&1 | grep -E 'TeamIdentifier|Signature' | tr '\n' ' ')"
 
 echo "🗜️ 6. Compressing application archive with maximum compression..."
 VERSION="$(grep -m1 '"version"' "$DIR/apps/desktop/src-tauri/tauri.conf.json" | cut -d'"' -f4)"

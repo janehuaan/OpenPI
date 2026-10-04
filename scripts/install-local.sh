@@ -35,6 +35,23 @@ echo "📦 2. Installing native OpenPI.app to /Applications..."
 rm -rf /Applications/OpenPI.app
 cp -R "$APP_BUNDLE" /Applications/OpenPI.app
 
+# The daemon was copied into the bundle above, after the packager had signed it, so
+# the bundle seal no longer matches. Re-sign in place (nested code first, bundle
+# last) — otherwise the installed app ships unsigned, and an unsigned binary cannot
+# hold a Full Disk Access grant.
+IDENTITY="${OPENPI_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 -oE '"Apple Development: [^"]+"' | tr -d '"')}"
+if [ -n "$IDENTITY" ]; then
+    SIGN=(--force --timestamp=none --sign "$IDENTITY")
+else
+    echo "   ⚠️  no signing identity found — falling back to ad-hoc"
+    SIGN=(--force --sign -)
+fi
+codesign "${SIGN[@]}" /Applications/OpenPI.app/Contents/Resources/openpi/bin/openpi-daemon
+codesign "${SIGN[@]}" /Applications/OpenPI.app/Contents/MacOS/openpi-daemon
+codesign "${SIGN[@]}" /Applications/OpenPI.app
+codesign --verify --deep --strict /Applications/OpenPI.app
+echo "   signed by: $(codesign -dv /Applications/OpenPI.app 2>&1 | grep -E 'TeamIdentifier' | tr '\n' ' ')"
+
 # Also install daemon to ~/.local/bin and /usr/local/bin if writable
 if [ -f "$DIR/target/release/openpi-daemon" ]; then
     mkdir -p "$HOME/.local/bin"
