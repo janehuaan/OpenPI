@@ -23,8 +23,7 @@ import {
 import type { AgentInstance, ConversationMessage, ConversationSnapshot, ConversationStats, RunningTool } from "../types";
 import {
 	ExternalLink,
-	Pause,
-	Play,
+	CircleStop,
 	FileText,
 	Terminal,
 	Clock3,
@@ -100,7 +99,6 @@ export type IslandMode = "idle" | "working" | "expanded" | "attention";
 
 export function IslandApp() {
 	const [isExpanded, setIsExpanded] = useState(false);
-	const [isPaused, setIsPaused] = useState(false);
 
 	const [justCompleted, setJustCompleted] = useState(false);
 	const completionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -433,16 +431,15 @@ export function IslandApp() {
 		}
 	}, []);
 
-	const handleTogglePause = useCallback(async () => {
-		if (isBusy && activeInstance?.id) {
-			try {
-				await desktopApi.stopConversationStream(activeInstance.id);
-				setIsPaused(true);
-			} catch (e) {
-				console.error("Failed to pause/stop stream:", e);
-			}
-		} else {
-			setIsPaused((prev) => !prev);
+	const handleStop = useCallback(async () => {
+		// The engine has no pause, so the only honest action is to stop the run.
+		// Aborting is what actually ends it; unsubscribing from the event stream
+		// (as this used to do) left the agent running while the HUD went quiet.
+		if (!isBusy || !activeInstance?.id) return;
+		try {
+			await desktopApi.abortConversation(activeInstance.id, "island_stop");
+		} catch (e) {
+			console.error("Failed to stop the run:", e);
 		}
 	}, [isBusy, activeInstance?.id]);
 
@@ -1031,10 +1028,11 @@ export function IslandApp() {
 								<button
 									type="button"
 									className="hud-action-pill-btn"
-									onClick={() => void handleTogglePause()}
+									disabled={!isBusy}
+									onClick={() => void handleStop()}
 								>
-									{isPaused ? <Play size={11} /> : <Pause size={11} />}
-									<span>{isPaused ? "继续" : "暂停"}</span>
+									<CircleStop size={11} />
+									<span>停止</span>
 								</button>
 
 								<button
