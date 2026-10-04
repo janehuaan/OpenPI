@@ -17,11 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let db_path = std::env::var("OPENPI_DB_PATH")
         .unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
 
-    let engine_mode = if Supervisor::use_native_engine() {
-        "native-rust"
-    } else {
-        "node-fallback"
-    };
+    let engine_mode = "native-rust";
 
     let pi_cli_path = std::env::var("OPENPI_PI_CLI_PATH").unwrap_or_default();
 
