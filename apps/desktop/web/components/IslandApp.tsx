@@ -845,11 +845,8 @@ export function IslandApp() {
 	return (
 		<div className="island-root">
 			{!isExpanded ? (
-				/* ── Top Floating Island (Capsule Pill with Concave Bezier Shoulders) ── */
+				/* ── Top Floating Island (capsule attached to the screen's top edge) ── */
 				<div className="island-pill-assembly">
-					<svg className="island-shoulder left" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-						<path d="M 0,0 H 16 V 16 C 16,7.163 8.837,0 0,0 Z" />
-					</svg>
 					<div
 						className={`island-capsule-pill ${isBusy ? "working" : "idle"}`}
 						onClick={() => setIsExpanded(true)}
@@ -895,20 +892,14 @@ export function IslandApp() {
 							</>
 						)}
 					</div>
-					<svg className="island-shoulder right" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-						<path d="M 0,16 V 0 H 16 C 7.163,0 0,7.163 0,16 Z" />
-					</svg>
 				</div>
 			) : (
-				/* ── Expanded Liquid HUD Card with Concave Bezier Shoulders ── */
+				/* ── Expanded Liquid HUD Card (sits flush under the capsule) ── */
 				<div
 					className="island-card-assembly"
 					onMouseEnter={handleCardMouseEnter}
 					onMouseLeave={handleCardMouseLeave}
 				>
-					<svg className="island-shoulder left card-shoulder" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M 0,0 H 20 V 20 C 20,8.954 11.046,0 0,0 Z" />
-					</svg>
 					<div className="island-hud-card" onClick={(e) => e.stopPropagation()}>
 						{/* 1. Header Row */}
 						<div className="hud-card-header">
@@ -1068,9 +1059,6 @@ export function IslandApp() {
 							</div>
 						</div>
 					</div>
-					<svg className="island-shoulder right card-shoulder" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-						<path d="M 0,20 V 0 H 20 C 8.954,0 0,8.954 0,20 Z" />
-					</svg>
 				</div>
 			)}
 		</div>

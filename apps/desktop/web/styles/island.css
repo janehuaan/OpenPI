@@ -66,7 +66,10 @@ body.dark,
 	overflow: hidden;
 }
 
-/* ── Concave Bezier Shoulder Assemblies ── */
+/* ── Island assemblies ──
+   The capsule sits flush against the screen's top edge and the HUD card hangs
+   directly beneath it, so both keep square top corners and no fillet pieces are
+   needed at the ends. */
 .island-pill-assembly {
 	display: inline-flex;
 	align-items: flex-start;
@@ -79,16 +82,6 @@ body.dark,
 	align-items: flex-start;
 	position: relative;
 	pointer-events: auto;
-}
-
-.island-shoulder {
-	fill: var(--hud-pill-bg);
-	pointer-events: none;
-	flex-shrink: 0;
-}
-
-.island-shoulder.card-shoulder {
-	fill: var(--hud-canvas-bg);
 }
 
 /* ── 1. Top Island Capsule Pill (Seamless Bezier Notch Attachment) ── */
