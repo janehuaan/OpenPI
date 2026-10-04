@@ -87,7 +87,10 @@ body.dark,
 	backdrop-filter: blur(28px) saturate(180%);
 	border: 1px solid var(--hud-border);
 	border-top: none;
-	box-shadow: 0 4px 16px var(--hud-shadow-color), 0 1px 3px rgba(0, 0, 0, 0.05);
+	box-shadow:
+		0 4px 16px var(--hud-shadow-color),
+		0 1px 3px rgba(0, 0, 0, 0.05),
+		inset 0 1px 0 rgba(255, 255, 255, 0.12);
 	color: var(--hud-fg);
 	cursor: pointer;
 	z-index: 50;
@@ -188,6 +191,7 @@ body.dark,
 
 /* ── 2. Expanded Floating HUD Card (Squircle 26px on All 4 Corners, 8px Gap Beneath Island) ── */
 .island-hud-card {
+	position: relative;
 	pointer-events: auto;
 	box-sizing: border-box;
 	width: 536px;
@@ -201,16 +205,30 @@ body.dark,
 	backdrop-filter: blur(40px) saturate(190%);
 	border: 1px solid var(--hud-border);
 	border-top: 1px solid var(--hud-border-light);
+	/* Specular rim: the top edge takes the light, the sides hold a trace, the bottom
+	   catches a reflection off the surface below. */
 	box-shadow:
 		0 24px 64px var(--hud-shadow-color),
 		0 4px 16px rgba(0, 0, 0, 0.08),
-		inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+		inset 0 1px 0 rgba(255, 255, 255, 0.14),
+		inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+		inset 0 -1px 0 rgba(255, 255, 255, 0.07);
 	padding: 16px 22px 18px;
 	display: flex;
 	flex-direction: column;
 	gap: 14px;
 	cursor: default;
 	animation: hud-card-reveal 240ms var(--ease-spring);
+}
+
+/* Light blooms in from above the plate, so the top of the surface reads as lit. */
+.island-hud-card::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	pointer-events: none;
+	background: radial-gradient(120% 62% at 50% -22%, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0) 62%);
 }
 
 @keyframes hud-card-reveal {
@@ -224,12 +242,18 @@ body.dark,
 	}
 }
 
-/* Layer 1: Header Row */
+/* Layer 1: Header Row — its own material band, so the card reads as three planes
+   (header / body / inset facts) rather than one flat plate. */
 .hud-card-header {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	height: 24px;
+	margin: -16px -22px 0;
+	padding: 15px 22px 13px;
+	background: color-mix(in srgb, var(--hud-fg) 3.5%, transparent);
+	border-bottom: 1px solid var(--hud-border-light);
+	border-radius: 0;
 }
 
 .hud-brand-group {
@@ -339,10 +363,10 @@ body.dark,
 }
 
 .hud-hero-title {
-	font-size: 16px;
-	font-weight: 650;
+	font-size: 17px;
+	font-weight: 680;
 	color: var(--hud-fg);
-	letter-spacing: -0.25px;
+	letter-spacing: -0.3px;
 	line-height: 1.25;
 	white-space: nowrap;
 	overflow: hidden;
@@ -350,7 +374,7 @@ body.dark,
 }
 
 .hud-hero-sub {
-	font-size: 11.5px;
+	font-size: 11px;
 	color: var(--hud-fg-muted);
 	letter-spacing: -0.1px;
 	white-space: nowrap;
@@ -505,7 +529,8 @@ body.dark,
 }
 
 .process-action-label {
-	font-weight: 500;
+	font-size: 12.5px;
+	font-weight: 650;
 	color: var(--hud-fg);
 	white-space: nowrap;
 }
@@ -581,8 +606,11 @@ body.dark,
 	display: flex;
 	align-items: center;
 	gap: 5px;
-	font-size: 10.5px;
-	color: var(--hud-fg-muted);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--hud-fg-subtle);
 }
 
 .metric-icon {
@@ -590,8 +618,8 @@ body.dark,
 }
 
 .metric-value {
-	font-size: 12.5px;
-	font-weight: 600;
+	font-size: 13.5px;
+	font-weight: 620;
 	color: var(--hud-fg);
 	font-family: var(--mono, ui-monospace, Menlo, monospace);
 	white-space: nowrap;
