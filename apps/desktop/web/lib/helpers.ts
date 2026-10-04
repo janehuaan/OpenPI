@@ -1158,11 +1158,12 @@ export function getRunningToolDetail(tool: RunningTool): RunningToolDetail {
 }
 
 export interface CommandDiagnostic {
-	warningLevel: "info" | "warning" | "critical";
+	/** `info` is intentionally not a level: a card is only worth showing when the
+	 *  command needs attention (a hang, or a long build/download/run). */
+	warningLevel: "warning" | "critical";
 	title: string;
 	detail: string;
 	suggestion?: string;
-	isInteractiveHang?: boolean;
 }
 
 const INTERACTIVE_PATTERNS = [
@@ -1179,8 +1180,6 @@ const INTERACTIVE_PATTERNS = [
 
 const BUILD_PATTERNS = /\b(cargo\s+(build|check|clippy|run)|rustc|mvn|gradle|cmake|make|tsc|vite\s+build|webpack|next\s+build|go\s+build|swift\s+build|bazel\s+build|ninja)\b/i;
 const INSTALL_PATTERNS = /\b(npm\s+(i|install|add)|pnpm\s+(i|install|add)|yarn\s+(add|install)|pip\s+install|cargo\s+fetch|go\s+mod\s+download|git\s+clone|docker\s+pull|curl|wget)\b/i;
-const TEST_PATTERNS = /\b(cargo\s+test|pytest|npm\s+test|vitest|jest|go\s+test|python\s+-m\s+unittest)\b/i;
-const SEARCH_PATTERNS = /\b(find\s+|grep\s+-r|rg\s+|ag\s+|locate\s+|du\s+-)\b/i;
 
 export function analyzeCommandExecutionState(
 	toolName: string,
@@ -1199,72 +1198,31 @@ export function analyzeCommandExecutionState(
 				title: "终端疑似等待交互输入确认",
 				detail: "控制台末尾输出了交互式询问（如 [y/n] 确认或密码等待）。智能体运行在非交互式管道中，进程将持续挂起阻塞。",
 				suggestion: "请点击右侧“终止执行”，并提醒模型附加非交互免确认参数（例如 -y / --yes / --batch）重新运行。",
-				isInteractiveHang: true,
 			};
 		}
 	}
 
 	// 2. Heavy Compilation / Build
-	if (BUILD_PATTERNS.test(commandText)) {
-		if (elapsedSeconds >= 90) {
-			return {
-				warningLevel: "warning",
-				title: `大型项目编译中 (已耗时 ${elapsedSeconds}s)`,
-				detail: "大型工程冷启动编译或跨模块构建可能需要数分钟。若长时间没有任何新的编译器输出，可检查依赖或随时终止。",
-				suggestion: "若怀疑编译卡死，可点击终止后分模块编译或检查目标缓存。",
-			};
-		}
-		if (elapsedSeconds >= 6) {
-			return {
-				warningLevel: "info",
-				title: "正在编译/构建工程代码",
-				detail: "底层编译器正在解析并编译代码模块。初次全量编译依赖体积较大，耗时通常相对较长，请耐心等待。",
-			};
-		}
+	if (BUILD_PATTERNS.test(commandText) && elapsedSeconds >= 90) {
+		return {
+			warningLevel: "warning",
+			title: `大型项目编译中 (已耗时 ${elapsedSeconds}s)`,
+			detail: "大型工程冷启动编译或跨模块构建可能需要数分钟。若长时间没有任何新的编译器输出，可检查依赖或随时终止。",
+			suggestion: "若怀疑编译卡死，可点击终止后分模块编译或检查目标缓存。",
+		};
 	}
 
 	// 3. Network Dependency Download / Package Install
-	if (INSTALL_PATTERNS.test(commandText)) {
-		if (elapsedSeconds >= 60) {
-			return {
-				warningLevel: "warning",
-				title: `网络依赖下载耗时较长 (已耗时 ${elapsedSeconds}s)`,
-				detail: "依赖下载受当前网络带宽与源延迟影响。若长时间无输出，可能遇到镜像源连接超时。",
-				suggestion: "可检查网络或国内镜像源配置（如 npm registry / crates.io 镜像）。",
-			};
-		}
-		if (elapsedSeconds >= 6) {
-			return {
-				warningLevel: "info",
-				title: "正在拉取外部依赖包",
-				detail: "正在从远程仓库下载依赖并解压，请保持网络连接活跃。",
-			};
-		}
+	if (INSTALL_PATTERNS.test(commandText) && elapsedSeconds >= 60) {
+		return {
+			warningLevel: "warning",
+			title: `网络依赖下载耗时较长 (已耗时 ${elapsedSeconds}s)`,
+			detail: "依赖下载受当前网络带宽与源延迟影响。若长时间无输出，可能遇到镜像源连接超时。",
+			suggestion: "可检查网络或国内镜像源配置（如 npm registry / crates.io 镜像）。",
+		};
 	}
 
-	// 4. Test Suite Execution
-	if (TEST_PATTERNS.test(commandText)) {
-		if (elapsedSeconds >= 6) {
-			return {
-				warningLevel: "info",
-				title: "正在执行全量测试套件",
-				detail: "正在逐项编译并运行单元测试与集成测试，验证代码修改。用例较多时耗时会有所增加。",
-			};
-		}
-	}
-
-	// 5. Deep Filesystem Search
-	if (SEARCH_PATTERNS.test(commandText)) {
-		if (elapsedSeconds >= 6) {
-			return {
-				warningLevel: "info",
-				title: "正在遍历全盘或目录检索",
-				detail: "正在进行全量文件树遍历或深层正则匹配，检索大型目录树通常耗时较久。",
-			};
-		}
-	}
-
-	// 6. Generic Long-running Command
+	// 4. Generic Long-running Command
 	if (elapsedSeconds >= 45) {
 		return {
 			warningLevel: "warning",
@@ -1274,8 +1232,8 @@ export function analyzeCommandExecutionState(
 		};
 	}
 
-	// Nothing actionable to report: the row already shows the command and elapsed
-	// time, so a generic "command is running" card would be pure noise.
+	// Nothing actionable: a normal command needs no card. The row already shows the
+	// command and elapsed time, and "it is still running" is visible from the badge.
 	return undefined;
 }
 

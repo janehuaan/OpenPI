@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, Copy, FileText, Info, Search, Terminal, Wrench } from "../../icons.tsx";
+import { AlertCircle, Check, Copy, FileText, Search, Terminal, Wrench } from "../../icons.tsx";
 import type { RunningTool } from "../../../types";
 import {
 	analyzeCommandExecutionState,
@@ -144,13 +144,7 @@ export function ChatLiveTools({ tools }: { tools: RunningTool[] }) {
 						{/* "Why It Takes So Long" diagnostic — only when actionable */}
 						{diagnostic && (
 							<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
-								{diagnostic.warningLevel === "critical" ? (
-									<AlertCircle size={14} />
-								) : diagnostic.warningLevel === "warning" ? (
-									<AlertCircle size={14} />
-								) : (
-									<Info size={14} />
-								)}
+								<AlertCircle size={14} />
 								<div className="diagnostic-content">
 									<div className="diagnostic-title">
 										{diagnostic.title}
