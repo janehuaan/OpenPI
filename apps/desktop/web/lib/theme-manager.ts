@@ -347,6 +347,24 @@ export function initTheme(): void {
 		}
 	}
 
+	// Follow theme changes made in the other window. The island is a separate
+	// webview that never mounts the theme hook, so initTheme() owns this.
+	const handleStorage = (e: StorageEvent) => {
+		if (e.key === THEME_MODE_STORAGE_KEY || e.key === THEME_FLAVOR_STORAGE_KEY) {
+			applyTheme(getStoredThemeConfig());
+		}
+	};
+	window.addEventListener("storage", handleStorage);
+
+	desktopApi.onThemeSync?.((payload) => {
+		if (!payload?.mode) return;
+		const mode = payload.mode as ThemeMode;
+		applyTheme({
+			mode,
+			flavor: (payload.flavor as ThemeFlavor) || defaultFlavorForMode(resolveEffectiveMode(mode)),
+		});
+	});
+
 	// In desktop environment, align theme settings from app_settings.json on startup
 	try {
 		if (desktopApi?.getAppSettings) {
@@ -388,58 +406,12 @@ export function useTheme() {
 			}
 		};
 
-		// 1. In-window DOM event
+		// Cross-window synchronization lives in initTheme(); this hook only mirrors
+		// the resulting DOM event into React state.
 		window.addEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
-
-		// 2. Cross-window storage event
-		const handleStorage = (e: StorageEvent) => {
-			if (e.key === THEME_MODE_STORAGE_KEY || e.key === THEME_FLAVOR_STORAGE_KEY) {
-				const current = getStoredThemeConfig();
-				applyTheme(current);
-				setTheme(current);
-				setEffectiveMode(resolveEffectiveMode(current.mode));
-			}
-		};
-		window.addEventListener("storage", handleStorage);
-
-		// 3. Cross-window Tauri IPC event
-		const unlistenSync = desktopApi.onThemeSync?.((payload) => {
-			if (payload?.mode) {
-				const mode = payload.mode as ThemeMode;
-				const effective = resolveEffectiveMode(mode);
-				const flavor = (payload.flavor as ThemeFlavor) || defaultFlavorForMode(effective);
-				const current = getStoredThemeConfig();
-				if (current.mode === mode && current.flavor === flavor) {
-					return;
-				}
-				const nextConfig: ThemeConfig = { mode, flavor };
-				applyTheme(nextConfig);
-				setTheme(nextConfig);
-				setEffectiveMode(effective);
-			}
-		});
-
-		// 4. On mount, synchronize with app settings directly
-		try {
-			if (desktopApi?.getAppSettings) {
-				desktopApi.getAppSettings().then((settings) => {
-					if (settings?.theme || settings?.themeFlavor) {
-						const mode = (settings.theme as ThemeMode) || "system";
-						const effective = resolveEffectiveMode(mode);
-						const flavor = (settings.themeFlavor as ThemeFlavor) || defaultFlavorForMode(effective);
-						const nextConfig: ThemeConfig = { mode, flavor };
-						applyTheme(nextConfig);
-						setTheme(nextConfig);
-						setEffectiveMode(effective);
-					}
-				}).catch(() => {});
-			}
-		} catch {}
 
 		return () => {
 			window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
-			window.removeEventListener("storage", handleStorage);
-			unlistenSync?.();
 		};
 	}, []);
 
