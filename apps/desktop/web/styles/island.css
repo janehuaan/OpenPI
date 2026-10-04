@@ -1,50 +1,37 @@
 /* OpenPI Ambient Agent HUD — Adaptive Glass Floating Island */
 
+/* The HUD palette is derived from the active theme instead of being hardcoded,
+   so the island follows every flavor (dark-warm, dark-oled, light-warm, …) and
+   any flavor added later, with no second palette to keep in sync. */
 :root {
-	--hud-canvas-bg: rgba(251, 247, 240, 0.96);
-	--hud-pill-bg: rgba(247, 241, 231, 0.95);
-	--hud-border: rgba(43, 38, 32, 0.09);
-	--hud-border-light: rgba(43, 38, 32, 0.05);
-	--hud-fg: #2b2520;
-	--hud-fg-muted: #7c7469;
-	--hud-fg-subtle: #999084;
-	--hud-accent: #e06a26;
-	--hud-accent-glow: rgba(224, 106, 38, 0.28);
-	--hud-ok: #3f9e6a;
-	--hud-error: #c0504a;
-	--hud-inset-bg: rgba(43, 38, 32, 0.035);
-	--hud-tag-bg: rgba(43, 38, 32, 0.05);
-	--hud-tag-border: rgba(43, 38, 32, 0.08);
-	--hud-btn-bg: rgba(43, 38, 32, 0.04);
-	--hud-btn-border: rgba(43, 38, 32, 0.08);
-	--hud-btn-hover: rgba(43, 38, 32, 0.08);
-	--hud-shadow-color: rgba(43, 38, 32, 0.12);
+	--hud-canvas-bg: color-mix(in srgb, var(--glass-bg-elevated, var(--bg-elevated)) 93%, transparent);
+	--hud-pill-bg: color-mix(in srgb, var(--glass-bg, var(--bg-elevated)) 95%, transparent);
+	--hud-border: var(--border);
+	--hud-border-light: var(--border-subtle);
+	--hud-fg: var(--text);
+	--hud-fg-muted: var(--text-secondary);
+	--hud-fg-subtle: var(--text-tertiary);
+	--hud-accent: var(--accent);
+	--hud-accent-glow: color-mix(in srgb, var(--accent) 30%, transparent);
+	--hud-ok: var(--ok);
+	--hud-error: var(--danger);
+	--hud-inset-bg: color-mix(in srgb, var(--text) 4%, transparent);
+	--hud-tag-bg: color-mix(in srgb, var(--text) 5%, transparent);
+	--hud-tag-border: var(--border-subtle);
+	--hud-btn-bg: color-mix(in srgb, var(--text) 5%, transparent);
+	--hud-btn-border: var(--border-subtle);
+	--hud-btn-hover: color-mix(in srgb, var(--text) 9%, transparent);
+	--hud-shadow-color: rgba(0, 0, 0, 0.22);
 	--ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Only the shadow needs a mode-specific value; everything else comes from the theme. */
 :root.dark,
 :root[data-theme="dark"],
 body.dark,
 .dark .island-root,
 :root[data-theme-flavor^="dark"] {
-	--hud-canvas-bg: rgba(20, 20, 24, 0.94);
-	--hud-pill-bg: rgba(16, 16, 19, 0.96);
-	--hud-border: rgba(255, 255, 255, 0.10);
-	--hud-border-light: rgba(255, 255, 255, 0.05);
-	--hud-fg: #f4f4f6;
-	--hud-fg-muted: #a1a1aa;
-	--hud-fg-subtle: #71717a;
-	--hud-accent: #e06a26;
-	--hud-accent-glow: rgba(224, 106, 38, 0.35);
-	--hud-ok: #34d399;
-	--hud-error: #f87171;
-	--hud-inset-bg: rgba(255, 255, 255, 0.04);
-	--hud-tag-bg: rgba(255, 255, 255, 0.06);
-	--hud-tag-border: rgba(255, 255, 255, 0.10);
-	--hud-btn-bg: rgba(255, 255, 255, 0.06);
-	--hud-btn-border: rgba(255, 255, 255, 0.10);
-	--hud-btn-hover: rgba(255, 255, 255, 0.12);
-	--hud-shadow-color: rgba(0, 0, 0, 0.50);
+	--hud-shadow-color: rgba(0, 0, 0, 0.5);
 }
 
 .island-root {
