@@ -1682,12 +1682,14 @@ pub async fn handle_invoke(
         }
 
         // ── Cloud account data sync (Supabase) ─────────────────────────────
-        "cloud_set_auth" | "cloud_clear_auth" | "cloud_sync_now" | "cloud_status" => {
+        // Forward every cloud_* op to the daemon as-is, so adding a new op does
+        // not require touching this list (a missing op silently no-ops before).
+        c if c.starts_with("cloud_") => {
             let mut op = args.clone();
             if let Some(obj) = op.as_object_mut() {
-                obj.insert("name".to_string(), json!(channel));
+                obj.insert("name".to_string(), json!(c));
             } else {
-                op = json!({ "name": channel, "args": args });
+                op = json!({ "name": c, "args": args });
             }
             let res = client.request(ClientRequest::App {
                 id: Uuid::new_v4().to_string(),

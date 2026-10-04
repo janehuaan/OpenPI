@@ -120,7 +120,13 @@ export const AuthAccountDialog: FC<AuthAccountDialogProps> = ({
 			const st = await desktopApi.cloudSetPassphrase(passphraseDraft.trim());
 			setCloudSync(st);
 			setPassphraseDraft("");
-			setSuccessMessage("同步口令已设置，API Key 将加密上传");
+			if (st?.passphraseSet) {
+				setSuccessMessage("同步口令已设置，API Key 将加密上传");
+			} else {
+				// Never claim success unless the daemon confirms it (a missing op used
+				// to fall through to a bare Ok, showing a false success).
+				setErrorMessage("同步口令未生效：后端未确认，请更新到最新版本后重试");
+			}
 		} catch (err: any) {
 			setErrorMessage(err?.message || "设置同步口令失败");
 		} finally {
