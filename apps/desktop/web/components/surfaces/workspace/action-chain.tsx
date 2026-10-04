@@ -7,7 +7,6 @@ import {
 	ChevronDown,
 	Copy,
 	FileText,
-	Info,
 	Search,
 	Square,
 	Terminal,
@@ -189,13 +188,7 @@ export function AgentActionChain({
 								{/* Running command diagnostics & explanation */}
 								{isCurrentlyRunning && diagnostic && (
 									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
-										{diagnostic.warningLevel === "critical" ? (
-											<AlertCircle size={13} />
-										) : diagnostic.warningLevel === "warning" ? (
-											<AlertCircle size={13} />
-										) : (
-											<Info size={13} />
-										)}
+										<AlertCircle size={13} />
 										<div className="diagnostic-content">
 											<div className="diagnostic-title">{diagnostic.title}</div>
 											<div className="diagnostic-detail">{diagnostic.detail}</div>
@@ -288,13 +281,7 @@ export function AgentActionChain({
 								{/* Running command diagnostic — only when there is something actionable */}
 								{diagnostic && (
 									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
-										{diagnostic.warningLevel === "critical" ? (
-											<AlertCircle size={13} />
-										) : diagnostic.warningLevel === "warning" ? (
-											<AlertCircle size={13} />
-										) : (
-											<Info size={13} />
-										)}
+										<AlertCircle size={13} />
 										<div className="diagnostic-content">
 											<div className="diagnostic-title">{diagnostic.title}</div>
 											<div className="diagnostic-detail">{diagnostic.detail}</div>
