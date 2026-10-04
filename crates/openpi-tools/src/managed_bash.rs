@@ -35,6 +35,10 @@ impl ManagedBash {
             .arg("-c")
             .arg(cmd)
             .current_dir(cwd.as_ref())
+            // Non-interactive by construction: give the child /dev/null instead of
+            // inheriting the daemon's stdin, so a command that reads input gets EOF
+            // and exits instead of blocking forever (and cannot consume our stdin).
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)

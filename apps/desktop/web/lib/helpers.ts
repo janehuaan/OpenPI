@@ -1166,15 +1166,16 @@ export interface CommandDiagnostic {
 	suggestion?: string;
 }
 
+// Shapes a non-interactive process can actually print while waiting on input.
+// Password prompts are deliberately absent: there is no tty, so `sudo` fails with
+// "a terminal is required..." (and a real "Password:" goes to the tty, never to
+// the captured stream), so such a pattern could never match.
 const INTERACTIVE_PATTERNS = [
 	/(?:\[[Yy]\/[Nn]\]|\([yY]\/[nN]\))\s*$/,
-	/(?:password|Password):\s*$/,
-	/(?:sudo|Authentication)\s+.*password:\s*$/i,
 	/Do you want to continue\?\s*$/i,
 	/Press\s+\[?Enter\]?\s+to\s+continue/i,
 	/Select\s+an?\s+option:\s*$/i,
-	/Enter\s+choice:\s*$/i,
-	/\?\s+[A-Z][\w\s]+:\s*$/,
+	/Enter\s+(?:your\s+)?choice:\s*$/i,
 	/\(default\s+[^)]+\):\s*$/,
 ];
 
