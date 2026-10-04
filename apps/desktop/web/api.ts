@@ -506,6 +506,8 @@ export const desktopApi = {
 	cloudSetPassphrase: (passphrase: string) =>
 		call<CloudSyncStatus>("cloud_set_passphrase", { passphrase }),
 	cloudClearPassphrase: () => call<CloudSyncStatus>("cloud_clear_passphrase"),
+	cloudRegisterProject: (path: string) =>
+		call<{ registered: boolean }>("cloud_register_project", { path }),
 	cloudSyncNow: () => call<CloudSyncStatus>("cloud_sync_now"),
 	cloudStatus: () => call<CloudSyncStatus>("cloud_status"),
 
