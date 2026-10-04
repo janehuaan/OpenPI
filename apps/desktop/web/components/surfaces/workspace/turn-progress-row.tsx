@@ -63,7 +63,7 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 	return (
 		<div className="agent-runtime-hud" role="status" aria-live="polite">
 			<div className="agent-runtime-main-bar">
-				<div className={`agent-runtime-badge ${verb.toLowerCase()}`}>
+				<div className="agent-runtime-badge">
 					<span className="agent-runtime-badge-icon">⌘</span>
 					<span className="agent-runtime-badge-verb">{verb}...</span>
 				</div>
