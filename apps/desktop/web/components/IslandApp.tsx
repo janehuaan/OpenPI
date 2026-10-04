@@ -18,6 +18,7 @@ import {
 	initialTurnProgress,
 	reduceTurnProgress,
 	toolLabel,
+	turnVerb,
 	type TurnProgress,
 } from "../lib/turn-progress";
 import type { AgentInstance, ConversationMessage, ConversationSnapshot, ConversationStats, RunningTool } from "../types";
@@ -41,20 +42,20 @@ interface ProcessRow {
 function deriveVerb(toolName?: string, pathOrCommand?: string): string {
 	const t = (toolName || "").toLowerCase();
 	const p = (pathOrCommand || "").toLowerCase();
-	if (t.includes("read") || t.includes("cat") || t.includes("view")) return "读取文件";
-	if (t.includes("edit") || t.includes("replace") || t.includes("patch")) return "修改代码";
-	if (t.includes("write")) return "写入文件";
-	if (t.includes("grep") || t.includes("search") || t.includes("find") || t.includes("glob")) return "检索代码";
+	if (t.includes("read") || t.includes("cat") || t.includes("view")) return "Analyzed";
+	if (t.includes("edit") || t.includes("replace") || t.includes("patch")) return "Edited";
+	if (t.includes("write")) return "Wrote";
+	if (t.includes("grep") || t.includes("search") || t.includes("find") || t.includes("glob")) return "Searched";
 	if (t.includes("bash") || t.includes("terminal") || t.includes("exec")) {
-		if (p.includes("cargo test") || p.includes("pytest") || p.includes("test")) return "运行自动化测试";
-		if (p.includes("cargo build") || p.includes("cargo check") || p.includes("build")) return "执行项目编译";
-		if (p.includes("git ")) return "版本控制操作";
-		if (p.includes("npm") || p.includes("pnpm") || p.includes("yarn") || p.includes("pip")) return "管理依赖包";
-		return "运行终端指令";
+		if (p.includes("cargo test") || p.includes("pytest") || p.includes("test")) return "Tested";
+		if (p.includes("cargo build") || p.includes("cargo check") || p.includes("build")) return "Built";
+		if (p.includes("git ")) return "Git";
+		if (p.includes("npm") || p.includes("pnpm") || p.includes("yarn") || p.includes("pip")) return "Installed";
+		return "Ran";
 	}
-	if (t.includes("subagent")) return "调度子代理";
-	if (t.includes("mcp")) return "调用扩展服务";
-	return "执行操作";
+	if (t.includes("subagent")) return "Delegated";
+	if (t.includes("mcp")) return "Interfaced";
+	return "Called";
 }
 
 function cleanActionTarget(raw?: string, toolName?: string, cwd?: string): string {
@@ -638,7 +639,7 @@ export function IslandApp() {
 				id: t.toolCallId,
 				actionType: deriveVerb(t.toolName, String(raw)),
 				path: target,
-				durationText: "进行中",
+				durationText: "running",
 				status: "running",
 			};
 		});
@@ -653,46 +654,46 @@ export function IslandApp() {
 				if (padded.length === 1) {
 					padded.push({
 						id: "flow-plan",
-						actionType: "分析结果",
-						path: "评估执行输出并制定下一步",
-						durationText: "进行中",
+						actionType: "Analyzing",
+						path: "Reviewing the output to plan the next step",
+						durationText: "running",
 						status: "running",
 					});
 					padded.push({
 						id: "flow-exec",
-						actionType: "准备操作",
-						path: "等待调度下一步骤",
-						durationText: "等待中",
+						actionType: "Queueing",
+						path: "Waiting for the next step",
+						durationText: "waiting",
 						status: "pending",
 					});
 					padded.push({
 						id: "flow-verify",
-						actionType: "结果校验",
-						path: "确保逻辑收敛与无错误",
-						durationText: "等待中",
+						actionType: "Verifying",
+						path: "Checking for a clean, converged result",
+						durationText: "waiting",
 						status: "pending",
 					});
 				} else if (padded.length === 2) {
 					padded.push({
 						id: "flow-plan",
-						actionType: "综合评估",
-						path: "检查执行状态与后续计划",
-						durationText: "进行中",
+						actionType: "Assessing",
+						path: "Reviewing progress and the remaining plan",
+						durationText: "running",
 						status: "running",
 					});
 					padded.push({
 						id: "flow-reply",
-						actionType: "组织答复",
-						path: "准备生成最终结果汇报",
-						durationText: "等待中",
+						actionType: "Summarizing",
+						path: "Preparing the final response",
+						durationText: "waiting",
 						status: "pending",
 					});
 				} else if (padded.length === 3) {
 					padded.push({
 						id: "flow-verify",
-						actionType: "验证收敛",
-						path: "确认任务已达成预期目标",
-						durationText: "进行中",
+						actionType: "Verifying",
+						path: "Confirming the goal was met",
+						durationText: "running",
 						status: "running",
 					});
 				}
@@ -703,23 +704,23 @@ export function IslandApp() {
 
 		// When 0 tool actions have executed yet:
 		if (isBusy) {
-			const goalText = lastUserPrompt ? cleanActionTarget(lastUserPrompt.slice(0, 36)) : "解析当前任务目标";
+			const goalText = lastUserPrompt ? cleanActionTarget(lastUserPrompt.slice(0, 36)) : "Parsing the current goal";
 			return [
-				{ id: "s1", actionType: "意图理解", path: goalText, durationText: `${hudElapsed}s`, status: "done" },
-				{ id: "s2", actionType: "方案规划", path: "分析上下文与执行策略", durationText: "进行中", status: "running" },
-				{ id: "s3", actionType: "工具调用", path: "准备执行终端或代码操作", durationText: "等待中", status: "pending" },
-				{ id: "s4", actionType: "结果校验", path: "验证执行输出并收敛", durationText: "等待中", status: "pending" },
+				{ id: "s1", actionType: "Understanding", path: goalText, durationText: `${hudElapsed}s`, status: "done" },
+				{ id: "s2", actionType: "Planning", path: "Analyzing context and the execution strategy", durationText: "running", status: "running" },
+				{ id: "s3", actionType: "Tool call", path: "Preparing terminal or code operations", durationText: "waiting", status: "pending" },
+				{ id: "s4", actionType: "Verifying", path: "Validating the output and converging", durationText: "waiting", status: "pending" },
 			];
 		}
 
 		// When idle / settled with no prior actions
 		const wsName = shortWorkspacePath(cwd) || "openpi-next";
-		const modelTitle = conversation?.state?.model?.name || conversation?.state?.model?.id || "自建 / Gemini 3.8";
+		const modelTitle = conversation?.state?.model?.name || conversation?.state?.model?.id || "Not selected";
 		return [
-			{ id: "i1", actionType: "工作空间", path: wsName, durationText: "就绪", status: "done" },
-			{ id: "i2", actionType: "服务引擎", path: "OpenPI Daemon (Active)", durationText: "在线", status: "done" },
-			{ id: "i3", actionType: "活跃模型", path: modelTitle, durationText: "就绪", status: "done" },
-			{ id: "i4", actionType: "等待指令", path: "输入任务即刻自动触发", durationText: "待命中", status: "pending" },
+			{ id: "i1", actionType: "Workspace", path: wsName, durationText: "ready", status: "done" },
+			{ id: "i2", actionType: "Engine", path: "OpenPI Daemon (Active)", durationText: "online", status: "done" },
+			{ id: "i3", actionType: "Model", path: modelTitle, durationText: "ready", status: "done" },
+			{ id: "i4", actionType: "Awaiting", path: "Send a task to start", durationText: "standby", status: "pending" },
 		];
 	}, [allActions, runningTools, isBusy, cwd, lastUserPrompt, hudElapsed, conversation?.state?.model]);
 
@@ -756,7 +757,7 @@ export function IslandApp() {
 			const last = allActions[allActions.length - 1];
 			return `${last.actionType}: ${last.path}`;
 		}
-		return "待命中 (无活跃命令)";
+		return "No active command";
 	}, [activeTool, activeToolTarget, lastBashCommand, allActions, cwd]);
 
 	// Processed Files Count
@@ -765,12 +766,12 @@ export function IslandApp() {
 			return `${turnProgress.step} / ${turnProgress.maxSteps}`;
 		}
 		if (touchedFiles.size > 0) {
-			return `${touchedFiles.size} 个文件`;
+			return `${touchedFiles.size} files`;
 		}
 		if (allActions.length > 0) {
-			return `${allActions.length} 个操作`;
+			return `${allActions.length} actions`;
 		}
-		return "0 个文件";
+		return "No files";
 	}, [turnProgress?.step, turnProgress?.maxSteps, touchedFiles.size, allActions.length]);
 
 	// Session / Task Name
@@ -800,16 +801,12 @@ export function IslandApp() {
 	// Hero Title
 	const heroTitle = useMemo(() => {
 		if (isBusy) {
-			if (activeTool) {
-				return `正在${deriveVerb(activeTool.toolName, activeToolTarget)}`;
-			}
-			if (turnProgress?.label) {
-				return turnProgress.label;
-			}
-			return "正在深度分析与规划解法...";
+			const verb = turnVerb(turnProgress, hudElapsed);
+			const target = activeToolTarget && activeToolTarget !== "—" ? activeToolTarget : "";
+			return target ? `${verb} · ${target}` : verb;
 		}
 		if (justCompleted) {
-			return "当前任务执行完成";
+			return "Task completed";
 		}
 		if (sessionTitle) {
 			return sessionTitle;
@@ -817,46 +814,43 @@ export function IslandApp() {
 		if (lastUserPrompt) {
 			return lastUserPrompt.length > 22 ? `${lastUserPrompt.slice(0, 22)}…` : lastUserPrompt;
 		}
-		return "OpenPI Agent 待命";
-	}, [isBusy, activeTool, activeToolTarget, turnProgress?.label, justCompleted, sessionTitle, lastUserPrompt]);
+		return "OpenPI Agent";
+	}, [isBusy, turnProgress, hudElapsed, activeToolTarget, justCompleted, sessionTitle, lastUserPrompt]);
 
 	// Hero Subtitle
 	const heroSub = useMemo(() => {
 		if (isBusy) {
 			if (activeTool) {
-				return activeToolTarget || "执行底层指令中...";
+				return activeToolTarget || "Running the command…";
 			}
 			if (turnProgress?.stage === "thinking") {
-				return latestReasoningSnippet || "结合上下文与执行结果，评估下一步最佳策略...";
+				return latestReasoningSnippet || "Reviewing context and results to plan the next step";
 			}
 			if (turnProgress?.stage === "responding") {
-				return "正在组织并输出答复内容...";
+				return "Composing the reply…";
 			}
-			return activeInstance?.cwd ? `工作区: ${shortWorkspacePath(activeInstance.cwd)}` : "处理任务中...";
+			return activeInstance?.cwd ? `Workspace: ${shortWorkspacePath(activeInstance.cwd)}` : "Working…";
 		}
 		if (justCompleted) {
-			return `共执行 ${allActions.length} 项操作，等待下一轮指令`;
+			return `${allActions.length} actions · ready for the next instruction`;
 		}
 		if (activeInstance?.cwd) {
-			return `工作区: ${shortWorkspacePath(activeInstance.cwd)} · 随时可以发起任务`;
+			return `Workspace: ${shortWorkspacePath(activeInstance.cwd)} · ready for a task`;
 		}
-		return "准备就绪，随时可以开始";
+		return "Ready";
 	}, [isBusy, activeTool, activeToolTarget, turnProgress?.stage, latestReasoningSnippet, activeInstance?.cwd, justCompleted, allActions.length]);
 
-	// Capsule Pill Task
+	// Capsule Pill Task. Shows what the agent is doing right now — never the session
+	// title, which says nothing about the current activity.
 	const capsuleTaskText = useMemo(() => {
 		if (isBusy) {
-			if (activeTool) {
-				return `正在${deriveVerb(activeTool.toolName, activeToolTarget)}...`;
-			}
-			if (turnProgress?.label) {
-				return turnProgress.label;
-			}
-			return "正在分析项目...";
+			const verb = turnVerb(turnProgress, hudElapsed);
+			const target = activeToolTarget && activeToolTarget !== "—" ? activeToolTarget : "";
+			return target ? `${verb} · ${target}` : verb;
 		}
-		if (justCompleted) return "任务已完成";
-		return sessionTitle || "待命中";
-	}, [isBusy, activeTool, activeToolTarget, turnProgress?.label, justCompleted, sessionTitle]);
+		if (justCompleted) return "Completed";
+		return "Standby";
+	}, [isBusy, turnProgress, hudElapsed, activeToolTarget, justCompleted]);
 
 	// Total Token Usage
 	const totalTokens = stats?.tokens?.total || stats?.contextUsage?.tokens || 0;
@@ -892,7 +886,7 @@ export function IslandApp() {
 							</>
 						) : justCompleted ? (
 							<>
-								<span className="island-capsule-task">已完成</span>
+								<span className="island-capsule-task">Completed</span>
 								<span className="island-capsule-check">✓</span>
 							</>
 						) : (
@@ -907,7 +901,6 @@ export function IslandApp() {
 									<span className="wave-bar" />
 									<span className="wave-bar" />
 								</div>
-								<span className="island-capsule-timer">{formatElapsedSec(hudElapsed)}</span>
 							</>
 						)}
 					</div>
@@ -941,7 +934,7 @@ export function IslandApp() {
 								</div>
 
 								{totalTokens > 0 && (
-									<span className="hud-card-tokens" title={`当前上下文消耗 ${totalTokens.toLocaleString()} tokens`}>
+									<span className="hud-card-tokens" title={`Context usage: ${totalTokens.toLocaleString()} tokens`}>
 										{totalTokens.toLocaleString()} tokens
 									</span>
 								)}
@@ -1020,7 +1013,7 @@ export function IslandApp() {
 							<div className="metric-col">
 								<div className="metric-label">
 									<Terminal size={11} className="metric-icon" />
-									<span>{isBusy ? "当前命令" : "上次命令"}</span>
+									<span>{isBusy ? "Command" : "Last command"}</span>
 								</div>
 								<div className="metric-value code-font" title={currentCommandText}>
 									{currentCommandText || "—"}
@@ -1030,7 +1023,7 @@ export function IslandApp() {
 							<div className="metric-col">
 								<div className="metric-label">
 									<FileText size={11} className="metric-icon" />
-									<span>已处理文件</span>
+									<span>Files</span>
 								</div>
 								<div className="metric-value">{processedFilesText}</div>
 							</div>
@@ -1038,7 +1031,7 @@ export function IslandApp() {
 							<div className="metric-col">
 								<div className="metric-label">
 									<Clock3 size={11} className="metric-icon" />
-									<span>运行时长</span>
+									<span>Elapsed</span>
 								</div>
 								<div className="metric-value">{formatElapsedSec(hudElapsed)}</div>
 							</div>
@@ -1054,7 +1047,7 @@ export function IslandApp() {
 									onClick={() => void handleStop()}
 								>
 									<CircleStop size={11} />
-									<span>停止</span>
+									<span>Stop</span>
 								</button>
 
 								<button
@@ -1063,7 +1056,7 @@ export function IslandApp() {
 									onClick={() => void handleOpenMain()}
 								>
 									<FileText size={11} />
-									<span>查看详情</span>
+									<span>Details</span>
 								</button>
 							</div>
 
@@ -1074,7 +1067,7 @@ export function IslandApp() {
 									onClick={() => void handleOpenMain()}
 								>
 									<ExternalLink size={12} />
-									<span>打开 OpenPI</span>
+									<span>Open OpenPI</span>
 								</button>
 							</div>
 						</div>

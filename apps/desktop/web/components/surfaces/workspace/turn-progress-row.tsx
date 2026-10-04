@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
-import type { TurnProgress } from "../../../lib/turn-progress";
+import { useEffect, useState } from "react";
+import { turnVerb, type TurnProgress } from "../../../lib/turn-progress";
 
 export interface TurnProgressRowProps {
 	progress?: TurnProgress;
@@ -35,25 +35,8 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 	const startedAt = progress?.startedAt || now;
 	const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
 
-	// Contextual dynamic English verbs (Claude Code & elite developer agent runtime HUD)
-	const verb = useMemo(() => {
-		if (!progress) return "Reasoning";
-		const stage = progress.stage;
-		if (stage === "tool") {
-			const t = (progress.toolName || "").toLowerCase();
-			if (t.includes("bash") || t.includes("terminal") || t.includes("exec")) return "Executing";
-			if (t.includes("read") || t.includes("find") || t.includes("grep") || t.includes("search")) return "Investigating";
-			if (t.includes("edit") || t.includes("write") || t.includes("patch")) return "Refactoring";
-			if (t.includes("subagent")) return "Orchestrating";
-			if (t.includes("mcp")) return "Interfacing";
-			return "Operating";
-		}
-		if (stage === "responding") return "Formulating";
-		if (seconds >= 12) return "Illuminating";
-		if (seconds >= 6) return "Synthesizing";
-		if (seconds >= 3) return "Analyzing";
-		return "Reasoning";
-	}, [progress, seconds]);
+	// Shared with the island so both surfaces name the activity identically.
+	const verb = turnVerb(progress, seconds);
 
 	if (!progress && !isWorking) return null;
 
