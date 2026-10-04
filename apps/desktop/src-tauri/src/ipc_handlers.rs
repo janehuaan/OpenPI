@@ -2612,10 +2612,28 @@ pub async fn handle_invoke(
         }
 
         "save_user_profile" => {
+            // Merge into the profile rather than replacing it. This one file holds
+            // both the user profile (nickname / avatar) and the assistant persona
+            // (assistantName / assistantRole / codeStyle), and writing only the
+            // incoming keys used to wipe whichever side did not send them — which is
+            // how a profile save silently deleted the persona.
             let profile_path = agent_dir().join("profile.json");
             let _ = fs::create_dir_all(agent_dir());
-            let _ = fs::write(&profile_path, serde_json::to_string_pretty(&args).unwrap_or_default());
-            Ok(args)
+            let mut merged = fs::read_to_string(&profile_path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<Value>(&c).ok())
+                .unwrap_or_else(|| json!({}));
+            if let (Some(dst), Some(src)) = (merged.as_object_mut(), args.as_object()) {
+                for (key, value) in src {
+                    if value.is_null() {
+                        dst.remove(key);
+                    } else {
+                        dst.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+            let _ = fs::write(&profile_path, serde_json::to_string_pretty(&merged).unwrap_or_default());
+            Ok(merged)
         }
 
         "get_app_settings" => {
