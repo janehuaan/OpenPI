@@ -228,6 +228,7 @@ pub async fn handle_app_op(
 
         "write_memory" => {
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".").to_string();
+            cloud.record_project(&cwd);
             let scope = op.get("scope").and_then(|s| s.as_str()).unwrap_or("project").to_string();
             let entry_type = op.get("type").and_then(|t| t.as_str()).unwrap_or("general").to_string();
             let key = op.get("key").and_then(|k| k.as_str()).unwrap_or_default().to_string();
@@ -266,6 +267,7 @@ pub async fn handle_app_op(
 
         "delete_memory" => {
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            cloud.record_project(cwd);
             let scope = op.get("scope").and_then(|s| s.as_str());
             let entry_type = op.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let key = op.get("key").and_then(|k| k.as_str()).unwrap_or("");
@@ -300,6 +302,7 @@ pub async fn handle_app_op(
 
         "memory_meta" => {
             let cwd = op.get("cwd").and_then(|c| c.as_str()).unwrap_or(".");
+            cloud.record_project(cwd);
             let proj_entries = storage.list_memory(cwd, Some("project")).unwrap_or_default();
             let glob_entries = storage.list_memory(cwd, Some("global")).unwrap_or_default();
             let has_md = std::path::Path::new(cwd).join(".pi/memory/MEMORY.md").exists()
@@ -867,6 +870,11 @@ pub async fn handle_app_op(
             let _ = cloud.sync_now().await;
             let st = cloud.status().await;
             Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
+        }
+        "cloud_register_project" => {
+            let path = op.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+            cloud.record_project(path);
+            Ok(ServerMessage::ok(id, serde_json::json!({ "registered": true })))
         }
         "cloud_sync_now" => {
             let st = cloud.sync_now().await?;

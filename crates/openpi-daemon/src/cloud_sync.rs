@@ -177,6 +177,8 @@ impl CloudSync {
         step!(self.sync_runs(&auth).await);
         // files: memories / skills / preferences
         step!(self.sync_files(&auth).await);
+        // project memory (<repo>/.pi/memory)
+        step!(self.sync_projects(&auth).await);
         // end-to-end encrypted secrets (API keys) — runs before conversations so
         // the shared salt exists when transcripts are encrypted
         step!(self.sync_secrets(&auth).await);
@@ -707,7 +709,7 @@ impl CloudSync {
             if last_seq > wm {
                 let _ = self
                     .storage
-                    .set_kv(&format!("cloud:conv:wm:{}", sid), &last_seq.to_string());
+                    .set_kv(&format!("cloud:conv:wm:{}:{}", sid, mode), &last_seq.to_string());
             }
 
             let conv_ts = if last_ts.is_empty() { now_iso() } else { to_iso(&last_ts) };
@@ -991,6 +993,178 @@ impl CloudSync {
             .map(|s| s.to_string()))
     }
 
+    /// Remember a workspace root so its `.pi/memory` can be synced later.
+    pub fn record_project(&self, cwd: &str) {
+        let cwd = cwd.trim();
+        if cwd.is_empty() || cwd == "." {
+            return;
+        }
+        let abs = std::fs::canonicalize(cwd)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| cwd.to_string());
+        if !std::path::Path::new(&abs).join(".pi").join("memory").is_dir() {
+            return;
+        }
+        let mut list: Vec<String> = self
+            .storage
+            .get_kv("cloud:projects")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        if list.iter().any(|p| p == &abs) {
+            return;
+        }
+        list.push(abs);
+        if list.len() > 50 {
+            list.remove(0);
+        }
+        if let Ok(ser) = serde_json::to_string(&list) {
+            let _ = self.storage.set_kv("cloud:projects", &ser);
+        }
+    }
+
+    // ── project memory: <repo>/.pi/memory (encrypted when a passphrase is set) ──
+    async fn sync_projects(&self, auth: &CloudAuth) -> Result<(u64, u64)> {
+        let roots: Vec<String> = self
+            .storage
+            .get_kv("cloud:projects")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        if roots.is_empty() {
+            return Ok((0, 0));
+        }
+
+        let pass = self
+            .storage
+            .get_kv(SECRET_PASS_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let salt: Option<String> = if pass.is_empty() {
+            None
+        } else {
+            self.fetch_secret_salt(auth).await.ok().flatten().filter(|s| !s.is_empty())
+        };
+        let enc_key: Option<[u8; 32]> = match (&salt, pass.is_empty()) {
+            (Some(s), false) => derive_key(&pass, s).ok(),
+            _ => None,
+        };
+
+        let mut pushed = 0u64;
+        let mut pulled = 0u64;
+
+        // ---- push ----
+        let wm = self.wm("push-projects", FILES_TABLE);
+        let mut rows = Vec::new();
+        let mut newest = wm.clone();
+        for root in &roots {
+            let pi = std::path::Path::new(root).join(".pi").join("memory");
+            if !pi.is_dir() {
+                continue;
+            }
+            let key = project_key(root);
+            let mut files = Vec::new();
+            collect_project_files(&pi, &pi, &mut files);
+            for f in files {
+                if !newer(&f.mtime, &wm) {
+                    continue;
+                }
+                if newer(&f.mtime, &newest) {
+                    newest = f.mtime.clone();
+                }
+                let content = match (&enc_key, &salt) {
+                    (Some(k), Some(s)) => {
+                        let nonce = random_b64(12);
+                        let ct = encrypt(k, &nonce, f.content.as_bytes())?;
+                        json!({ "__enc": { "v": 1, "salt": s, "nonce": nonce, "ct": ct } }).to_string()
+                    }
+                    _ => f.content.clone(),
+                };
+                rows.push(json!({
+                    "path": format!("projects/{}/{}", key, f.rel),
+                    "content": content,
+                    "updated_at": to_iso(&f.mtime),
+                }));
+            }
+        }
+        if !rows.is_empty() {
+            pushed += self
+                .push_rows(auth, FILES_TABLE, "user_id,path", &rows)
+                .await?;
+        }
+        if newest != wm {
+            let _ = self.set_wm("push-projects", FILES_TABLE, &newest);
+        }
+
+        // ---- pull ----
+        let roots_by_key: std::collections::HashMap<String, String> = roots
+            .iter()
+            .map(|r| (project_key(r), r.clone()))
+            .collect();
+        pulled += self
+            .pull_rows(auth, "pull-projects", FILES_TABLE, |row| {
+                let Some(path) = row["path"].as_str() else {
+                    return Ok(false);
+                };
+                let Some(rest) = path.strip_prefix("projects/") else {
+                    return Ok(false);
+                };
+                let Some((key, rel)) = rest.split_once('/') else {
+                    return Ok(false);
+                };
+                if rel.contains("..") {
+                    return Ok(false);
+                }
+                let Some(root) = roots_by_key.get(key) else {
+                    return Ok(false); // project not present on this machine
+                };
+                let abs = std::path::Path::new(root).join(".pi").join("memory").join(rel);
+                let updated = row["updated_at"].as_str().unwrap_or_default();
+                let local_mtime = std::fs::metadata(&abs)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+                    .unwrap_or_default();
+                if !newer(updated, &local_mtime) {
+                    return Ok(false);
+                }
+                let Some(content) = row["content"].as_str() else {
+                    return Ok(false);
+                };
+                let plain = if content.trim_start().starts_with("{\"__enc\"") {
+                    let Ok(v) = serde_json::from_str::<Value>(content) else {
+                        return Ok(false);
+                    };
+                    if pass.is_empty() {
+                        return Ok(false);
+                    }
+                    let enc = &v["__enc"];
+                    let salt = enc["salt"].as_str().unwrap_or_default();
+                    let nonce = enc["nonce"].as_str().unwrap_or_default();
+                    let ct = enc["ct"].as_str().unwrap_or_default();
+                    if salt.is_empty() || nonce.is_empty() || ct.is_empty() {
+                        return Ok(false);
+                    }
+                    match derive_key(&pass, salt).and_then(|k| decrypt(&k, nonce, ct)) {
+                        Ok(p) => p,
+                        Err(_) => return Ok(false),
+                    }
+                } else {
+                    content.to_string()
+                };
+                if let Some(parent) = abs.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                Ok(std::fs::write(&abs, plain).is_ok())
+            })
+            .await?;
+
+        Ok((pushed, pulled))
+    }
+
     async fn patch_deleted(
         &self,
         auth: &CloudAuth,
@@ -1261,6 +1435,94 @@ fn decrypt(key: &[u8; 32], nonce_b64: &str, ct_b64: &str) -> Result<String> {
         .decrypt(aes_gcm::Nonce::from_slice(&nonce), ciphertext.as_ref())
         .map_err(|e| anyhow!("decrypt: {}", e))?;
     String::from_utf8(plain).map_err(|e| anyhow!("utf8: {}", e))
+}
+
+/// Portable project identity: prefer the git remote (same across machines and
+/// checkout paths), fall back to a hash of the absolute path.
+fn project_key(root: &str) -> String {
+    let remote = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+    let (name, basis) = match remote {
+        Some(r) => {
+            let n = r
+                .trim_end_matches(".git")
+                .rsplit(['/', ':'])
+                .next()
+                .unwrap_or("repo")
+                .to_string();
+            (n, r)
+        }
+        None => {
+            let n = std::path::Path::new(root)
+                .file_name()
+                .and_then(|x| x.to_str())
+                .unwrap_or("project")
+                .to_string();
+            (n, root.to_string())
+        }
+    };
+    let safe: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    format!("{}-{:08x}", safe, fnv1a32(&basis))
+}
+
+fn fnv1a32(s: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
+/// Collect `.pi/memory` text files, skipping derived artifacts and backups.
+fn collect_project_files(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<SyncFile>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "backups" || name == "archive" {
+                continue;
+            }
+            collect_project_files(&path, base, out);
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !matches!(ext, "md" | "json" | "txt") {
+            continue;
+        }
+        if meta.len() == 0 || meta.len() > FILE_MAX_BYTES {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(rel_path) = path.strip_prefix(base) else {
+            continue;
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        let mtime = meta
+            .modified()
+            .ok()
+            .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+            .unwrap_or_else(now_iso);
+        out.push(SyncFile { rel, content, mtime });
+    }
 }
 
 fn collect_files(root: &std::path::Path) -> Vec<SyncFile> {

@@ -64,6 +64,14 @@ export function initCloudSyncBridge() {
 	// Initial sync of whatever session we already have.
 	void pushSession(supabase.getSession());
 
+	// Register the current workspace so its .pi/memory is included in the sync.
+	const workspace = window.localStorage.getItem("openpi-code-workspace");
+	if (workspace) {
+		void desktopApi.cloudRegisterProject(workspace).catch(() => {
+			/* daemon may be offline */
+		});
+	}
+
 	// React to login / logout / token refresh.
 	supabase.onAuthStateChange((user) => {
 		void pushSession(user ? supabase.getSession() : null);
