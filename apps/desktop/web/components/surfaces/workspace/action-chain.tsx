@@ -285,23 +285,25 @@ export function AgentActionChain({
 
 								</div>
 
-								{/* Running command diagnostic */}
-								<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
-									{diagnostic.warningLevel === "critical" ? (
-										<AlertCircle size={13} />
-									) : diagnostic.warningLevel === "warning" ? (
-										<AlertCircle size={13} />
-									) : (
-										<Info size={13} />
-									)}
-									<div className="diagnostic-content">
-										<div className="diagnostic-title">{diagnostic.title}</div>
-										<div className="diagnostic-detail">{diagnostic.detail}</div>
-										{diagnostic.suggestion && (
-											<div className="diagnostic-suggestion">{diagnostic.suggestion}</div>
+								{/* Running command diagnostic — only when there is something actionable */}
+								{diagnostic && (
+									<div className={`tool-live-diagnostic ${diagnostic.warningLevel}`}>
+										{diagnostic.warningLevel === "critical" ? (
+											<AlertCircle size={13} />
+										) : diagnostic.warningLevel === "warning" ? (
+											<AlertCircle size={13} />
+										) : (
+											<Info size={13} />
 										)}
+										<div className="diagnostic-content">
+											<div className="diagnostic-title">{diagnostic.title}</div>
+											<div className="diagnostic-detail">{diagnostic.detail}</div>
+											{diagnostic.suggestion && (
+												<div className="diagnostic-suggestion">{diagnostic.suggestion}</div>
+											)}
+										</div>
 									</div>
-								</div>
+								)}
 
 								{liveOutput && (
 									<div>
