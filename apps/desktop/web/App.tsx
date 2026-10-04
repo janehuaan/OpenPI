@@ -672,20 +672,16 @@ export function App() {
 			);
 			if (payload.instanceId) {
 				if (
-					eventType === "agent_start" ||
-					eventType === "message_update" ||
-					eventType === "message_start" ||
-					eventType === "tool_execution_start" ||
-					eventType === "tool_execution_update"
-				) {
-					lastStreamActivityRef.current[payload.instanceId] = Date.now();
-				} else if (
 					eventType === "agent_settled" ||
 					eventType === "turn_end" ||
 					eventType === "stream_closed" ||
 					eventType === "stream_error"
 				) {
 					delete lastStreamActivityRef.current[payload.instanceId];
+				} else {
+					// Any other event means the run is alive. The watchdog only recovers
+					// after the stream has genuinely gone quiet.
+					lastStreamActivityRef.current[payload.instanceId] = Date.now();
 				}
 			}
 			if (eventType === "extension_ui_request") {
@@ -1042,10 +1038,12 @@ export function App() {
 		};
 	}, []);
 
-	// Inactivity Watchdog: If an instance is marked as streaming, but has been completely silent
-	// for > 4.5 seconds, has no active tools running, and the assistant message has completed text,
-	// automatically recover to settled/idle state.
+	// Inactivity Watchdog. A quiet stream is NOT proof the run ended: a model can
+	// think, or a tool can run, for far longer than any local timeout without
+	// emitting an event. So ask the daemon (which owns the real run state) before
+	// recovering — otherwise the UI declares "stopped" while the agent is working.
 	useEffect(() => {
+		const QUIET_MS = 30_000;
 		const interval = setInterval(() => {
 			if (streamingInstances.size === 0 && !conversation?.state?.isStreaming) return;
 			const now = Date.now();
@@ -1059,30 +1057,27 @@ export function App() {
 			if (runningTools.length > 0 || busy === "send-message") return;
 
 			const lastActivity = lastStreamActivityRef.current[activeId];
-			if (lastActivity && now - lastActivity > 4500) {
-				const lastMsg = conversation?.messages?.[conversation.messages.length - 1];
-				// If the last message is an assistant message with content
-				if (lastMsg?.role === "assistant" && Array.isArray(lastMsg.content) && lastMsg.content.length > 0) {
+			if (!lastActivity || now - lastActivity <= QUIET_MS) return;
+
+			// Re-arm first so overlapping ticks cannot pile up requests.
+			lastStreamActivityRef.current[activeId] = now;
+			void desktopApi
+				.getConversation(activeId)
+				.then((next) => {
+					if (next?.state?.isStreaming) return; // still running — leave the UI alone
 					delete lastStreamActivityRef.current[activeId];
 					setStreamingInstances((prev) => {
-						const next = new Set(prev);
-						next.delete(activeId);
-						return next;
+						const remaining = new Set(prev);
+						remaining.delete(activeId);
+						return remaining;
 					});
 					clearRunningTools(activeId);
 					setTurnProgress(undefined);
-					setConversation((curr) => {
-						if (curr?.instance?.id !== activeId) return curr;
-						return { ...curr, state: { ...curr.state, isStreaming: false } };
-					});
-					void desktopApi.getConversation(activeId).then((next) => {
-						setConversation({
-							...next,
-							state: { ...next.state, isStreaming: false },
-						});
-					}).catch(() => {});
-				}
-			}
+					setConversation((curr) =>
+						curr?.instance?.id === activeId ? { ...next, state: { ...next.state, isStreaming: false } } : curr,
+					);
+				})
+				.catch(() => {});
 		}, 1500);
 
 		return () => clearInterval(interval);
