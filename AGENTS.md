@@ -2,6 +2,40 @@
 
 > 每轮请求都会自动读取本文件。新会话开工前先看这里，省去重新摸索。
 
+## 验证与 CI（先看这条，别再说"本地全绿"）
+
+CI 是唯一裁判：`.github/workflows/ci.yml`（`Check & Test (macOS)`，7 步）。本地绿 ≠ CI 绿，已经踩过两次：
+
+1. **本机 rustc host 是 `x86_64-apple-darwin`，CI runner 是 arm64。** 所以
+   `#[cfg(target_arch = "aarch64")]` 分支**本地根本不参与编译**。`crates/openpi-memory/src/metal.rs`
+   的 `unused_assignments` 就是这样骗过本地全部检查、到 CI 才红的。
+   → 已加 `scripts/check-targets.sh`（用 clippy 编译**非本机** macOS target，`-D warnings`）和
+   `scripts/git-hooks/pre-push`（推送前自动跑）。`aarch64-apple-darwin` target 已装好。
+2. **`apps/desktop/dist` 是 gitignore 的**，而 `tauri::generate_context!()` 在**编译期**就要求它存在
+   （`frontendDist: "../dist"`）。CI 必须先 `yarn build` 再编译 Rust workspace，**顺序别改回去**，
+   否则 workflow 永远不可能通过。
+
+**本地跑一遍 CI 等价检查**（`~/.cargo/bin` 必须进 PATH，`RUSTFLAGS` 要手动给）：
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+yarn typecheck && yarn build && yarn test
+RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
+yarn check:targets          # 非本机架构的 cfg 分支
+```
+
+改完 Rust 至少跑 `yarn check:targets`；它比 `cargo check` 强，是 clippy 级别。
+
+## 已完成的两轮修复
+
+- **daemon 覆写自己**：`cp target/debug/openpi-daemon /Applications/OpenPI.app/.../bin/openpi-daemon && kill <自己 pid>`
+  会作废运行中 Mach-O 的映射页，进程**静默冻结**（不崩溃），UI 却因为信任内存里的 `runningTools`
+  标志把这一轮谎报成"执行中"两小时。修法：`App.tsx` 活性看门狗 + `gate.rs` 自我保护规则 +
+  `scripts/package-tauri-app.sh` 原子替换 + `scripts/install-daemon.sh`。**别再用 `cp` 原地覆盖运行中的二进制。**
+- **agent 变慢**：单轮几十个工具结果可以突破 48k 上下文预算（实测 25k–42k token）；记忆抽取和标题摘要
+  每轮各一次 LLM 往返。现在裁剪会对半砍最大的工具结果，后台任务每 3 轮采样一次。`yarn cost` 可量
+  `calls/turn` / `span/turn`。
+
 ## 移动端 M1：局域网实时 + 手机发指令（功能已完成，待真机验收）
 
 **目标**：手机在同一 WiFi 下**实时**看到 Mac 上 agent 的运行过程，并能从手机发指令/停止。
