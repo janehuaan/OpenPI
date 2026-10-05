@@ -12,7 +12,10 @@ describe("nextStreamingTextOffset", () => {
 		const huge = nextStreamingTextOffset(0, "x".repeat(10_000), 32);
 		expect(medium).toBeGreaterThan(3);
 		expect(large).toBeGreaterThan(medium);
-		expect(huge).toBe(800);
+		// Catch-up is deliberately bounded to 96 chars per frame so long messages
+		// reveal steadily instead of lurching forward; see smooth-stream.ts.
+		expect(huge).toBe(96);
+		expect(huge).toBeGreaterThan(large);
 	});
 
 	it("finishes without advancing past the target", () => {
