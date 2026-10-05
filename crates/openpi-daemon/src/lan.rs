@@ -40,16 +40,16 @@ fn settings() -> (bool, u16) {
 	(enabled, port)
 }
 
-/// Turns the link on in app_settings.json. Takes effect on the next daemon start,
-/// which is also when the pairing screen shows up.
-pub fn enable_in_settings() -> Result<()> {
+/// Turns the link on or off in app_settings.json. Takes effect on the next daemon
+/// start, which is also when the pairing screen appears or disappears.
+pub fn set_enabled_in_settings(enabled: bool) -> Result<()> {
 	let path = openpi_dir().join("agent").join("app_settings.json");
 	let mut value: Value = std::fs::read_to_string(&path)
 		.ok()
 		.and_then(|content| serde_json::from_str(&content).ok())
 		.unwrap_or_else(|| json!({}));
 	if let Some(object) = value.as_object_mut() {
-		object.insert("lanEnabled".to_string(), json!(true));
+		object.insert("lanEnabled".to_string(), json!(enabled));
 		object.entry("lanPort".to_string()).or_insert_with(|| json!(DEFAULT_PORT));
 	}
 	if let Some(parent) = path.parent() {
@@ -57,6 +57,11 @@ pub fn enable_in_settings() -> Result<()> {
 	}
 	std::fs::write(&path, serde_json::to_string_pretty(&value)?)?;
 	Ok(())
+}
+
+/// Asking for a pairing code is also a user turning the link on.
+pub fn enable_in_settings() -> Result<()> {
+	set_enabled_in_settings(true)
 }
 
 /// Issues a fresh pairing code (valid for five minutes) and returns it.
@@ -107,6 +112,13 @@ fn rand_below(max: u32) -> u32 {
 	nanos % max.max(1)
 }
 
+/// The phone's wire field is `text`; `send_rpc` reads `message` (the command is
+/// opaque to openpi-proto, so nothing type-checks this hop). Keep the mapping in
+/// one place — sending `text` here silently runs the turn with an empty prompt.
+fn prompt_command(text: &str) -> Value {
+	json!({ "type": "prompt", "message": text })
+}
+
 /// Serves the LAN link until the process ends. Disabled by default; a bind failure
 /// is logged and ignored so it can never keep the daemon from starting.
 pub async fn serve(supervisor: Supervisor, storage: Storage) {
@@ -152,11 +164,11 @@ async fn handle_client(stream: TcpStream, supervisor: Supervisor, storage: Stora
 	};
 	let Some(token) = authorize(&storage, &frame) else {
 		let _ = sink
-			.send(Message::Text(json!({ "type": "error", "error": "bad_code" }).to_string().into()))
+			.send(Message::Text(json!({ "type": "error", "error": "bad_code" }).to_string()))
 			.await;
 		return Err(anyhow!("pairing rejected"));
 	};
-	sink.send(Message::Text(json!({ "type": "paired", "token": token }).to_string().into()))
+	sink.send(Message::Text(json!({ "type": "paired", "token": token }).to_string()))
 		.await?;
 
 	// ---- requests + live events ----
@@ -191,7 +203,7 @@ async fn handle_client(stream: TcpStream, supervisor: Supervisor, storage: Stora
 							Err("sessionId required".to_string())
 						} else if crate::supervisor::find_session_file(&sid).exists() {
 							let command = if kind == "lan_prompt" {
-								json!({ "type": "prompt", "text": request.get("text").and_then(|v| v.as_str()).unwrap_or("") })
+								prompt_command(request.get("text").and_then(|v| v.as_str()).unwrap_or(""))
 							} else {
 								json!({ "type": "abort" })
 							};
@@ -214,7 +226,7 @@ async fn handle_client(stream: TcpStream, supervisor: Supervisor, storage: Stora
 					Ok(data) => json!({ "id": id, "ok": true, "data": data }),
 					Err(error) => json!({ "id": id, "ok": false, "error": error }),
 				};
-				sink.send(Message::Text(frame.to_string().into())).await?;
+				sink.send(Message::Text(frame.to_string())).await?;
 			}
 
 			event = events.recv() => {
@@ -229,7 +241,7 @@ async fn handle_client(stream: TcpStream, supervisor: Supervisor, storage: Stora
 			_ = ticker.tick() => {
 				if !batch.is_empty() {
 					let frame = json!({ "type": "lan_events", "events": batch });
-					sink.send(Message::Text(frame.to_string().into())).await?;
+					sink.send(Message::Text(frame.to_string())).await?;
 					batch = Vec::new();
 				}
 			}
@@ -261,4 +273,18 @@ fn authorize(storage: &Storage, frame: &Value) -> Option<String> {
 	let _ = storage.set_kv(KV_DEVICES, &serde_json::to_string(&known).unwrap_or_default());
 	let _ = storage.set_kv(KV_CODE, ""); // the code is one-shot
 	Some(token)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn prompt_command_uses_message_key() {
+		let command = prompt_command("hello");
+		assert_eq!(command["type"], "prompt");
+		assert_eq!(command["message"], "hello");
+		// `send_rpc` never reads `text`; reintroducing it silently drops prompts.
+		assert!(command.get("text").is_none());
+	}
 }

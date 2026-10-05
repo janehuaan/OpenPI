@@ -133,6 +133,15 @@ export interface CloudSyncStatus {
 	passphraseSet: boolean;
 }
 
+export interface LanStatus {
+	/** Whether the LAN WebSocket server is enabled in app_settings.json. */
+	enabled: boolean;
+	port: number;
+	pairedDevices: number;
+	/** The pending pairing code, or null when none has been issued. */
+	code: string | null;
+}
+
 export const desktopApi = {
 	isNative,
 	getSnapshot: (opts?: { includeStopped?: boolean }) =>
@@ -506,6 +515,12 @@ export const desktopApi = {
 		call<{ registered: boolean }>("cloud_register_project", { path }),
 	cloudSyncNow: () => call<CloudSyncStatus>("cloud_sync_now"),
 	cloudStatus: () => call<CloudSyncStatus>("cloud_status"),
+
+	// ── LAN remote (phone pairing over the local network) ────────────────────
+	lanStatus: () => call<LanStatus>("lan_status"),
+	lanBeginPairing: () => call<{ code: string; expiresInSec: number }>("lan_begin_pairing"),
+	lanSetEnabled: (enabled: boolean) => call<LanStatus>("lan_set_enabled", { enabled }),
+	lanRevokeDevices: () => call<{ revoked: boolean }>("lan_revoke_devices"),
 
 	// ── Kernel Runtime Hot-Update & Diagnostics ──────────────────────────────
 	getRuntimeInfo: () => call<RuntimeInfo>("runtime_get_info"),

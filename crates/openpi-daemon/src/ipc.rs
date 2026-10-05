@@ -104,6 +104,7 @@ impl Drop for ConnGuard {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     stream: UnixStream,
     supervisor: Supervisor,
@@ -154,7 +155,7 @@ async fn handle_connection(
 
                     let msg = ServerMessage::event(&session_id, event);
                     if let Ok(line) = msg.to_json_line() {
-                        if let Err(_) = write_tx_events.send(line).await {
+                        if write_tx_events.send(line).await.is_err() {
                             break;
                         }
                     }
@@ -206,6 +207,7 @@ async fn handle_connection(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_request(
     request: ClientRequest,
     supervisor: Supervisor,
@@ -314,7 +316,7 @@ async fn handle_request(
                                     let _ = supervisor.update_session_model(&session_id, model_str).await;
                                 }
                                 let _ = supervisor.stop_session(&session_id).await;
-                                if let Ok(_) = supervisor.ensure_process(&session_id, &pi_cli_path).await {
+                                if supervisor.ensure_process(&session_id, &pi_cli_path).await.is_ok() {
                                     match supervisor.send_rpc(&session_id, &command).await {
                                         Ok(data) => ServerMessage::ok(id, data),
                                         Err(retry_err) => ServerMessage::err(id, retry_err.to_string()),

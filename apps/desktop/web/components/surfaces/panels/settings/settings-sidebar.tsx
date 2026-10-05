@@ -4,10 +4,11 @@ import {
 	Info,
 	Shield,
 	Sliders,
+	Smartphone,
 	UserRound,
 } from "../../../icons";
 
-export type SettingsTabId = "general" | "persona" | "models" | "extensions" | "security" | "about";
+export type SettingsTabId = "general" | "persona" | "models" | "extensions" | "security" | "lan" | "about";
 
 interface SettingsSidebarProps {
 	activeTab: SettingsTabId;
@@ -85,6 +86,17 @@ export const SettingsSidebar = ({
 			<div className="settings-nav-divider" />
 
 			<span className="settings-nav-section-title">系统</span>
+			<button
+				type="button"
+				role="tab"
+				aria-selected={activeTab === "lan"}
+				className={`settings-nav-item ${activeTab === "lan" ? "active" : ""}`}
+				onClick={() => onSelectTab("lan")}
+			>
+				<Smartphone size={16} />
+				<span>局域网遥控</span>
+			</button>
+
 			<button
 				type="button"
 				role="tab"

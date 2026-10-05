@@ -53,9 +53,12 @@ pub fn find_session_file(sid: &str) -> PathBuf {
     direct
 }
 
+type PendingMap =
+    Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>>;
+
 pub struct ManagedSession {
     pub info: SessionInfo,
-    pub pending: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>>,
+    pub pending: PendingMap,
 }
 
 #[derive(Clone)]
@@ -652,11 +655,11 @@ impl Supervisor {
                 }
 
                 self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
             "abort" => {
                 self.engine.abort(session_id).await?;
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
             "set_model" => {
                 if let Some(m) = command.get("modelId").and_then(|v| v.as_str()) {
@@ -677,16 +680,16 @@ impl Supervisor {
                         "isCompacting": false
                     }));
                 }
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
             "set_thinking_level" => {
                 let level = command.get("level").and_then(|v| v.as_str()).unwrap_or("medium");
                 let mut journal = openpi_engine::session_journal::SessionJournal::open(session_id);
                 let _ = journal.append_thinking_level_change(level);
-                return Ok(serde_json::json!({
+                Ok(serde_json::json!({
                     "thinkingLevel": level,
                     "sessionId": session_id
-                }));
+                }))
             }
             "steer" => {
                 let msg = command.get("message").and_then(|v| v.as_str()).unwrap_or("");
@@ -700,16 +703,16 @@ impl Supervisor {
                 };
                 let _ = self.engine.abort(session_id).await;
                 self.engine.prompt(session_id, msg, &cwd, model_override.as_deref()).await?;
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
             "get_commands" => {
-                return Ok(serde_json::json!({ "commands": ["/help", "/compact", "/reset", "/model"] }));
+                Ok(serde_json::json!({ "commands": ["/help", "/compact", "/reset", "/model"] }))
             }
             "extension_ui_response" => {
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
             _ => {
-                return Ok(serde_json::json!(true));
+                Ok(serde_json::json!(true))
             }
         }
     }
@@ -738,5 +741,11 @@ impl Supervisor {
             }
         }
         tracing::info!("All managed sessions stopped.");
+    }
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self::new()
     }
 }
