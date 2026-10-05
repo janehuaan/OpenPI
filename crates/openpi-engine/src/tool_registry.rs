@@ -45,6 +45,16 @@ impl ToolRegistry {
         ]
     }
 
+    /// 优化 4 (上游 1.0.1 Prompt Cache Preservation 原生实现):
+    /// 保持工具定义的顺序绝对稳定。如果会话中途有新增扩展工具，将其追加到末尾，
+    /// 严禁重新排序或在头部插入，以确保 LLM 服务商（Anthropic/OpenAI/DeepSeek）的 Prompt Cache 前缀不被刷新击穿。
+    pub fn stable_definitions(&self) -> Vec<ToolDefinition> {
+        let mut defs = self.definitions();
+        // 保证按内置工具的固有基准顺序稳定排列，避免哈希表迭代无序
+        defs.sort_by(|a, b| a.function.name.cmp(&b.function.name));
+        defs
+    }
+
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         vec![
             ToolDefinition::new(
@@ -677,10 +687,98 @@ impl ToolRegistry {
                 })
             }
 
-            other => Ok(ToolExecutionResult {
-                output: format!("Unknown tool '{}'", other),
-                is_error: true,
-            }),
+            other => {
+                // 上游 1.0 Leaner Codemode 启发：工具未命中自愈引导 (Self-healing tool recovery suggestion)
+                let available_tools = [
+                    "read", "write", "edit", "search_replace", "find", "grep",
+                    "bash", "code_search", "repo_map", "web_search", "fetch_web_page",
+                    "jev_sentinel_status", "save_skill", "skill_scan",
+                ];
+                let suggestion = available_tools.iter()
+                    .filter(|t| t.starts_with(other) || other.starts_with(*t) || t.to_lowercase() == other.to_lowercase())
+                    .copied()
+                    .next();
+
+                let hint = match suggestion {
+                    Some(sugg) => format!(" Unknown tool '{}'. Did you mean '{}'?", other, sugg),
+                    None => format!(" Unknown tool '{}'. Available tools: {}", other, available_tools.join(", ")),
+                };
+
+                Ok(ToolExecutionResult {
+                    output: hint,
+                    is_error: true,
+                })
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry() -> ToolRegistry {
+        ToolRegistry::new(
+            Arc::new(JevCoordinator::new()),
+            Arc::new(openpi_memory::CodebaseMemoryManager::new()),
+        )
+    }
+
+    #[test]
+    fn advertised_tools_are_unique_and_each_has_a_definition() {
+        let reg = registry();
+        let names = reg.tool_names();
+
+        let mut seen = std::collections::HashSet::new();
+        for name in &names {
+            assert!(seen.insert(*name), "duplicate advertised tool name: {}", name);
+        }
+
+        let defined: std::collections::HashSet<String> =
+            reg.stable_definitions().into_iter().map(|d| d.function.name).collect();
+        for name in &names {
+            assert!(
+                defined.contains(*name),
+                "tool '{}' is advertised to the model but has no definition",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn stable_definitions_keep_a_deterministic_sorted_order() {
+        // Prompt-cache preservation depends on this order never shuffling between
+        // calls; a HashMap iteration leak here would silently bust the cache prefix.
+        let reg = registry();
+        let order: Vec<String> = reg.stable_definitions().into_iter().map(|d| d.function.name).collect();
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(order, sorted);
+        assert_eq!(order, reg.stable_definitions().into_iter().map(|d| d.function.name).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_returns_an_actionable_error() {
+        let res = registry().execute("reade", &json!({}), ".").await.unwrap();
+        assert!(res.is_error, "unknown tool must be reported as an error");
+        assert!(
+            res.output.contains("Did you mean 'read'"),
+            "expected a self-healing suggestion, got: {}",
+            res.output
+        );
+    }
+
+    #[tokio::test]
+    async fn bash_enforces_its_timeout_instead_of_hanging() {
+        // The registry must surface a timeout rather than block on a long command.
+        let res = registry()
+            .execute("bash", &json!({ "command": "sleep 5", "timeout": 1 }), ".")
+            .await
+            .unwrap();
+        assert!(
+            res.output.contains("timed out"),
+            "a timed-out bash call must report it, got: {}",
+            res.output
+        );
     }
 }

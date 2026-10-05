@@ -117,6 +117,11 @@ mod tests {
         }), cwd).await.unwrap();
         assert!(!res.is_error);
         assert!(res.output.contains("test-auto-synth-skill"));
+
+        // 6. Test unknown tool self-healing suggestion (upstream 1.0 Leaner Codemode feature)
+        let res = registry.execute("Bash", &json!({"command": "echo 1"}), cwd).await.unwrap();
+        assert!(res.is_error);
+        assert!(res.output.contains("Did you mean 'bash'?"));
     }
 
     #[test]
