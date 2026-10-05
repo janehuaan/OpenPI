@@ -17,6 +17,7 @@
     "typecheck": "yarn --cwd apps/desktop typecheck",
     "test": "cargo test --workspace && yarn --cwd apps/desktop test",
     "cost": "python3 scripts/cost-baseline.py",
+    "check:targets": "bash scripts/check-targets.sh",
     "check": "yarn typecheck && yarn test"
   },
   "devDependencies": {

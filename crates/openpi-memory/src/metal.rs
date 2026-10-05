@@ -35,13 +35,10 @@ impl HardwareInspector {
     pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
         assert_eq!(a.len(), b.len(), "Vector lengths must match");
         
-        let len = a.len();
-        #[allow(unused_mut)]
-        let mut sum = 0.0f32;
-
         #[cfg(target_arch = "aarch64")]
         {
             use std::arch::aarch64::*;
+            let len = a.len();
             let mut i = 0;
             let mut acc = unsafe { vdupq_n_f32(0.0) };
 
@@ -55,22 +52,18 @@ impl HardwareInspector {
                 i += 4;
             }
 
-            // 水平求和规约
-            unsafe {
-                sum = vaddvq_f32(acc);
-            }
-
-            // 处理余数尾部
+            // 水平求和规约，余数尾部再逐个累加
+            let mut sum = unsafe { vaddvq_f32(acc) };
             while i < len {
                 sum += a[i] * b[i];
                 i += 1;
             }
-            return sum;
+            sum
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            let _ = len;
+            let mut sum = 0.0f32;
             for (x, y) in a.iter().zip(b.iter()) {
                 sum += x * y;
             }

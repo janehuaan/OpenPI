@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# OpenPI pre-push 钩子：推送前编译"非本机架构"的 cfg 分支。
+#
+# 起因：crates/openpi-memory/src/metal.rs 的 #[cfg(target_arch = "aarch64")]
+# 分支在 x86_64 开发机上完全不参与编译，于是本地 test/clippy 全绿，CI 的
+# arm64 runner 直接报 unused_assignments 编译失败。
+#
+# 安装：git config core.hooksPath scripts/git-hooks
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+
+# Hooks run in a non-login shell and the toolchain is not on the default PATH.
+if [ -d "$HOME/.cargo/bin" ]; then
+  PATH="$HOME/.cargo/bin:$PATH"
+  export PATH
+fi
+
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustup >/dev/null 2>&1; then
+  echo "⚠️  pre-push: 找不到 cargo/rustup，跳过跨架构检查（CI 仍会检查）" >&2
+  exit 0
+fi
+
+if ! scripts/check-targets.sh; then
+  echo "❌ pre-push: 非本机架构的 cfg 分支编译失败，已阻止推送。" >&2
+  echo "   这类问题本机默认检查看不见，但 CI 一定会红。修复后重试。" >&2
+  exit 1
+fi
