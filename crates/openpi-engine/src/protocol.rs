@@ -53,8 +53,14 @@ pub struct ChatMessage {
     /// otherwise multi-turn tool calling is rejected or degraded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
-    /// Optional offloaded artifact reference for large tool payloads (ActKV bypass)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional offloaded artifact reference for large tool payloads (ActKV bypass).
+    ///
+    /// Never serialized: it is internal bookkeeping, and the preview it carries
+    /// is already inlined into `content`. Sending it would both duplicate ~16KB
+    /// per offloaded result and put a non-standard field on the wire to the
+    /// provider — the offload measured 32,980 chars instead of the intended
+    /// 16,466 for a 311,804-char payload.
+    #[serde(skip)]
     pub artifact: Option<ArtifactRef>,
 }
 
@@ -295,5 +301,37 @@ mod tests {
             }
             _ => panic!("expected text summary"),
         }
+    }
+
+    #[test]
+    fn test_bypassed_tool_result_is_bounded_on_the_wire() {
+        // Real incident: one `skill_scan` call returned 311,804 chars. It went
+        // into the context verbatim and produced a 135k-token request, which is
+        // what made long sessions crawl. Pin the real size.
+        const REAL_INCIDENT_LEN: usize = 311_804;
+        const CAP: usize = 16 * 1024;
+
+        let (msg, offloaded) =
+            ChatMessage::tool_result_with_bypass("call_scan", "x".repeat(REAL_INCIDENT_LEN), CAP);
+        assert!(offloaded.is_some(), "the full payload must be offloaded");
+
+        let wire = serde_json::to_string(&msg).expect("message must serialize");
+        println!(
+            "REAL_INCIDENT: {} chars in -> {} chars on the wire (inline content {} chars)",
+            REAL_INCIDENT_LEN,
+            wire.len(),
+            match &msg.content {
+                Some(ChatContent::Text(t)) => t.len(),
+                _ => 0,
+            }
+        );
+        // The wire payload is the inline preview plus a short marker. It must
+        // stay at the cap — not at twice the cap, which is what happens if the
+        // `artifact` preview is serialized alongside the inlined one.
+        assert!(
+            wire.len() <= CAP + 512,
+            "offloaded tool message must stay at the {CAP}-char cap, got {} chars on the wire",
+            wire.len()
+        );
     }
 }
