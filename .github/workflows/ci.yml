@@ -16,6 +16,11 @@ jobs:
   check-and-test:
     name: Check & Test (macOS)
     runs-on: macos-15
+    env:
+      # Treat compiler warnings as errors for workspace crates. Cargo caps lints
+      # for registry dependencies, so this only gates our own code. The workspace
+      # is warning-clean, so a new warning fails CI instead of accumulating.
+      RUSTFLAGS: "-D warnings"
     defaults:
       run:
         shell: bash
@@ -39,6 +44,11 @@ jobs:
 
       - name: Test Rust workspace and desktop web app
         run: yarn test
+
+      - name: Clippy (warnings as errors)
+        run: |
+          rustup component add clippy
+          cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build desktop web app and check Tauri crate
         run: |
