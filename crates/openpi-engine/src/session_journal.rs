@@ -116,39 +116,76 @@ impl SessionJournal {
             }
         }
 
-        // 4. Global character budget enforcement (max 48,000 chars ~ 12,000 tokens)
-        // If sliced history exceeds 48,000 characters, drop the oldest user turn until within budget
-        let max_total_chars = 48000;
-        let mut total_chars: usize = sliced.iter().map(|m| {
-            match &m.content {
-                Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
-                _ => 0,
-            }
-        }).sum();
+        // 4. Global character budget enforcement (~48,000 chars ~ 12,000 tokens)
+        const MAX_TOTAL_CHARS: usize = 48_000;
+        const HARD_TOOL_FLOOR: usize = 400;
 
-        while total_chars > max_total_chars {
+        fn total_chars(messages: &[ChatMessage]) -> usize {
+            messages
+                .iter()
+                .map(|m| match &m.content {
+                    Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
+                    _ => 0,
+                })
+                .sum()
+        }
+
+        // 4a. Drop the oldest complete turns until within budget, keeping at least
+        // the newest turn.
+        loop {
+            if total_chars(&sliced) <= MAX_TOTAL_CHARS {
+                break;
+            }
             let u_indices: Vec<usize> = sliced
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| m.role == "user")
                 .map(|(i, _)| i)
                 .collect();
-
-            // If only 1 turn left, break to preserve at least the immediate turn
             if u_indices.len() <= 1 {
                 break;
             }
+            sliced.drain(0..u_indices[1]);
+        }
 
-            // Drop from 0 up to u_indices[1]
-            let drop_count = u_indices[1];
-            let dropped: Vec<ChatMessage> = sliced.drain(0..drop_count).collect();
-            let dropped_chars: usize = dropped.iter().map(|m| {
-                match &m.content {
-                    Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
-                    _ => 0,
+        // 4b. A single turn can still exceed the budget on its own: a tool-heavy
+        // turn kept every result bounded only per-message (step 3 above), so dozens
+        // of results could carry hundreds of KB into the next request. That leaked
+        // past the budget — real calls were observed at 25k-42k tokens. Repeatedly
+        // halve the largest remaining tool result until we fit, or every result
+        // reaches the hard floor.
+        while total_chars(&sliced) > MAX_TOTAL_CHARS {
+            let mut worst: Option<(usize, usize)> = None;
+            for (i, m) in sliced.iter().enumerate() {
+                if m.role != "tool" {
+                    continue;
                 }
-            }).sum();
-            total_chars = total_chars.saturating_sub(dropped_chars);
+                if let Some(crate::protocol::ChatContent::Text(t)) = &m.content {
+                    let n = t.chars().count();
+                    let is_worst = match worst {
+                        Some((_, w)) => n > w,
+                        None => true,
+                    };
+                    if n > HARD_TOOL_FLOOR * 2 && is_worst {
+                        worst = Some((i, n));
+                    }
+                }
+            }
+            let Some((idx, len)) = worst else { break };
+            let target = (len / 2).max(HARD_TOOL_FLOOR);
+            if let Some(crate::protocol::ChatContent::Text(ref mut t)) = sliced[idx].content {
+                let total = t.chars().count();
+                let head = (target * 3) / 4;
+                let tail = target.saturating_sub(head);
+                let head_s: String = t.chars().take(head).collect();
+                let tail_s: String = t.chars().skip(total.saturating_sub(tail)).collect();
+                *t = format!(
+                    "{}\n... [历史工具执行结果已自动截断，已省略 {} 字符以节省上下文] ...\n{}",
+                    head_s,
+                    total.saturating_sub(head + tail),
+                    tail_s
+                );
+            }
         }
 
         sliced
@@ -317,6 +354,7 @@ impl SessionJournal {
         Ok(entry_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn append_assistant_message(
         &mut self,
         text: &str,
@@ -527,5 +565,42 @@ mod tests {
         } else {
             panic!("Expected text content");
         }
+    }
+
+    #[test]
+    fn test_prune_history_messages_bounds_a_single_tool_heavy_turn() {
+        // One turn with 40 tool results of 3,000 chars each = 120,000 chars, far
+        // past the 48,000 budget. Previously only the per-message cap applied, so
+        // the whole turn sailed through and real requests ballooned to 25k-42k
+        // tokens. The total budget must now shrink it within a single turn.
+        let mut raw = Vec::new();
+        raw.push(ChatMessage::user("do a big task"));
+        for i in 0..40 {
+            let mut asst = ChatMessage::assistant("");
+            asst.tool_calls = Some(vec![ToolCall {
+                id: format!("call_{}", i),
+                r#type: "function".to_string(),
+                function: FunctionCall {
+                    name: "bash".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]);
+            raw.push(asst);
+            raw.push(ChatMessage::tool_result(format!("call_{}", i), "Z".repeat(3000)));
+        }
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        let total: usize = pruned
+            .iter()
+            .map(|m| match &m.content {
+                Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
+                _ => 0,
+            })
+            .sum();
+        assert!(
+            total <= 48_000,
+            "a single tool-heavy turn must respect the 48k budget, got {}",
+            total
+        );
     }
 }
