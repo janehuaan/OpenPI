@@ -9,6 +9,187 @@ use uuid::Uuid;
 use crate::config::sessions_dir;
 use crate::protocol::{ChatMessage, FunctionCall, ToolCall};
 
+/// Global character budget for one request (~48,000 chars ~ 12,000 tokens).
+const MAX_TOTAL_CHARS: usize = 48_000;
+/// Never shrink a payload below this; it stops the halving loop from spinning.
+const HARD_TOOL_FLOOR: usize = 400;
+/// String values in tool-call arguments longer than this are folded away.
+const ARG_STRING_KEEP: usize = 400;
+
+/// Characters a message carries: `content`, tool-call arguments, and reasoning.
+///
+/// The budget used to count only `content`. A `write` call's file body lives in
+/// `tool_calls[].function.arguments`, so it was invisible to every limit: one
+/// real session accumulated 270,723 characters of assistant messages that way,
+/// which is what pushed its requests to 78k tokens. `reasoning_content` was
+/// invisible for the same reason and reached 98,143 characters in one turn.
+fn message_chars(m: &ChatMessage) -> usize {
+    let content = match &m.content {
+        Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
+        _ => 0,
+    };
+    let args: usize = m
+        .tool_calls
+        .as_ref()
+        .map(|calls| calls.iter().map(|c| c.function.arguments.chars().count()).sum())
+        .unwrap_or(0);
+    let reasoning = m.reasoning_content.as_ref().map_or(0, |r| r.chars().count());
+    content + args + reasoning
+}
+
+/// Length of the longest single string value inside a JSON document.
+fn longest_string_len(raw: &str) -> usize {
+    fn walk(v: &Value) -> usize {
+        match v {
+            Value::String(s) => s.chars().count(),
+            Value::Array(a) => a.iter().map(walk).max().unwrap_or(0),
+            Value::Object(o) => o.values().map(walk).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+    serde_json::from_str::<Value>(raw).map(|v| walk(&v)).unwrap_or(0)
+}
+
+/// Replace every over-long string value in a tool call's JSON arguments with a
+/// short marker. The JSON stays valid — providers reject malformed arguments —
+/// and the small fields (`path`, `name`) survive, so the model still sees *what*
+/// it did, just not the payload. Returns `None` when nothing needed shrinking.
+pub(crate) fn shrink_arguments(raw: &str, max_string_chars: usize) -> Option<String> {
+    fn shrink(v: &mut Value, max: usize) -> bool {
+        match v {
+            Value::String(s) if s.chars().count() > max => {
+                let n = s.chars().count();
+                *s = format!("[已省略 {n} 字符，完整内容见会话记录]");
+                true
+            }
+            Value::Array(a) => a.iter_mut().fold(false, |hit, x| shrink(x, max) | hit),
+            Value::Object(o) => o.values_mut().fold(false, |hit, x| shrink(x, max) | hit),
+            _ => false,
+        }
+    }
+    let mut v: Value = serde_json::from_str(raw).ok()?;
+    if shrink(&mut v, max_string_chars) {
+        serde_json::to_string(&v).ok()
+    } else {
+        None
+    }
+}
+
+/// Fold the oversized string values of one message's tool calls in place.
+pub(crate) fn shrink_message_arguments(m: &mut ChatMessage, max_string_chars: usize) -> bool {
+    let Some(calls) = m.tool_calls.as_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for call in calls.iter_mut() {
+        if call.function.arguments.chars().count() <= max_string_chars {
+            continue;
+        }
+        if let Some(smaller) = shrink_arguments(&call.function.arguments, max_string_chars) {
+            call.function.arguments = smaller;
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Fold an oversized `reasoning_content` down to a marker.
+///
+/// Reasoning is real request payload: the provider receives every character of
+/// it on each call. It is kept for the recent steps (reasoning models expect it
+/// echoed back) but older scratchpad is pure overhead — one measured turn held
+/// 98,143 characters of it. The marker keeps the field present, so a provider
+/// that wants it still sees *that* there was reasoning, just not the text.
+pub(crate) fn shrink_message_reasoning(m: &mut ChatMessage, max_chars: usize) -> bool {
+    let Some(r) = m.reasoning_content.as_ref() else {
+        return false;
+    };
+    let n = r.chars().count();
+    if n <= max_chars {
+        return false;
+    }
+    m.reasoning_content = Some(format!("[已省略 {n} 字符的思考内容以节省上下文]"));
+    true
+}
+
+#[derive(Clone, Copy)]
+enum PayloadKind {
+    Result,
+    Arguments,
+    Reasoning,
+}
+
+/// One step of budget reduction: shrink the single largest payload, whether it
+/// is a tool-result body, a string inside a tool call's arguments, or a block of
+/// reasoning. Returns false when there is nothing left worth shrinking.
+fn shrink_largest_payload(messages: &mut [ChatMessage]) -> bool {
+    let mut worst_result: Option<(usize, usize)> = None;
+    let mut worst_arg: Option<(usize, usize)> = None;
+    let mut worst_reasoning: Option<(usize, usize)> = None;
+    for (i, m) in messages.iter().enumerate() {
+        if m.role == "tool" {
+            if let Some(crate::protocol::ChatContent::Text(t)) = &m.content {
+                let n = t.chars().count();
+                if n > HARD_TOOL_FLOOR * 2 && worst_result.is_none_or(|(_, w)| n > w) {
+                    worst_result = Some((i, n));
+                }
+            }
+        }
+        if let Some(calls) = &m.tool_calls {
+            for c in calls {
+                let n = longest_string_len(&c.function.arguments);
+                if n > ARG_STRING_KEEP * 2 && worst_arg.is_none_or(|(_, w)| n > w) {
+                    worst_arg = Some((i, n));
+                }
+            }
+        }
+        if let Some(r) = &m.reasoning_content {
+            let n = r.chars().count();
+            if n > ARG_STRING_KEEP * 2 && worst_reasoning.is_none_or(|(_, w)| n > w) {
+                worst_reasoning = Some((i, n));
+            }
+        }
+    }
+
+    let worst = [
+        worst_result.map(|(i, n)| (i, n, PayloadKind::Result)),
+        worst_arg.map(|(i, n)| (i, n, PayloadKind::Arguments)),
+        worst_reasoning.map(|(i, n)| (i, n, PayloadKind::Reasoning)),
+    ]
+    .into_iter()
+    .flatten()
+    .max_by_key(|&(_, n, _)| n);
+
+    match worst {
+        None => false,
+        // Arguments and reasoning fold outright, which frees the whole payload
+        // in one step instead of halving repeatedly.
+        Some((idx, _, PayloadKind::Arguments)) => {
+            shrink_message_arguments(&mut messages[idx], ARG_STRING_KEEP)
+        }
+        Some((idx, _, PayloadKind::Reasoning)) => {
+            shrink_message_reasoning(&mut messages[idx], ARG_STRING_KEEP)
+        }
+        Some((idx, len, PayloadKind::Result)) => {
+            let target = (len / 2).max(HARD_TOOL_FLOOR);
+            if let Some(crate::protocol::ChatContent::Text(ref mut t)) = messages[idx].content {
+                let total = t.chars().count();
+                let head = (target * 3) / 4;
+                let tail = target.saturating_sub(head);
+                let head_s: String = t.chars().take(head).collect();
+                let tail_s: String = t.chars().skip(total.saturating_sub(tail)).collect();
+                *t = format!(
+                    "{}\n... [历史工具执行结果已自动截断，已省略 {} 字符以节省上下文] ...\n{}",
+                    head_s,
+                    total.saturating_sub(head + tail),
+                    tail_s
+                );
+            }
+            true
+        }
+    }
+}
+
 pub struct SessionJournal {
     pub session_id: String,
     pub file_path: PathBuf,
@@ -116,18 +297,21 @@ impl SessionJournal {
             }
         }
 
-        // 4. Global character budget enforcement (~48,000 chars ~ 12,000 tokens)
-        const MAX_TOTAL_CHARS: usize = 48_000;
-        const HARD_TOOL_FLOOR: usize = 400;
+        // 3b. Fold older tool-call arguments and reasoning. A `write` call carries
+        // the whole file body in its arguments, and nothing above counted it — one
+        // session held 270,723 characters of these. Keep the newest turn intact so
+        // the model can still reason about what it is doing right now.
+        for (idx, msg) in sliced.iter_mut().enumerate() {
+            if idx >= last_user_turn_idx {
+                break;
+            }
+            shrink_message_arguments(msg, ARG_STRING_KEEP);
+            shrink_message_reasoning(msg, ARG_STRING_KEEP);
+        }
 
+        // 4. Global character budget enforcement, over content *and* arguments.
         fn total_chars(messages: &[ChatMessage]) -> usize {
-            messages
-                .iter()
-                .map(|m| match &m.content {
-                    Some(crate::protocol::ChatContent::Text(t)) => t.chars().count(),
-                    _ => 0,
-                })
-                .sum()
+            messages.iter().map(message_chars).sum()
         }
 
         // 4a. Drop the oldest complete turns until within budget, keeping at least
@@ -154,37 +338,17 @@ impl SessionJournal {
         // past the budget — real calls were observed at 25k-42k tokens. Repeatedly
         // halve the largest remaining tool result until we fit, or every result
         // reaches the hard floor.
-        while total_chars(&sliced) > MAX_TOTAL_CHARS {
-            let mut worst: Option<(usize, usize)> = None;
-            for (i, m) in sliced.iter().enumerate() {
-                if m.role != "tool" {
-                    continue;
-                }
-                if let Some(crate::protocol::ChatContent::Text(t)) = &m.content {
-                    let n = t.chars().count();
-                    let is_worst = match worst {
-                        Some((_, w)) => n > w,
-                        None => true,
-                    };
-                    if n > HARD_TOOL_FLOOR * 2 && is_worst {
-                        worst = Some((i, n));
-                    }
-                }
+        loop {
+            let before = total_chars(&sliced);
+            if before <= MAX_TOTAL_CHARS {
+                break;
             }
-            let Some((idx, len)) = worst else { break };
-            let target = (len / 2).max(HARD_TOOL_FLOOR);
-            if let Some(crate::protocol::ChatContent::Text(ref mut t)) = sliced[idx].content {
-                let total = t.chars().count();
-                let head = (target * 3) / 4;
-                let tail = target.saturating_sub(head);
-                let head_s: String = t.chars().take(head).collect();
-                let tail_s: String = t.chars().skip(total.saturating_sub(tail)).collect();
-                *t = format!(
-                    "{}\n... [历史工具执行结果已自动截断，已省略 {} 字符以节省上下文] ...\n{}",
-                    head_s,
-                    total.saturating_sub(head + tail),
-                    tail_s
-                );
+            if !shrink_largest_payload(&mut sliced) {
+                break;
+            }
+            // Defensive: never spin if a step somehow failed to free anything.
+            if total_chars(&sliced) >= before {
+                break;
             }
         }
 
@@ -602,5 +766,168 @@ mod tests {
             "a single tool-heavy turn must respect the 48k budget, got {}",
             total
         );
+    }
+
+    fn write_call(id: &str, path: &str, body_len: usize) -> ChatMessage {
+        let mut asst = ChatMessage::assistant("");
+        asst.tool_calls = Some(vec![ToolCall {
+            id: id.to_string(),
+            r#type: "function".to_string(),
+            function: FunctionCall {
+                name: "write".to_string(),
+                arguments: json!({
+                    "path": path,
+                    "content": "B".repeat(body_len),
+                })
+                .to_string(),
+            },
+        }]);
+        asst
+    }
+
+    #[test]
+    fn test_prune_bounds_write_arguments() {
+        // The `db2133cc` shape: 270,723 characters of assistant messages, almost
+        // all of it `write` call arguments. The budget counted only `content`, so
+        // every one of these was invisible and the request reached 78k tokens.
+        let mut raw = Vec::new();
+        raw.push(ChatMessage::user("write a lot of files"));
+        for i in 0..20 {
+            raw.push(write_call(&format!("call_{i}"), &format!("/tmp/f{i}.txt"), 15_000));
+            raw.push(ChatMessage::tool_result(format!("call_{i}"), "ok"));
+        }
+        raw.push(ChatMessage::user("now summarize"));
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        let total: usize = pruned.iter().map(message_chars).sum();
+        assert!(
+            total <= MAX_TOTAL_CHARS,
+            "write arguments must count against the budget, got {total} chars"
+        );
+
+        // The file paths must survive so the model still knows what it did.
+        let kept_path = pruned.iter().any(|m| {
+            m.tool_calls.as_ref().is_some_and(|calls| {
+                calls
+                    .iter()
+                    .any(|c| c.function.arguments.contains("/tmp/f0.txt"))
+            })
+        });
+        assert!(kept_path, "the path field must not be folded away");
+
+        // ...and every argument payload must still be valid JSON.
+        for m in &pruned {
+            for call in m.tool_calls.iter().flatten() {
+                let parsed: Result<Value, _> = serde_json::from_str(&call.function.arguments);
+                assert!(parsed.is_ok(), "folded arguments must stay valid JSON");
+            }
+        }
+    }
+
+    #[test]
+    fn test_prune_keeps_the_live_turn_write_arguments() {
+        // The newest turn is what the model is working on right now: a payload
+        // that fits the budget must not be folded out from under it.
+        let raw = vec![
+            ChatMessage::user("write one file"),
+            write_call("call_live", "/tmp/live.txt", 8_000),
+        ];
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        let body_kept = pruned.iter().any(|m| {
+            m.tool_calls.as_ref().is_some_and(|calls| {
+                calls.iter().any(|c| c.function.arguments.contains(&"B".repeat(8_000)))
+            })
+        });
+        assert!(body_kept, "the live turn's arguments must survive intact");
+    }
+
+    #[test]
+    fn test_shrink_arguments_keeps_json_and_small_fields() {
+        let raw = json!({
+            "path": "/tmp/keep.txt",
+            "content": "C".repeat(9_000),
+            "nested": { "note": "D".repeat(3_000) },
+        })
+        .to_string();
+
+        let shrunk = shrink_arguments(&raw, ARG_STRING_KEEP).expect("must shrink");
+        assert!(shrunk.len() < raw.len() / 2, "payload must actually shrink");
+        let v: Value = serde_json::from_str(&shrunk).expect("must stay valid JSON");
+        assert_eq!(v["path"], "/tmp/keep.txt");
+        assert!(v["nested"]["note"].as_str().unwrap().contains("已省略"));
+    }
+
+    #[test]
+    fn test_shrink_arguments_is_a_noop_for_small_payloads() {
+        let raw = json!({ "path": "/tmp/small.txt", "content": "hi" }).to_string();
+        assert!(shrink_arguments(&raw, ARG_STRING_KEEP).is_none());
+    }
+
+    #[test]
+    fn test_shrink_message_reasoning_folds_only_oversized() {
+        let mut big = ChatMessage::assistant("answer");
+        big.reasoning_content = Some("R".repeat(9_000));
+        assert!(shrink_message_reasoning(&mut big, ARG_STRING_KEEP));
+        let folded = big.reasoning_content.clone().unwrap();
+        assert!(folded.contains("已省略 9000 字符"), "got {folded}");
+        assert!(folded.chars().count() < 60, "marker must be short");
+
+        // Idempotent: a second pass finds nothing left to fold.
+        assert!(!shrink_message_reasoning(&mut big, ARG_STRING_KEEP));
+
+        let mut small = ChatMessage::assistant("answer");
+        small.reasoning_content = Some("short thought".into());
+        assert!(!shrink_message_reasoning(&mut small, ARG_STRING_KEEP));
+    }
+
+    #[test]
+    fn test_prune_bounds_reasoning_and_keeps_the_live_turn() {
+        // Reasoning is resent on every call in a turn and reached 98,143 chars
+        // in one measured turn; it must count against the budget.
+        let mut raw = Vec::new();
+        for i in 0..8 {
+            raw.push(ChatMessage::user(format!("step {i}")));
+            let mut asst = ChatMessage::assistant("ok");
+            asst.reasoning_content = Some("T".repeat(20_000));
+            raw.push(asst);
+        }
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        let total: usize = pruned.iter().map(message_chars).sum();
+        assert!(
+            total <= MAX_TOTAL_CHARS,
+            "reasoning must count against the budget, got {total} chars"
+        );
+
+        // The newest assistant message keeps its reasoning intact.
+        let last_reasoning = pruned
+            .iter()
+            .rev()
+            .find_map(|m| m.reasoning_content.as_ref())
+            .expect("reasoning present");
+        assert_eq!(
+            last_reasoning.chars().count(),
+            20_000,
+            "the live turn's reasoning must survive"
+        );
+    }
+
+    #[test]
+    fn test_prune_folds_reasoning_that_alone_blows_the_budget() {
+        // One turn, no tool results: the only thing left to shrink is reasoning,
+        // so the budget loop has to reach it instead of spinning.
+        let mut raw = vec![ChatMessage::user("think hard")];
+        let mut asst = ChatMessage::assistant("done");
+        asst.reasoning_content = Some("T".repeat(120_000));
+        raw.push(asst);
+
+        let pruned = SessionJournal::prune_history_messages(raw, 5);
+        let total: usize = pruned.iter().map(message_chars).sum();
+        assert!(
+            total <= MAX_TOTAL_CHARS,
+            "reasoning alone must be folded to fit, got {total} chars"
+        );
+        assert!(pruned[1].reasoning_content.as_ref().unwrap().contains("已省略"));
     }
 }

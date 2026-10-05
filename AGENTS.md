@@ -26,7 +26,7 @@ yarn check:targets          # 非本机架构的 cfg 分支
 
 改完 Rust 至少跑 `yarn check:targets`；它比 `cargo check` 强，是 clippy 级别。
 
-## 已完成的两轮修复
+## 已完成的三轮修复
 
 - **daemon 覆写自己**：`cp target/debug/openpi-daemon /Applications/OpenPI.app/.../bin/openpi-daemon && kill <自己 pid>`
   会作废运行中 Mach-O 的映射页，进程**静默冻结**（不崩溃），UI 却因为信任内存里的 `runningTools`
@@ -35,6 +35,12 @@ yarn check:targets          # 非本机架构的 cfg 分支
 - **agent 变慢**：单轮几十个工具结果可以突破 48k 上下文预算（实测 25k–42k token）；记忆抽取和标题摘要
   每轮各一次 LLM 往返。现在裁剪会对半砍最大的工具结果，后台任务每 3 轮采样一次。`yarn cost` 可量
   `calls/turn` / `span/turn`。
+- **预算漏算了 arguments 和 reasoning**：`total_chars()` 只看 `content`，而 `write` 调用的文件正文在
+  `tool_calls[].function.arguments` 里、思考内容在 `reasoning_content` 里 —— 两者都**对预算隐形**。
+  实测 `db2133cc` 有 443,203 字符的 arguments（比 content 还多）、单轮 98,143 字符的 reasoning。
+  现在 `message_chars()` 三者都算，裁剪按"谁大砍谁"处理：arguments 折叠超长字符串值（保 JSON 结构、
+  保留 `path` 等小字段），reasoning 折叠成标记（字段仍在，符合需要回传的 provider），工具结果继续对半砍。
+  实测 `db2133cc` 852,334 → 40,435 字符。
 
 ## 移动端 M1：局域网实时 + 手机发指令（功能已完成，待真机验收）
 

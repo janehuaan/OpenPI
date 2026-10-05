@@ -16,6 +16,10 @@ use crate::tool_registry::ToolRegistry;
 /// single user message; sample them on this cadence instead.
 const BACKGROUND_TURN_INTERVAL: u64 = 3;
 
+/// In-flight folding is conservative: these messages belong to the turn that is
+/// still running, so only clearly oversized payloads are folded.
+const INFLIGHT_ARG_STRING_KEEP: usize = 2000;
+
 struct DesktopStreamBridge {
     session_id: String,
     event_tx: broadcast::Sender<(String, Value)>,
@@ -167,22 +171,30 @@ impl AgentLoop {
 
         let recent_cutoff = tool_indices[total_tools - 2];
 
-        for &idx in &tool_indices {
-            if idx < recent_cutoff {
-                if let Some(crate::protocol::ChatContent::Text(ref mut txt)) = messages[idx].content {
-                    let total_chars = txt.chars().count();
-                    if total_chars > 1000 {
-                        let head: String = txt.chars().take(350).collect();
-                        let tail: String = txt.chars().skip(total_chars.saturating_sub(150)).collect();
-                        *txt = format!(
-                            "{}\n... [前序步骤工具执行结果已折叠，已省略 {} 字符以节省上下文] ...\n{}",
-                            head,
-                            total_chars.saturating_sub(500),
-                            tail
-                        );
-                    }
+        // Fold everything before the last two results. Tool *results* are the
+        // obvious bulk, but a `write` call carries the whole file body in its
+        // arguments, and reasoning is resent on every call too: one session held
+        // 270,723 characters of arguments and 98,143 characters of reasoning this
+        // way, which is what took its requests to 78k tokens.
+        for (idx, msg) in messages.iter_mut().enumerate() {
+            if idx >= recent_cutoff {
+                break;
+            }
+            if let Some(crate::protocol::ChatContent::Text(ref mut txt)) = msg.content {
+                let total_chars = txt.chars().count();
+                if total_chars > 1000 {
+                    let head: String = txt.chars().take(350).collect();
+                    let tail: String = txt.chars().skip(total_chars.saturating_sub(150)).collect();
+                    *txt = format!(
+                        "{}\n... [前序步骤工具执行结果已折叠，已省略 {} 字符以节省上下文] ...\n{}",
+                        head,
+                        total_chars.saturating_sub(500),
+                        tail
+                    );
                 }
             }
+            crate::session_journal::shrink_message_arguments(msg, INFLIGHT_ARG_STRING_KEEP);
+            crate::session_journal::shrink_message_reasoning(msg, INFLIGHT_ARG_STRING_KEEP);
         }
     }
 
@@ -750,6 +762,35 @@ mod tests {
         assert!(text_of(&messages[2]).contains("已折叠"), "oldest result should be folded");
         assert_eq!(text_of(&messages[4]).chars().count(), 2000, "recent result must be intact");
         assert_eq!(text_of(&messages[6]).chars().count(), 2000, "newest result must be intact");
+    }
+
+    #[test]
+    fn compact_folds_older_reasoning_but_keeps_the_recent_steps() {
+        // Reasoning is resent to the provider on every call within the turn, so
+        // old scratchpad must be folded while the newest steps stay intact.
+        let mut older = assistant_with_tool_call();
+        older.reasoning_content = Some("R".repeat(9_000));
+        let mut recent = assistant_with_tool_call();
+        recent.reasoning_content = Some("S".repeat(9_000));
+
+        let mut messages = vec![
+            ChatMessage::user("go"),
+            older,               // before the last two results -> folded
+            tool_result_of(500),
+            assistant_with_tool_call(),
+            tool_result_of(500),
+            recent,              // after the cutoff -> kept
+            tool_result_of(500),
+        ];
+        AgentLoop::compact_inflight_messages(&mut messages);
+
+        let older_r = messages[1].reasoning_content.as_ref().unwrap();
+        assert!(older_r.contains("已省略"), "older reasoning should be folded");
+        assert_eq!(
+            messages[5].reasoning_content.as_ref().unwrap().chars().count(),
+            9_000,
+            "recent reasoning must stay intact"
+        );
     }
 
     #[test]
