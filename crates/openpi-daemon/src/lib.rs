@@ -1,6 +1,7 @@
 pub mod app_ops;
 pub mod cloud_sync;
 pub mod ipc;
+pub mod lan;
 pub mod supervisor;
 pub mod task_runner;
 

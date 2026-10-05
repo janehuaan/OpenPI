@@ -112,6 +112,18 @@ impl CloudSync {
         self.storage.set_kv(SECRET_PASS_KEY, pass)?;
         // force an encrypted re-push on the next sync
         let _ = self.storage.set_kv("cloud:push:wm:cloud_secrets", "");
+        // A new passphrase has to re-encrypt the whole history, not just the messages
+        // that come after it: rows already uploaded stay encrypted under the previous
+        // key forever otherwise, and every device with the new passphrase reports
+        // "wrong passphrase" for them. Clearing the per-conversation watermarks makes
+        // the next sync re-push every message, overwriting those rows.
+        if let Ok(rows) = self.storage.list_kv() {
+            for record in rows {
+                if record.key.starts_with("cloud:conv:wm:") {
+                    let _ = self.storage.set_kv(&record.key, "");
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1583,12 +1595,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn print_reference_envelope() {
+        // Prints a real envelope produced by the Rust side so the browser path can be
+        // checked against it. Run with --nocapture.
+        let salt: Vec<u8> = (0u8..16).collect();
+        let salt_b64 = b64(&salt);
+        let key = derive_key("openpi-compat", &salt_b64).unwrap();
+        let nonce_b64 = b64(&[7u8; 12]);
+        let ct = encrypt(&key, &nonce_b64, b"HELLO-OPENPI").unwrap();
+        println!("ENVELOPE salt={} nonce={} ct={}", salt_b64, nonce_b64, ct);
+    }
+
+    #[test]
     fn key_derivation_is_deterministic() {
         let salt = random_b64(16);
         let a = derive_key("correct horse battery staple", &salt).unwrap();
         let b = derive_key("correct horse battery staple", &salt).unwrap();
         assert_eq!(a, b);
         assert_ne!(a, derive_key("different passphrase", &salt).unwrap());
+    }
+
+    #[test]
+    fn argon2_matches_the_browser_implementation() {
+        // Cross-implementation vector: the mobile app derives the same key in the
+        // browser with hash-wasm. The parameters come from argon2::Argon2::default()
+        // — Argon2id, v0x13, t=2, m=19456 KiB, p=1 — and the browser side must use
+        // exactly those. Getting t_cost wrong (3 reads as more secure) silently
+        // produces a different key and every synced transcript fails to decrypt.
+        let salt: Vec<u8> = (0u8..16).collect();
+        let key = derive_key("openpi-compat", &b64(&salt)).unwrap();
+        let hex: String = key.iter().map(|byte| format!("{:02x}", byte)).collect();
+        assert_eq!(
+            hex, "47554913fd14f8e59def5a0c18eb2fb6cabd65829623f94db625d8b86750e04e",
+            "rust argon2id drifted from the value the browser derives"
+        );
     }
 
     #[test]

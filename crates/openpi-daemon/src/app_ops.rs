@@ -885,6 +885,19 @@ pub async fn handle_app_op(
             Ok(ServerMessage::ok(id, serde_json::to_value(st).unwrap_or(Value::Null)))
         }
 
+        // LAN link — the phone's pairing flow
+        "lan_status" => Ok(ServerMessage::ok(id, crate::lan::pairing_status(storage))),
+        "lan_begin_pairing" => {
+            // Asking for a code is the user turning the link on; it takes effect on
+            // the next daemon start, which is also when the pairing screen appears.
+            crate::lan::enable_in_settings()?;
+            Ok(ServerMessage::ok(id, crate::lan::begin_pairing(storage)?))
+        }
+        "lan_revoke_devices" => {
+            crate::lan::revoke_devices(storage)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "revoked": true })))
+        }
+
         // Default handler
         _ => Ok(ServerMessage::ok(id, serde_json::json!({ "status": "handled_by_rust_daemon" }))),
     }
