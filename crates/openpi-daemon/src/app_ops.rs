@@ -471,8 +471,8 @@ pub async fn handle_app_op(
                         let p = e.path();
                         if p.extension().and_then(|s| s.to_str()) == Some("md") {
                             let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-                            if fname != "MEMORY.md" && fname != "memory_summary.md" {
-                                if !rollout_summaries.iter().any(|item| item.get("fileName").and_then(|v| v.as_str()) == Some(&fname)) {
+                            if fname != "MEMORY.md" && fname != "memory_summary.md"
+                                && !rollout_summaries.iter().any(|item| item.get("fileName").and_then(|v| v.as_str()) == Some(&fname)) {
                                     if let Ok(content) = std::fs::read_to_string(&p) {
                                         let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
                                         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -484,7 +484,6 @@ pub async fn handle_app_op(
                                         }));
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -560,11 +559,7 @@ pub async fn handle_app_op(
                                 let model_count = cfg.get("models").and_then(|m| {
                                     if let Some(arr) = m.as_array() {
                                         Some(arr.len())
-                                    } else if let Some(obj) = m.as_object() {
-                                        Some(obj.len())
-                                    } else {
-                                        None
-                                    }
+                                    } else { m.as_object().map(|obj| obj.len()) }
                                 }).unwrap_or(0);
                                 providers.push(serde_json::json!({
                                     "provider": p_name,
@@ -859,7 +854,7 @@ pub async fn handle_app_op(
         "cloud_set_passphrase" => {
             let pass = op.get("passphrase").and_then(|v| v.as_str()).unwrap_or_default();
             if let Err(e) = cloud.set_passphrase(pass) {
-                return Ok(ServerMessage::err(id, &e.to_string()));
+                return Ok(ServerMessage::err(id, e.to_string()));
             }
             let _ = cloud.sync_now().await;
             let st = cloud.status().await;
@@ -892,6 +887,13 @@ pub async fn handle_app_op(
             // the next daemon start, which is also when the pairing screen appears.
             crate::lan::enable_in_settings()?;
             Ok(ServerMessage::ok(id, crate::lan::begin_pairing(storage)?))
+        }
+        "lan_set_enabled" => {
+            // The WS server binds (or not) at daemon start, so this only takes effect
+            // on the next restart — the desktop UI says as much.
+            let enabled = op.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            crate::lan::set_enabled_in_settings(enabled)?;
+            Ok(ServerMessage::ok(id, crate::lan::pairing_status(storage)))
         }
         "lan_revoke_devices" => {
             crate::lan::revoke_devices(storage)?;
@@ -1215,4 +1217,16 @@ if CommandLine.arguments.count > 1 {
         return s.to_string();
     }
     String::from_utf8_lossy(&bytes).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn parse_package_name_strips_prefix_and_version() {
+        assert_eq!(super::parse_package_name("npm:foo"), "foo");
+        assert_eq!(super::parse_package_name("foo@1.2.3"), "foo");
+        assert_eq!(super::parse_package_name("foo"), "foo");
+        assert_eq!(super::parse_package_name("npm:@scope/pkg@1.2.3"), "@scope/pkg");
+        assert_eq!(super::parse_package_name("@scope/pkg"), "@scope/pkg");
+    }
 }

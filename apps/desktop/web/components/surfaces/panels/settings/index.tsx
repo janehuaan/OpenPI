@@ -6,6 +6,7 @@ import { PersonaTab } from "./tabs/persona-tab";
 import { ModelsTab } from "./tabs/models-tab";
 import { ExtensionsTab } from "./tabs/extensions-tab";
 import { SecurityTab } from "./tabs/security-tab";
+import { LanTab } from "./tabs/lan-tab";
 import { AboutTab } from "./tabs/about-tab";
 import { desktopApi } from "../../../../api";
 import type { MarketplacePackage } from "../../../../marketplace";
@@ -156,6 +157,7 @@ export const SettingsSurface: FC<SettingsSurfaceProps> = ({
 						/>
 					)}
 					{tab === "security" && <SecurityTab instanceId={instanceId} onReload={onReload} />}
+					{tab === "lan" && <LanTab />}
 					{tab === "about" && <AboutTab capabilities={capabilities} />}
 				</main>
 			</div>
