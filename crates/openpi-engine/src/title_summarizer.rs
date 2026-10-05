@@ -62,10 +62,10 @@ pub fn summarize_title_heuristic(prompt: &str, cwd: &str) -> String {
     }
 
     // Strip trailing punctuation
-    let text = text.trim_end_matches(|c: char| c == '，' || c == ',' || c == '。' || c == '！' || c == '!' || c == '？' || c == '?' || c == '~').trim();
+    let text = text.trim_end_matches(['，', ',', '。', '！', '!', '？', '?', '~']).trim();
 
     // If text is very long, take the first clause (split by punctuation)
-    let first_clause = text.split(|c: char| c == '，' || c == ',' || c == '。' || c == '；' || c == ';' || c == '！' || c == '!' || c == '？' || c == '?')
+    let first_clause = text.split(['，', ',', '。', '；', ';', '！', '!', '？', '?'])
         .next()
         .unwrap_or(text)
         .trim();
@@ -129,7 +129,7 @@ pub fn extract_title_from_jsonl(path: &Path, cwd: &str) -> Option<String> {
     let mut first_user_prompt = None;
     let mut second_user_prompt = None;
 
-    for line in reader.lines().flatten() {
+    for line in reader.lines().map_while(|l| l.ok()) {
         if line.trim().is_empty() {
             continue;
         }
@@ -214,7 +214,7 @@ pub async fn summarize_title_llm(
         .trim_start_matches("标题：")
         .trim_start_matches("标题:")
         .trim_matches(|c: char| c == '"' || c == '“' || c == '”' || c == '《' || c == '》' || c == '`' || c == ' ')
-        .trim_end_matches(|c: char| c == '。' || c == '！' || c == '!' || c == '？' || c == '?' || c == '，' || c == ',');
+        .trim_end_matches(['。', '！', '!', '？', '?', '，', ',']);
 
     if clean_title.is_empty() {
         anyhow::bail!("Empty LLM title");

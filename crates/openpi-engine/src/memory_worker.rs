@@ -231,7 +231,7 @@ pub fn extract_substantive_session_focus(session_id: &str, cwd: &str, current_pr
 		if let Ok(file) = std::fs::File::open(&sess_path) {
 			use std::io::{BufRead, BufReader};
 			let reader = BufReader::new(file);
-			for line in reader.lines().flatten() {
+			for line in reader.lines().map_while(|l| l.ok()) {
 				if line.trim().is_empty() {
 					continue;
 				}
@@ -293,7 +293,7 @@ pub fn build_session_context(session_id: &str, cwd: &str, current_prompt: &str, 
 			use std::io::{BufRead, BufReader};
 			let reader = BufReader::new(file);
 			let mut user_turns = Vec::new();
-			for line in reader.lines().flatten() {
+			for line in reader.lines().map_while(|l| l.ok()) {
 				if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
 					if val.get("type").and_then(|v| v.as_str()) == Some("message") {
 						if let Some(msg) = val.get("message") {
@@ -618,7 +618,7 @@ pub fn reconcile_all_session_memories() -> Result<()> {
 				if let Ok(f) = fs::File::open(&sess_file) {
 					use std::io::{BufRead, BufReader};
 					let reader = BufReader::new(f);
-					for line in reader.lines().flatten() {
+					for line in reader.lines().map_while(|l| l.ok()) {
 						if line.trim().is_empty() {
 							continue;
 						}
