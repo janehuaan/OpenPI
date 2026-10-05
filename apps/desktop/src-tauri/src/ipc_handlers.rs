@@ -1684,7 +1684,7 @@ pub async fn handle_invoke(
         // ── Cloud account data sync (Supabase) ─────────────────────────────
         // Forward every cloud_* op to the daemon as-is, so adding a new op does
         // not require touching this list (a missing op silently no-ops before).
-        c if c.starts_with("cloud_") => {
+        c if c.starts_with("cloud_") || c.starts_with("lan_") => {
             let mut op = args.clone();
             if let Some(obj) = op.as_object_mut() {
                 obj.insert("name".to_string(), json!(c));

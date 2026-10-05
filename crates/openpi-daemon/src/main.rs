@@ -37,6 +37,13 @@ async fn main() -> anyhow::Result<()> {
         openpi_daemon::run_cloud_sync_loop(cloud_for_loop).await;
     });
 
+    // LAN link for the paired phone (off unless lanEnabled; never fatal)
+    let supervisor_for_lan = supervisor.clone();
+    let storage_for_lan = storage.clone();
+    tokio::spawn(async move {
+        openpi_daemon::lan::serve(supervisor_for_lan, storage_for_lan).await;
+    });
+
     // Spawn scheduler background loop
     let scheduler_clone = scheduler.clone();
     let supervisor_for_sched = supervisor.clone();

@@ -29,3 +29,4 @@ base64.workspace = true
 aes-gcm = "0.10"
 argon2 = "0.5"
 rand = "0.8"
+tokio-tungstenite = "0.24"
