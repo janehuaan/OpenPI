@@ -60,6 +60,31 @@ impl SafetyGate {
                 0.95,
                 "Destructive SQL operation (DROP/TRUNCATE).",
             ),
+            // Self-preservation: an agent must never be able to destroy the daemon
+            // that supervises it. Overwriting a *running* binary in place (cp/mv/dd/
+            // truncation) invalidates its mapped pages and wedges the live process;
+            // killing the daemon then leaves a permanently "running" ghost state.
+            // Updates must go through an atomic, externally supervised deploy.
+            (
+                Regex::new(r"(?i)\b(cp|mv|install|dd|tee|truncate)\b[^\n]*?(\.app/Contents/Resources/openpi/bin/openpi-daemon|/\.local/bin/openpi-daemon)").unwrap(),
+                0.99,
+                "🛑 禁止原地覆写正在运行的 openpi-daemon 二进制：这把运行中的进程镜像写坏会导致其静默卡死。请使用 scripts/install-daemon.sh（原子替换 + 受监管重启），不要用 cp/mv 直接覆盖。",
+            ),
+            (
+                Regex::new(r"(?i)>\s*[^\s;&|]*(\.app/Contents/Resources/openpi/bin/openpi-daemon|\.local/bin/openpi-daemon)").unwrap(),
+                0.99,
+                "🛑 禁止用重定向截断正在运行的 openpi-daemon 二进制（会损坏运行中进程的映像）。",
+            ),
+            (
+                Regex::new(r"(?i)\b(pkill|killall)\b[^\n]*openpi-daemon").unwrap(),
+                0.99,
+                "🛑 禁止杀死 openpi-daemon 自身/父守护进程：这会抹掉当前会话的监管进程并留下僵死运行态。",
+            ),
+            (
+                Regex::new(r"(?i)\bkill\b[^\n]*\$PPID").unwrap(),
+                0.99,
+                "🛑 禁止杀死自身的父进程 ($PPID)：该父进程正是监管你的 daemon。",
+            ),
         ];
 
         let hang_rules = vec![
@@ -260,5 +285,41 @@ mod tests {
             _ => panic!("Expected Deny on heavy cargo add, got {:?}", verdict2),
         }
     }
-}
 
+    #[test]
+    fn test_self_protection_blocks_daemon_overwrite_and_kill() {
+        let gate = SafetyGate::new();
+
+        // The exact incident: in-place overwrite of the daemon's own executable.
+        let overwrite = gate.inspect_command(
+            "cp target/debug/openpi-daemon /Applications/OpenPI.app/Contents/Resources/openpi/bin/openpi-daemon",
+        );
+        assert!(
+            matches!(overwrite, GateVerdict::Deny { .. }),
+            "must deny overwriting the running daemon, got {:?}",
+            overwrite
+        );
+
+        let truncate = gate.inspect_command(": > /Users/someone/.local/bin/openpi-daemon");
+        assert!(
+            matches!(truncate, GateVerdict::Deny { .. }),
+            "must deny truncating the daemon binary, got {:?}",
+            truncate
+        );
+
+        let kill = gate.inspect_command("pkill -f openpi-daemon");
+        assert!(
+            matches!(kill, GateVerdict::Deny { .. }),
+            "must deny killing the supervisor, got {:?}",
+            kill
+        );
+
+        // A copy that does not target a running daemon stays allowed.
+        let benign = gate.inspect_command("cp target/debug/openpi-daemon /tmp/openpi-daemon-backup");
+        assert!(
+            matches!(benign, GateVerdict::Allow),
+            "benign copy should stay allowed, got {:?}",
+            benign
+        );
+    }
+}

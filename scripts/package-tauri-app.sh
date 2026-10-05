@@ -40,9 +40,12 @@ DAEMON="$DIR/target/release/openpi-daemon"
 
 echo "🔗 3. Embedding pure Rust openpi-daemon binary..."
 mkdir -p "$RUNTIME/bin"
-rm -f "$RUNTIME/bin/openpi-daemon"
-cp -f "$DAEMON" "$RUNTIME/bin/openpi-daemon"
-chmod +x "$RUNTIME/bin/openpi-daemon"
+# Atomic replace: an in-place `cp` over a *running* daemon truncates a file that
+# is already mapped into the live process, corrupting its pages and wedging it.
+# Installing to a temp path and renaming swaps the inode instead, so a running
+# process keeps its old image until it is deliberately restarted.
+install -m 755 "$DAEMON" "$RUNTIME/bin/.openpi-daemon.tmp"
+mv -f "$RUNTIME/bin/.openpi-daemon.tmp" "$RUNTIME/bin/openpi-daemon"
 
 echo "📝 4. Generating daemon launcher..."
 cat > "$APP_BUNDLE/Contents/MacOS/openpi-daemon" <<'LAUNCHER'
