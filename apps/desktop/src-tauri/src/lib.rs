@@ -1,7 +1,9 @@
 pub mod daemon_client;
+pub mod git_ops;
 pub mod ipc_handlers;
 pub mod island_native;
 pub mod oauth_listener;
+pub mod system_ops;
 pub mod tray;
 
 use daemon_client::DaemonClient;
@@ -203,16 +205,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building openpi desktop tauri application")
         .run(|app_handle, event| {
-            match event {
-                tauri::RunEvent::Reopen { .. } => {
-                    // Clicking Dock icon re-opens and focuses main window
-                    if let Some(main) = app_handle.get_webview_window("main") {
-                        let _ = main.unminimize();
-                        let _ = main.show();
-                        let _ = main.set_focus();
-                    }
+            if let tauri::RunEvent::Reopen { .. } = event {
+                // Clicking Dock icon re-opens and focuses main window
+                if let Some(main) = app_handle.get_webview_window("main") {
+                    let _ = main.unminimize();
+                    let _ = main.show();
+                    let _ = main.set_focus();
                 }
-                _ => {}
             }
         });
 }

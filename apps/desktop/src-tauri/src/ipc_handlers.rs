@@ -7,7 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{LazyLock, Mutex};
-use sysinfo::System;
 use tauri::{AppHandle, Emitter, Manager};
 use tracing::info;
 use uuid::Uuid;
@@ -338,7 +337,7 @@ async fn execute_model_capability_probe(
 
         let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
 
-        if status >= 200 && status < 300 {
+        if (200..300).contains(&status) {
             if let Ok(v) = serde_json::from_str::<Value>(body) {
                 if let Some(choices) = v.get("choices").and_then(|c| c.as_array()) {
                     if let Some(msg) = choices.first().and_then(|c| c.get("message")) {
@@ -390,42 +389,6 @@ fn memory_request_op(channel: &str, args: &Value) -> Value {
 fn run_log_text(response: &Value) -> Result<&str, String> {
     response.get("text").and_then(Value::as_str)
         .ok_or_else(|| "Invalid run log response from daemon".to_string())
-}
-
-#[cfg(test)]
-mod contract_tests {
-    use super::*;
-
-    #[test]
-    fn memory_requests_use_daemon_type_without_losing_fields() {
-        for (channel, name) in [("write_memory_entry", "write_memory"), ("delete_memory_entry", "delete_memory")] {
-            let op = memory_request_op(channel, &json!({
-                "cwd": "/workspace", "scope": "global", "memoryType": "architecture",
-                "key": "backend", "value": "rust", "body": "notes"
-            }));
-            assert_eq!(op["name"], name);
-            assert_eq!(op["type"], "architecture");
-            assert!(op.get("memoryType").is_none());
-            assert_eq!(op["key"], "backend");
-            assert_eq!(op["scope"], "global");
-        }
-    }
-
-    #[test]
-    fn run_log_returns_text_and_rejects_invalid_response() {
-        assert_eq!(run_log_text(&json!({"text": "output", "truncated": false})).unwrap(), "output");
-        assert!(run_log_text(&json!({"truncated": false})).is_err());
-    }
-
-    #[test]
-    fn package_entries_are_mapped_to_capabilities() {
-        let entries = vec![json!({"kind": "package", "source": "npm:example", "resolved": "example"}),
-            json!({"kind": "extension", "source": "ext.js"})];
-        let caps = conversation_capabilities(Some(&entries));
-        assert_eq!(caps["packages"], json!([{"source": "npm:example", "scope": "user", "filtered": false}]));
-        assert!(caps["skills"].is_array());
-        assert!(caps["tools"].is_array());
-    }
 }
 
 fn conversation_capabilities(package_entries: Option<&[Value]>) -> Value {
@@ -525,6 +488,15 @@ pub async fn handle_invoke(
     channel: String,
     args: Value,
 ) -> Result<Value, String> {
+    // Git operations live in their own module so this dispatch stays legible.
+    if channel.starts_with("git_") {
+        return crate::git_ops::handle(&channel, &args);
+    }
+
+    if crate::system_ops::is_system_channel(&channel) {
+        return crate::system_ops::handle(&app, &channel, &args);
+    }
+
     match channel.as_str() {
         // ── Snapshot & Daemon ───────────────────────────────────────────────
         "get_snapshot" => {
@@ -1617,7 +1589,7 @@ pub async fn handle_invoke(
                         "provider": provider,
                         "timestamp": chrono::Utc::now().to_rfc3339()
                     });
-                    let _ = writeln!(f, "{}", entry.to_string());
+                    let _ = writeln!(f, "{}", entry);
                 }
             }
 
@@ -1652,7 +1624,7 @@ pub async fn handle_invoke(
                         "thinkingLevel": level,
                         "timestamp": chrono::Utc::now().to_rfc3339()
                     });
-                    let _ = writeln!(f, "{}", entry.to_string());
+                    let _ = writeln!(f, "{}", entry);
                 }
             }
 
@@ -1765,384 +1737,6 @@ pub async fn handle_invoke(
         }
 
         // ── Git Surface ────────────────────────────────────────────────────
-        "git_status" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let out = Command::new("git")
-                .args(["status", "--porcelain=v1", "-b", "-uall"])
-                .current_dir(cwd)
-                .output();
-
-            let out = match out {
-                Ok(o) => o,
-                Err(_) => {
-                    return Ok(json!({
-                        "isRepo": false,
-                        "branch": "",
-                        "clean": true,
-                        "ahead": 0,
-                        "behind": 0,
-                        "files": []
-                    }));
-                }
-            };
-
-            if !out.status.success() {
-                return Ok(json!({
-                    "isRepo": false,
-                    "branch": "",
-                    "clean": true,
-                    "ahead": 0,
-                    "behind": 0,
-                    "files": []
-                }));
-            }
-
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let mut branch = "main".to_string();
-            let mut ahead = 0;
-            let mut behind = 0;
-            let mut files = Vec::new();
-
-            for line in stdout.lines() {
-                if line.starts_with("##") {
-                    let b_info = line.trim_start_matches('#').trim();
-                    let branch_part = b_info.split_whitespace().next().unwrap_or("main");
-                    branch = branch_part.split("...").next().unwrap_or("main").to_string();
-                    if let Some(pos) = b_info.find('[') {
-                        let bracket = &b_info[pos..];
-                        if let Some(ahead_pos) = bracket.find("ahead ") {
-                            let s = &bracket[ahead_pos + 6..];
-                            let num: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-                            ahead = num.parse().unwrap_or(0);
-                        }
-                        if let Some(behind_pos) = bracket.find("behind ") {
-                            let s = &bracket[behind_pos + 7..];
-                            let num: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-                            behind = num.parse().unwrap_or(0);
-                        }
-                    }
-                } else if line.len() >= 3 {
-                    let x = line.chars().next().unwrap_or(' ');
-                    let y = line.chars().nth(1).unwrap_or(' ');
-                    let file_path = line[3..].trim();
-
-                    if x == '?' && y == '?' {
-                        files.push(json!({
-                            "path": file_path,
-                            "status": "untracked",
-                            "staged": false
-                        }));
-                    } else if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
-                        files.push(json!({
-                            "path": file_path,
-                            "status": "conflicted",
-                            "staged": false
-                        }));
-                    } else {
-                        if x != ' ' && x != '?' {
-                            let st = match x {
-                                'A' => "added",
-                                'D' => "deleted",
-                                'R' => "renamed",
-                                _ => "modified",
-                            };
-                            files.push(json!({
-                                "path": file_path,
-                                "status": st,
-                                "staged": true
-                            }));
-                        }
-                        if y != ' ' && y != '?' {
-                            let st = match y {
-                                'D' => "deleted",
-                                _ => "modified",
-                            };
-                            files.push(json!({
-                                "path": file_path,
-                                "status": st,
-                                "staged": false
-                            }));
-                        }
-                    }
-                }
-            }
-
-            Ok(json!({
-                "isRepo": true,
-                "branch": branch,
-                "clean": files.is_empty(),
-                "ahead": ahead,
-                "behind": behind,
-                "files": files
-            }))
-        }
-
-        "git_diff" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let staged = args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut cmd = Command::new("git");
-            cmd.arg("diff");
-            if staged {
-                cmd.arg("--cached");
-            }
-            let file_opt = args.get("path").or_else(|| args.get("filePath")).and_then(|v| v.as_str());
-            if let Some(file) = file_opt {
-                cmd.arg("--").arg(file);
-            }
-            let out = cmd.current_dir(cwd).output();
-            let (mut diff_str, err_msg) = match out {
-                Ok(o) => {
-                    let s = String::from_utf8_lossy(&o.stdout).to_string();
-                    let e = if o.status.success() { None } else { Some(String::from_utf8_lossy(&o.stderr).to_string()) };
-                    (s, e)
-                }
-                Err(e) => (String::new(), Some(e.to_string())),
-            };
-
-            // If empty and unstaged and a specific file was requested, check for untracked file
-            if diff_str.trim().is_empty() && !staged {
-                if let Some(f) = file_opt {
-                    let full_path = Path::new(cwd).join(f);
-                    if full_path.exists() && full_path.is_file() {
-                        if let Ok(no_index) = Command::new("git")
-                            .args(["diff", "--no-index", "/dev/null", f])
-                            .current_dir(cwd)
-                            .output()
-                        {
-                            let s = String::from_utf8_lossy(&no_index.stdout).to_string();
-                            if !s.is_empty() {
-                                diff_str = s;
-                            }
-                        }
-                    }
-                }
-            }
-
-            Ok(json!({
-                "diff": diff_str,
-                "error": err_msg
-            }))
-        }
-
-        "git_stage" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut paths: Vec<String> = Vec::new();
-            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
-                for p in arr {
-                    if let Some(s) = p.as_str() {
-                        paths.push(s.to_string());
-                    }
-                }
-            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
-                paths.push(p.to_string());
-            }
-
-            let mut cmd = Command::new("git");
-            cmd.arg("add");
-            if all || paths.is_empty() {
-                cmd.arg("-A");
-            } else {
-                for p in &paths {
-                    cmd.arg(p);
-                }
-            }
-            match cmd.current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({ "ok": success, "success": success, "error": if success { Value::Null } else { json!(stderr) } }))
-                }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-            }
-        }
-
-        "git_unstage" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut paths: Vec<String> = Vec::new();
-            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
-                for p in arr {
-                    if let Some(s) = p.as_str() {
-                        paths.push(s.to_string());
-                    }
-                }
-            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
-                paths.push(p.to_string());
-            }
-
-            let mut cmd = Command::new("git");
-            cmd.args(["restore", "--staged"]);
-            if all || paths.is_empty() {
-                cmd.arg(".");
-            } else {
-                for p in &paths {
-                    cmd.arg(p);
-                }
-            }
-            match cmd.current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({ "ok": success, "success": success, "error": if success { Value::Null } else { json!(stderr) } }))
-                }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-            }
-        }
-
-        "git_discard" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let mut paths: Vec<String> = Vec::new();
-            if let Some(arr) = args.get("paths").and_then(|v| v.as_array()) {
-                for p in arr {
-                    if let Some(s) = p.as_str() {
-                        paths.push(s.to_string());
-                    }
-                }
-            } else if let Some(p) = args.get("path").and_then(|v| v.as_str()) {
-                paths.push(p.to_string());
-            }
-
-            if paths.is_empty() {
-                let _ = Command::new("git").args(["restore", "."]).current_dir(cwd).output();
-                let _ = Command::new("git").args(["clean", "-fd"]).current_dir(cwd).output();
-            } else {
-                for p in &paths {
-                    let _ = Command::new("git").args(["restore", p]).current_dir(cwd).output();
-                    let _ = Command::new("git").args(["clean", "-fd", p]).current_dir(cwd).output();
-                }
-            }
-            Ok(json!({ "ok": true, "success": true }))
-        }
-
-        "git_commit" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let msg = args.get("message").and_then(|v| v.as_str()).unwrap_or("Update");
-            let stage_all = args.get("stageAll").and_then(|v| v.as_bool()).unwrap_or(false);
-            if stage_all {
-                let _ = Command::new("git").args(["add", "-A"]).current_dir(cwd).output();
-            }
-            match Command::new("git").args(["commit", "-m", msg]).current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({
-                        "ok": success,
-                        "success": success,
-                        "output": stdout,
-                        "error": if success { Value::Null } else { json!(stderr) }
-                    }))
-                }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-            }
-        }
-
-        "git_branches" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let out = Command::new("git").args(["branch", "-a"]).current_dir(cwd).output().map_err(|e| e.to_string())?;
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let mut current = "main".to_string();
-            let mut branches = Vec::new();
-            for line in stdout.lines() {
-                let is_current = line.contains('*');
-                let clean = line.replace('*', "").trim().to_string();
-                if !clean.is_empty() {
-                    if is_current {
-                        current = clean.clone();
-                    }
-                    branches.push(json!({
-                        "name": clean,
-                        "current": is_current
-                    }));
-                }
-            }
-            Ok(json!({
-                "current": current,
-                "branches": branches
-            }))
-        }
-
-        "git_checkout" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let branch = args.get("branch").and_then(|v| v.as_str()).unwrap_or("main");
-            let create = args.get("create").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut cmd = Command::new("git");
-            cmd.arg("checkout");
-            if create {
-                cmd.arg("-b");
-            }
-            cmd.arg(branch);
-            match cmd.current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({
-                        "ok": success,
-                        "success": success,
-                        "currentBranch": branch,
-                        "error": if success { Value::Null } else { json!(stderr) }
-                    }))
-                }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-            }
-        }
-
-        "git_sync" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("sync");
-            match action {
-                "pull" => {
-                    match Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output() {
-                        Ok(out) => {
-                            let success = out.status.success();
-                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                            Ok(json!({
-                                "ok": success,
-                                "success": success,
-                                "output": stdout,
-                                "error": if success { Value::Null } else { json!(stderr) }
-                            }))
-                        }
-                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-                    }
-                }
-                "push" => {
-                    match Command::new("git").args(["push"]).current_dir(cwd).output() {
-                        Ok(out) => {
-                            let success = out.status.success();
-                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                            Ok(json!({
-                                "ok": success,
-                                "success": success,
-                                "output": stdout,
-                                "error": if success { Value::Null } else { json!(stderr) }
-                            }))
-                        }
-                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-                    }
-                }
-                _ => {
-                    let _ = Command::new("git").args(["pull", "--rebase"]).current_dir(cwd).output();
-                    match Command::new("git").args(["push"]).current_dir(cwd).output() {
-                        Ok(out) => {
-                            let success = out.status.success();
-                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                            Ok(json!({
-                                "ok": success,
-                                "success": success,
-                                "output": stdout,
-                                "error": if success { Value::Null } else { json!(stderr) }
-                            }))
-                        }
-                        Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-                    }
-                }
-            }
-        }
 
         // ── Workspace & Files ──────────────────────────────────────────────
         "default_workspace" => {
@@ -2229,166 +1823,6 @@ pub async fn handle_invoke(
         }
 
         // ── System Ops & Telemetry ─────────────────────────────────────────
-        "system_get_telemetry" => {
-            let mut sys = System::new_all();
-            sys.refresh_all();
-            let cpu = sys.global_cpu_usage();
-            let total_mem = sys.total_memory() / 1024 / 1024;
-            let used_mem = sys.used_memory() / 1024 / 1024;
-            Ok(json!({
-                "cpuUsage": cpu,
-                "memoryUsedMb": used_mem,
-                "memoryTotalMb": total_mem,
-                "uptimeSeconds": System::uptime()
-            }))
-        }
-
-        "system_list_ports" => {
-            let out = Command::new("lsof")
-                .args(["-iTCP", "-sTCP:LISTEN", "-P", "-n"])
-                .output()
-                .map_err(|e| e.to_string())?;
-
-            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let mut ports = Vec::new();
-            for line in stdout.lines().skip(1) {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 9 {
-                    let cmd = parts[0];
-                    let pid = parts[1];
-                    let name = parts[8];
-                    if let Some(idx) = name.rfind(':') {
-                        let port_str = &name[idx+1..];
-                        if let Ok(port) = port_str.parse::<u16>() {
-                            ports.push(json!({
-                                "command": cmd,
-                                "pid": pid,
-                                "port": port
-                            }));
-                        }
-                    }
-                }
-            }
-            Ok(json!(ports))
-        }
-
-        "system_kill_port" => {
-            let port = args.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-            if port > 0 {
-                let script = format!("kill -9 $(lsof -t -i:{} 2>/dev/null) 2>/dev/null || true", port);
-                let _ = Command::new("sh").args(["-c", &script]).output();
-            }
-            Ok(json!(true))
-        }
-
-        "system_capture_screen" => {
-            let tmp = format!("/tmp/openpi_cap_{}.png", Uuid::new_v4());
-            let _ = Command::new("screencapture").args(["-i", "-r", &tmp]).output();
-            if Path::new(&tmp).exists() {
-                let bytes = fs::read(&tmp).unwrap_or_default();
-                let _ = fs::remove_file(&tmp);
-                let b64 = format!("data:image/png;base64,{}", tauri::image::Image::from_bytes(&bytes).map(|_| "captured").unwrap_or(""));
-                Ok(json!({ "image": b64 }))
-            } else {
-                Ok(json!({ "image": null }))
-            }
-        }
-
-        // ── Window Controls ────────────────────────────────────────────────
-
-        "focus_main_window" => {
-            if let Some(main) = app.get_webview_window("main") {
-                let _ = main.show();
-                let _ = main.set_focus();
-            }
-            Ok(json!(true))
-        }
-
-        "set_island_expanded" => {
-            let expanded = args.get("expanded").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mode = args.get("mode").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let _ = app.emit("openpi:island-state", serde_json::json!({ "expanded": expanded, "mode": mode }));
-            // AppKit NSWindow mutations must happen on the main thread; async IPC
-            // handlers run on a tokio worker, so marshal the layout call over.
-            let app_island = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(island) = app_island.get_webview_window("island") {
-                    let mode_str = mode.as_deref();
-                    let is_expanded_state = expanded || mode_str == Some("expanded") || mode_str == Some("attention");
-                    let (w, h) = if is_expanded_state {
-                        (560.0, 530.0)
-                    } else {
-                        (360.0, 44.0)
-                    };
-                    crate::island_native::position_island_top_center(&island, w, h);
-                    if is_expanded_state {
-                        let _ = island.show();
-                        let _ = island.set_focus();
-                    }
-                }
-            });
-            Ok(json!(true))
-        }
-
-        "open_main_from_island" => {
-            if let Some(main) = app.get_webview_window("main") {
-                let _ = main.unminimize();
-                let _ = main.show();
-                let _ = main.set_focus();
-            }
-            Ok(json!(true))
-        }
-
-        "toggle_island_window" => {
-            let app_island = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(island) = app_island.get_webview_window("island") {
-                    if let Ok(visible) = island.is_visible() {
-                        if visible {
-                            let _ = island.hide();
-                        } else {
-                            crate::island_native::position_island_top_center(&island, 360.0, 44.0);
-                            let _ = island.show();
-                        }
-                    }
-                }
-            });
-            Ok(json!(true))
-        }
-
-        "show_island_window" => {
-            let app_island = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(island) = app_island.get_webview_window("island") {
-                    if island.is_visible().unwrap_or(false) {
-                        let _ = island.show();
-                        return;
-                    }
-                    let _ = app_island.emit("openpi:island-state", serde_json::json!({ "expanded": false, "mode": "idle" }));
-                    crate::island_native::position_island_top_center(&island, 360.0, 44.0);
-                    let _ = island.show();
-                }
-            });
-            Ok(json!(true))
-        }
-
-        "hide_island_window" => {
-            if let Some(island) = app.get_webview_window("island") {
-                let _ = island.hide();
-            }
-            Ok(json!(true))
-        }
-
-        "set_island_mouse_ignore" => {
-            let ignore = args.get("ignore").and_then(|v| v.as_bool()).unwrap_or(false);
-            let app_island = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Some(island) = app_island.get_webview_window("island") {
-                    crate::island_native::set_island_mouse_ignore(&island, ignore);
-                }
-            });
-            Ok(json!(true))
-        }
 
         // ── Jev Decision Engine ────────────────────────────────────────────
         "jev_decide" => {
@@ -2519,15 +1953,14 @@ pub async fn handle_invoke(
                             let mut found_idx = None;
                             for offset in -(radius as isize)..=(radius as isize) {
                                 let test_idx = target_idx as isize + offset;
-                                if test_idx >= 0 && (test_idx as usize) < lines.len() {
-                                    if lines[test_idx as usize] == *expected_first {
+                                if test_idx >= 0 && (test_idx as usize) < lines.len()
+                                    && lines[test_idx as usize] == *expected_first {
                                         let dist = offset.unsigned_abs();
                                         if dist < best_dist {
                                             best_dist = dist;
                                             found_idx = Some(test_idx as usize);
                                         }
                                     }
-                                }
                             }
                             if let Some(f_idx) = found_idx {
                                 target_idx = f_idx;
@@ -2545,53 +1978,7 @@ pub async fn handle_invoke(
             Ok(json!({ "success": true, "appliedCount": applied_count }))
         }
 
-        "git_init" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let _ = std::fs::create_dir_all(cwd);
-            match Command::new("git").arg("init").current_dir(cwd).output() {
-                Ok(out) => {
-                    let success = out.status.success();
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    Ok(json!({
-                        "ok": success,
-                        "success": success,
-                        "output": stdout,
-                        "error": if success { Value::Null } else { json!(stderr) }
-                    }))
-                }
-                Err(e) => {
-                    Ok(json!({
-                        "ok": false,
-                        "success": false,
-                        "error": e.to_string()
-                    }))
-                }
-            }
-        }
 
-        "git_resolve_conflict" => {
-            let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or_else(|| default_workspace());
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            let strategy = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("ours");
-            if path.is_empty() {
-                return Ok(json!({ "ok": false, "success": false, "error": "Missing path" }));
-            }
-            let flag = if strategy == "theirs" { "--theirs" } else { "--ours" };
-            let out = Command::new("git").args(["checkout", flag, path]).current_dir(cwd).output();
-            match out {
-                Ok(o) => {
-                    if o.status.success() {
-                        let _ = Command::new("git").args(["add", path]).current_dir(cwd).output();
-                        Ok(json!({ "ok": true, "success": true }))
-                    } else {
-                        let stderr = String::from_utf8_lossy(&o.stderr).to_string();
-                        Ok(json!({ "ok": false, "success": false, "error": stderr }))
-                    }
-                }
-                Err(e) => Ok(json!({ "ok": false, "success": false, "error": e.to_string() })),
-            }
-        }
 
         // ── User Profile & App Settings ────────────────────────────────────
         "get_user_profile" => {
@@ -2807,7 +2194,7 @@ pub async fn handle_invoke(
                     };
 
                     let latency_ms = (time_sec * 1000.0).round().max(1.0) as u64;
-                    let is_ok = status >= 200 && status < 300;
+                    let is_ok = (200..300).contains(&status);
 
                     let mut model_count = 0;
                     if let Ok(val) = serde_json::from_str::<Value>(body) {
@@ -4097,4 +3484,40 @@ if CommandLine.arguments.count > 1 {
         return s.to_string();
     }
     String::from_utf8_lossy(&bytes).to_string()
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    #[test]
+    fn memory_requests_use_daemon_type_without_losing_fields() {
+        for (channel, name) in [("write_memory_entry", "write_memory"), ("delete_memory_entry", "delete_memory")] {
+            let op = memory_request_op(channel, &json!({
+                "cwd": "/workspace", "scope": "global", "memoryType": "architecture",
+                "key": "backend", "value": "rust", "body": "notes"
+            }));
+            assert_eq!(op["name"], name);
+            assert_eq!(op["type"], "architecture");
+            assert!(op.get("memoryType").is_none());
+            assert_eq!(op["key"], "backend");
+            assert_eq!(op["scope"], "global");
+        }
+    }
+
+    #[test]
+    fn run_log_returns_text_and_rejects_invalid_response() {
+        assert_eq!(run_log_text(&json!({"text": "output", "truncated": false})).unwrap(), "output");
+        assert!(run_log_text(&json!({"truncated": false})).is_err());
+    }
+
+    #[test]
+    fn package_entries_are_mapped_to_capabilities() {
+        let entries = vec![json!({"kind": "package", "source": "npm:example", "resolved": "example"}),
+            json!({"kind": "extension", "source": "ext.js"})];
+        let caps = conversation_capabilities(Some(&entries));
+        assert_eq!(caps["packages"], json!([{"source": "npm:example", "scope": "user", "filtered": false}]));
+        assert!(caps["skills"].is_array());
+        assert!(caps["tools"].is_array());
+    }
 }
