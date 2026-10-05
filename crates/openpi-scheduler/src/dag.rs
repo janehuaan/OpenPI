@@ -56,3 +56,9 @@ impl DagEngine {
         }
     }
 }
+
+impl Default for DagEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}

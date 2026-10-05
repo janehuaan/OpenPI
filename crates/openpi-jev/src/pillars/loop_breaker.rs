@@ -83,9 +83,9 @@ impl LoopBreaker {
         if self.recent_history.len() >= 2 {
             let last = self.recent_history.last().unwrap();
             for prev in self.recent_history.iter().rev().skip(1) {
-                if prev.cmd == last.cmd {
-                    loop_count += 1;
-                } else if prev.is_error && last.is_error && prev.output_summary == last.output_summary {
+                if prev.cmd == last.cmd
+                    || (prev.is_error && last.is_error && prev.output_summary == last.output_summary)
+                {
                     loop_count += 1;
                 } else {
                     break;

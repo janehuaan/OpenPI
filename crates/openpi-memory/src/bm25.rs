@@ -13,7 +13,7 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
         // Sub-tokenize on '_' or '-' (snake_case / kebab-case)
         if lower.contains('_') || lower.contains('-') {
-            for sub in lower.split(|c: char| c == '_' || c == '-') {
+            for sub in lower.split(['_', '-']) {
                 if !sub.is_empty() {
                     tokens.push(sub.to_string());
                 }

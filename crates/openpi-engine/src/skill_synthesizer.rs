@@ -28,12 +28,11 @@ pub fn sanitize_skill_slug(raw: &str) -> String {
         if c.is_ascii_alphanumeric() {
             slug.push(c.to_ascii_lowercase());
             last_dash = false;
-        } else if c == '-' || c == '_' || c.is_whitespace() || c == '/' || c == '.' {
-            if !last_dash {
+        } else if (c == '-' || c == '_' || c.is_whitespace() || c == '/' || c == '.')
+            && !last_dash {
                 slug.push('-');
                 last_dash = true;
             }
-        }
     }
 
     let trimmed = slug.trim_matches('-').to_string();

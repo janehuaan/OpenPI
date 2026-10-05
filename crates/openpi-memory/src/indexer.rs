@@ -199,7 +199,7 @@ impl CodebaseIndex {
                 .to_string();
 
             let fp = FileFingerprint::of(path);
-            let unchanged = fp.map_or(false, |fp| self.fingerprints.get(&rel_path) == Some(&fp));
+            let unchanged = fp.is_some_and(|fp| self.fingerprints.get(&rel_path) == Some(&fp));
 
             if unchanged {
                 // 复用旧 chunk（顺序与全量重建一致；空文件自然得到空 vec）。

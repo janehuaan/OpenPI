@@ -48,6 +48,7 @@ pub enum ScheduleRole {
 
 /// 任务情境分类（情境化分层做梦）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TaskContext {
     /// 定位与修复 Bug（偏深度收敛利用）
     QuickFix,
@@ -56,14 +57,10 @@ pub enum TaskContext {
     /// 未知环境与开源项目探索调研
     Exploration,
     /// 通用平衡型任务
+    #[default]
     General,
 }
 
-impl Default for TaskContext {
-    fn default() -> Self {
-        Self::General
-    }
-}
 
 impl TaskContext {
     pub fn as_str(&self) -> &'static str {
@@ -97,6 +94,7 @@ pub struct DiscoveryNode {
 }
 
 impl DiscoveryNode {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
         parent_id: Option<String>,

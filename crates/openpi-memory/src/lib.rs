@@ -2,6 +2,8 @@ pub mod bm25;
 pub mod vector;
 pub mod indexer;
 pub mod repomap;
+pub mod decay;
+pub mod metal;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,8 +18,10 @@ pub use repomap::RepoMapGenerator;
 
 #[derive(Clone)]
 pub struct CodebaseMemoryManager {
-    indices: Arc<RwLock<HashMap<PathBuf, (Instant, Arc<CodebaseIndex>)>>>,
+    indices: Arc<RwLock<IndexMap>>,
 }
+
+type IndexMap = HashMap<PathBuf, (Instant, Arc<CodebaseIndex>)>;
 
 impl Default for CodebaseMemoryManager {
     fn default() -> Self {
@@ -132,7 +136,7 @@ impl HybridSearchEngine {
             };
 
             let vec_score = match (query_vector, &doc.vector) {
-                (Some(qv), Some(dv)) => cosine_similarity(qv, dv),
+                (Some(qv), Some(dv)) => metal::HardwareInspector::cosine_similarity(qv, dv),
                 _ => 0.0,
             };
 

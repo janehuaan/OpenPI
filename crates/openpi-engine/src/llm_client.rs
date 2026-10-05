@@ -75,13 +75,25 @@ impl LlmClient {
             }
         }
 
+        // 解析动态采样参数（Thinking Level 或默认温度）
+        let (dyn_temperature, _dyn_top_p) = if let Some(ref map) = config.sampling_params_by_thinking_level {
+            let key = if config.reasoning { "high" } else { "normal" };
+            if let Some(params) = map.get(key) {
+                (params.temperature.or(Some(0.2)), params.top_p)
+            } else {
+                (Some(0.2), None)
+            }
+        } else {
+            (Some(0.2), None)
+        };
+
         let req_body = ChatCompletionRequest {
             model: config.id.clone(),
             messages,
             tools,
             stream: true,
             max_tokens: Some(config.max_tokens),
-            temperature: Some(0.2),
+            temperature: dyn_temperature,
             stream_options: Some(StreamOptions {
                 include_usage: true,
             }),
@@ -341,5 +353,11 @@ impl LlmClient {
             finish_reason,
             usage,
         })
+    }
+}
+
+impl Default for LlmClient {
+    fn default() -> Self {
+        Self::new()
     }
 }

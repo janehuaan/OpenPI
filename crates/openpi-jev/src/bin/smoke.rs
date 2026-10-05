@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let v2 = coordinator.pre_check_command("apt-get install nginx");
     match v2 {
         GateVerdict::ModifyCommand { safe_command, reason } => {
-            println!("    ✅ 成功捕获交互式挂起指令并修补: `{}` -> `{}` ({})", "apt-get install nginx", safe_command, reason);
+            println!("    ✅ 成功捕获交互式挂起指令并修补: `apt-get install nginx` -> `{}` ({})", safe_command, reason);
             assert_eq!(safe_command, "apt-get install nginx -y");
         }
         _ => panic!("Expected ModifyCommand for interactive install"),
@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     let v3 = coordinator.pre_check_command("tail -f /var/log/app.log");
     match v3 {
         GateVerdict::RequireConfirmation { prompt, .. } => {
-            println!("    ✅ 成功识别终端长阻塞命令: `{}` ({})", "tail -f /var/log/app.log", prompt);
+            println!("    ✅ 成功识别终端长阻塞命令: `tail -f /var/log/app.log` ({})", prompt);
         }
         _ => println!("    ℹ️ 命令通过"),
     }
@@ -159,23 +159,28 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // 阶段 6.2：ONNX 模型真机前向推理实测
-    println!("\n[Test 7] ModernBERT-base (FP32) 本地神经前向推理实测 (Intel AVX2):");
-    if let Ok(engine) = LocalVerdictEngine::try_load_default() {
-        let req = JevRequest {
-            state: "cargo test --workspace --verbose\nAll 12 tests passed successfully.".into(),
-            questions: vec![
-                JevQuestion::Noul {
-                    id: "task_complete".into(),
-                    instructions: "Did the test suite pass completely without errors?".into(),
-                },
-            ],
-        };
-        let t = Instant::now();
-        let resp = engine.evaluate(&req).await?;
-        let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
-        println!("  - 神经推理耗时: {:.2} ms", elapsed_ms);
-        println!("  - 判定结果: id={}, value={}, 置信度={}", resp.answers[0].id, resp.answers[0].value, resp.answers[0].confidence);
+    // 阶段 6.2：ONNX 模型真机前向推理实测 (若本地未下载 ONNX Runtime 动态库则优雅跳过)
+    println!("\n[Test 7] ModernBERT-base 本地神经推理引擎探测:");
+    match LocalVerdictEngine::try_load_default() {
+        Ok(engine) => {
+            let req = JevRequest {
+                state: "cargo test --workspace --verbose\nAll 12 tests passed successfully.".into(),
+                questions: vec![
+                    JevQuestion::Noul {
+                        id: "task_complete".into(),
+                        instructions: "Did the test suite pass completely without errors?".into(),
+                    },
+                ],
+            };
+            let t = Instant::now();
+            let resp = engine.evaluate(&req).await?;
+            let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
+            println!("  - 神经推理耗时: {:.2} ms", elapsed_ms);
+            println!("  - 判定结果: id={}, value={}, 置信度={}", resp.answers[0].id, resp.answers[0].value, resp.answers[0].confidence);
+        }
+        Err(e) => {
+            println!("  - 本地未装载 ONNX 动态库运行时 ({:?})，已优雅降级至原生规则引擎。", e);
+        }
     }
 
     println!("\n============================================================");

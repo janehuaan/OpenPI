@@ -1,5 +1,6 @@
 //! 规则集：SkillSpector 17 类中可静态判定的关键子集。
 
+use aho_corasick::AhoCorasick;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -151,6 +152,32 @@ pub static RULES: &[Rule] = &[
 pub struct CompiledRule {
     pub rule: &'static Rule,
     pub regex: Regex,
+}
+
+/// 高置信 IoC 字面锚点：(锚点, rule_id, category)。
+///
+/// 作为正则规则之外的兜底网：只做「加法」，命中的关键字额外报一条，
+/// **不做门控**。部分规则的模式不含字面锚点（如 P1 的 "disregard prior"、
+/// UNI1 的控制字符、SC3 的超长 base64），若以「无锚点即跳过」做预筛会造成漏报。
+pub const IOC_ANCHORS: &[(&str, &str, &str)] = &[
+    ("bash -i", "IOC1", "excessive-agency"),
+    ("nc -e", "IOC1", "excessive-agency"),
+    ("mkfifo", "IOC1", "excessive-agency"),
+    ("/dev/tcp", "IOC1", "excessive-agency"),
+    ("/etc/passwd", "IOC2", "output-handling"),
+    ("discord.com/api", "IOC2", "exfiltration"),
+    ("api.telegram.org", "IOC2", "exfiltration"),
+];
+
+/// 惰性构建 IoC 锚点多模自动机（一次过扫描，ASCII 大小写不敏感）。
+pub fn ioc_anchor_matcher() -> &'static AhoCorasick {
+    static AC: OnceLock<AhoCorasick> = OnceLock::new();
+    AC.get_or_init(|| {
+        AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build(IOC_ANCHORS.iter().map(|(anchor, _, _)| *anchor))
+            .expect("Failed to build IoC anchor matcher")
+    })
 }
 
 /// 惰性编译全部规则（失败即 panic，单测保证全部合法）。
