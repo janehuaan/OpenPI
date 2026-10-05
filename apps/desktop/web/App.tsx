@@ -267,6 +267,11 @@ export function App() {
 	const refreshCurrentViewRef = useRef<() => Promise<void>>(async () => undefined);
 	const turnStartTimesRef = useRef<Record<string, number>>({});
 	const lastStreamActivityRef = useRef<Record<string, number>>({});
+	// Liveness is proven, never assumed. This records the last moment the daemon
+	// actually answered a request; a frozen or killed daemon leaves the in-memory
+	// `runningTools`/`isStreaming` flags stuck, so those flags must never be the
+	// only thing gating recovery.
+	const lastDaemonContactRef = useRef<number>(Date.now());
 	/** Live token stream per instance, so text renders as it arrives instead of in
 	 *  poll-sized chunks (the poll only runs every few seconds while streaming). */
 	const liveStreamRef = useRef<Record<string, { text: string }>>({});
@@ -315,6 +320,7 @@ export function App() {
 			try {
 				const next = await desktopApi.getSnapshot({ includeStopped });
 				setSnapshot(next);
+				lastDaemonContactRef.current = Date.now();
 				if (next.instances) {
 					setConversationTitles((current) => {
 						let changed = false;
@@ -1064,6 +1070,11 @@ export function App() {
 	// recovering — otherwise the UI declares "stopped" while the agent is working.
 	useEffect(() => {
 		const QUIET_MS = 30_000;
+		// How long the daemon may go without answering ANY request before we treat
+		// it as dead. This bounds the "still running" lie to tens of seconds instead
+		// of hours, and it is cause-agnostic: freeze, crash, OOM, or kill all look
+		// the same from here — no successful contact.
+		const DAEMON_SILENCE_MS = 20_000;
 		const interval = setInterval(() => {
 			if (streamingInstances.size === 0 && !conversation?.state?.isStreaming) return;
 			const now = Date.now();
@@ -1073,9 +1084,34 @@ export function App() {
 			const isMarkedStreaming = streamingInstances.has(activeId) || Boolean(conversation?.state?.isStreaming);
 			if (!isMarkedStreaming) return;
 
-			// If tools are running or user message is being sent, don't interrupt
-			if (runningTools.length > 0 || busy === "send-message") return;
+			// Liveness first. Previously this returned early whenever a tool was
+			// marked running or a message was being sent, so a wedged daemon could
+			// keep the UI "executing" forever. Prove the daemon is alive instead of
+			// trusting the in-memory flags.
+			if (now - lastDaemonContactRef.current > DAEMON_SILENCE_MS) {
+				delete lastStreamActivityRef.current[activeId];
+				setStreamingInstances((prev) => {
+					const remaining = new Set(prev);
+					remaining.delete(activeId);
+					return remaining;
+				});
+				setRunningTools((current) =>
+					current.map((tool) => ({
+						...tool,
+						status: "failed" as const,
+						isError: true,
+						result: "Daemon unreachable — run interrupted.",
+					})),
+				);
+				setTurnProgress(undefined);
+				setError("与 daemon 的连接已中断（进程可能已崩溃或卡死），本次运行已标记为中断。");
+				setSnapshot((current) => ({ ...current, daemonRunning: false }));
+				return;
+			}
 
+			// Otherwise ask the daemon (which owns the real run state): a quiet
+			// stream is not proof the run ended — a model or a tool can stay silent
+			// for a long time while still working.
 			const lastActivity = lastStreamActivityRef.current[activeId];
 			if (!lastActivity || now - lastActivity <= QUIET_MS) return;
 
