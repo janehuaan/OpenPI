@@ -27,13 +27,24 @@ if [ -z "$host" ]; then
   exit 1
 fi
 
+# Prefer clippy: it catches everything `cargo check` does plus the lint set CI
+# enforces. Fall back to `cargo check` when the component is unavailable.
+lint() {
+  local target="$1"
+  if cargo clippy --version >/dev/null 2>&1; then
+    RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets --target "$target" -- -D warnings
+  else
+    RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --target "$target"
+  fi
+}
+
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
   if [ "$target" = "$host" ]; then
     continue
   fi
-  echo "==> cargo check --workspace --all-targets --target $target"
+  echo "==> linting workspace for $target"
   rustup target add "$target"
-  RUSTFLAGS="-D warnings" cargo check --workspace --all-targets --target "$target"
+  lint "$target"
 done
 
 echo "==> cross-architecture check passed (host: $host)"
