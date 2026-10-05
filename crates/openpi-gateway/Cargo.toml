@@ -1,0 +1,25 @@
+[package]
+name = "openpi-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "OpenAI-compatible gateway that bridges upstream coding-agent private APIs."
+
+[[bin]]
+name = "openpi-gateway"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
