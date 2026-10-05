@@ -42,6 +42,13 @@ jobs:
       - name: Typecheck
         run: yarn typecheck
 
+      # The Tauri crate embeds the frontend through `frontendDist: "../dist"`, and
+      # `generate_context!()` fails at *compile* time when that directory is
+      # missing. `dist/` is gitignored, so the web app has to be built before
+      # anything compiles the Rust workspace.
+      - name: Build desktop web app
+        run: yarn build
+
       - name: Test Rust workspace and desktop web app
         run: yarn test
 
@@ -56,7 +63,5 @@ jobs:
       - name: Check the other macOS target (cfg-gated code)
         run: bash scripts/check-targets.sh
 
-      - name: Build desktop web app and check Tauri crate
-        run: |
-          yarn build
-          cargo check --locked -p openpi-desktop -p openpi-daemon
+      - name: Check Tauri crate
+        run: cargo check --locked -p openpi-desktop -p openpi-daemon
