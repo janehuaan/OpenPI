@@ -99,7 +99,11 @@ def run_fixed(prompt, cwd, timeout):
                     "id": "cost-prompt",
                     "type": "rpc",
                     "sessionId": sid,
-                    "command": {"type": "prompt", "text": prompt},
+                    # `send_rpc` reads `command["message"]`. Sending "text" here
+                    # silently delivers an empty prompt, and an empty prompt
+                    # scores *better* on every metric in this report — which is
+                    # how a broken harness fakes an improvement.
+                    "command": {"type": "prompt", "message": prompt},
                 })
             if (
                 msg.get("type") == "event"
@@ -111,6 +115,33 @@ def run_fixed(prompt, cwd, timeout):
         stream.close()
         sock.close()
     return sid, time.time() - started
+
+
+def verify_prompt_landed(sid, prompt):
+    """Confirm the prompt really reached the session journal.
+
+    Cheap insurance against the harness silently sending nothing: an empty turn
+    looks fast and cheap, so the numbers would be meaningless without this.
+    """
+    for path in glob.glob(os.path.join(sessions_dir(), f"*{sid}*.jsonl")):
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                for line in fh:
+                    try:
+                        entry = json.loads(line)
+                    except ValueError:
+                        continue
+                    if entry.get("type") != "message":
+                        continue
+                    msg = entry.get("message") or {}
+                    if msg.get("role") != "user":
+                        continue
+                    for part in msg.get("content") or []:
+                        if isinstance(part, dict) and prompt in (part.get("text") or ""):
+                            return True
+        except OSError:
+            continue
+    return False
 
 
 def parse_ts(value):
@@ -291,6 +322,14 @@ def main():
         sid, wall = run_fixed(args.run, args.cwd, args.timeout)
         if not sid:
             return 3
+        if not verify_prompt_landed(sid, args.run):
+            print(
+                "error: the prompt never reached the session journal — the run "
+                "measured an empty turn, so its numbers are meaningless.\n"
+                "       check that the prompt command still uses the `message` key.",
+                file=sys.stderr,
+            )
+            return 4
         args.sid = sid
         print(f"ran fixed prompt on session {sid} in {wall:.1f}s\n")
 
