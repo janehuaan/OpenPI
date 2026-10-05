@@ -50,6 +50,12 @@ jobs:
           rustup component add clippy
           cargo clippy --workspace --all-targets -- -D warnings
 
+      # The host build never compiles the other architecture's `cfg` branches, so
+      # a break in one of them only shows up on a differently-architected runner.
+      # Check the non-host target explicitly instead of relying on runner luck.
+      - name: Check the other macOS target (cfg-gated code)
+        run: bash scripts/check-targets.sh
+
       - name: Build desktop web app and check Tauri crate
         run: |
           yarn build
