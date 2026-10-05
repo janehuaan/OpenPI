@@ -71,8 +71,8 @@ impl SearchOps {
         let root_path = root.as_ref();
         let q = query.trim().to_lowercase();
         let mut results = Vec::new();
-        let max_results = limit.max(1).min(100);
-        let depth = max_depth.max(1).min(10);
+        let max_results = limit.clamp(1, 100);
+        let depth = max_depth.clamp(1, 10);
 
         for entry in WalkDir::new(root_path)
             .max_depth(depth)
@@ -110,7 +110,7 @@ impl SearchOps {
         max_results: usize,
     ) -> Result<SearchResult> {
         let root_path = root.as_ref();
-        let limit = max_results.max(1).min(80);
+        let limit = max_results.clamp(1, 80);
 
         let regex = Regex::new(&format!("(?i){}", pattern))
             .or_else(|_| Regex::new(&regex::escape(pattern)))?;

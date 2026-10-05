@@ -19,6 +19,18 @@ pub struct BashResult {
 
 pub struct ManagedBash;
 
+/// Timeout used when the caller does not specify one.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 20;
+/// Hard upper bound on any single bash command. Without it a tool call could hold
+/// the agent for an arbitrarily long time; the bound is what makes the timeout
+/// meaningful, so it is enforced in one named, unit-tested place.
+pub const MAX_TIMEOUT_SECS: u64 = 60;
+
+/// Resolve the effective timeout, clamped to [1, MAX_TIMEOUT_SECS].
+pub fn effective_timeout_secs(requested: Option<u64>) -> u64 {
+    requested.unwrap_or(DEFAULT_TIMEOUT_SECS).clamp(1, MAX_TIMEOUT_SECS)
+}
+
 impl ManagedBash {
     /// Safely execute bash command with hard-fenced OS timeout and output stream cap
     pub async fn execute<P: AsRef<Path>>(
@@ -27,7 +39,7 @@ impl ManagedBash {
         timeout_secs: Option<u64>,
         max_output_bytes: Option<usize>,
     ) -> Result<BashResult> {
-        let t_secs = timeout_secs.unwrap_or(20).clamp(1, 60);
+        let t_secs = effective_timeout_secs(timeout_secs);
         let cap_bytes = max_output_bytes.unwrap_or(50 * 1024); // 50KB default cap
         let start = Instant::now();
 
@@ -69,16 +81,21 @@ impl ManagedBash {
                         match res {
                             Ok(0) => { stdout_done = true; }
                             Ok(n) => {
-                                if stdout_buf.len() + n <= cap_bytes {
-                                    stdout_buf.extend_from_slice(&out_chunk[..n]);
-                                } else {
-                                    let remaining = cap_bytes.saturating_sub(stdout_buf.len());
-                                    if remaining > 0 {
-                                        stdout_buf.extend_from_slice(&out_chunk[..remaining]);
+                                if !is_truncated {
+                                    if stdout_buf.len() + n <= cap_bytes {
+                                        stdout_buf.extend_from_slice(&out_chunk[..n]);
+                                    } else {
+                                        let remaining = cap_bytes.saturating_sub(stdout_buf.len());
+                                        if remaining > 0 {
+                                            stdout_buf.extend_from_slice(&out_chunk[..remaining]);
+                                        }
+                                        is_truncated = true;
                                     }
-                                    is_truncated = true;
-                                    stdout_done = true;
                                 }
+                                // Past the cap we keep reading and simply discard, so the
+                                // child can keep writing and finally exit. Stopping the read
+                                // here used to block the child on a full pipe and turn a
+                                // clean truncation into a bogus timeout.
                             }
                             Err(_) => { stdout_done = true; }
                         }
@@ -93,15 +110,16 @@ impl ManagedBash {
                         match res {
                             Ok(0) => { stderr_done = true; }
                             Ok(n) => {
-                                if stderr_buf.len() + n <= cap_bytes {
-                                    stderr_buf.extend_from_slice(&err_chunk[..n]);
-                                } else {
-                                    let remaining = cap_bytes.saturating_sub(stderr_buf.len());
-                                    if remaining > 0 {
-                                        stderr_buf.extend_from_slice(&err_chunk[..remaining]);
+                                if !is_truncated {
+                                    if stderr_buf.len() + n <= cap_bytes {
+                                        stderr_buf.extend_from_slice(&err_chunk[..n]);
+                                    } else {
+                                        let remaining = cap_bytes.saturating_sub(stderr_buf.len());
+                                        if remaining > 0 {
+                                            stderr_buf.extend_from_slice(&err_chunk[..remaining]);
+                                        }
+                                        is_truncated = true;
                                     }
-                                    is_truncated = true;
-                                    stderr_done = true;
                                 }
                             }
                             Err(_) => { stderr_done = true; }
@@ -169,5 +187,30 @@ mod tests {
         let res = ManagedBash::execute("sleep 5", ".", Some(1), None).await.unwrap();
         assert!(res.is_timed_out);
         assert!(res.stderr.contains("Command timed out after 1 seconds"));
+    }
+
+    #[test]
+    fn test_timeout_is_clamped_to_a_hard_upper_bound() {
+        // The upper bound is the whole point of the timeout. A regression that
+        // raises or removes it must fail here.
+        assert_eq!(effective_timeout_secs(None), DEFAULT_TIMEOUT_SECS);
+        assert_eq!(effective_timeout_secs(Some(0)), 1);
+        assert_eq!(effective_timeout_secs(Some(45)), 45);
+        assert_eq!(effective_timeout_secs(Some(MAX_TIMEOUT_SECS)), MAX_TIMEOUT_SECS);
+        assert_eq!(effective_timeout_secs(Some(600_000)), MAX_TIMEOUT_SECS);
+    }
+
+    #[tokio::test]
+    async fn test_managed_bash_output_cap_truncates() {
+        // A command that emits far more than the cap must be truncated, not buffered
+        // whole: unbounded buffering is how a single tool call balloons memory and
+        // then the prompt context.
+        let res = ManagedBash::execute("yes AAAA | head -n 20000", ".", Some(5), Some(1024))
+            .await
+            .unwrap();
+        assert!(res.is_truncated, "expected truncation at the 1KB cap");
+        assert!(res.stdout.contains("Output truncated"));
+        // cap + the truncation marker, not the ~100KB the command produced
+        assert!(res.stdout.len() < 4096, "stdout was not capped: {} bytes", res.stdout.len());
     }
 }
