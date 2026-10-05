@@ -88,7 +88,7 @@ pub fn start_oauth_listener(app_handle: AppHandle) {
                         if let Some(idx) = request.find("access_token=") {
                             let slice = &request[idx..];
                             let end_idx = slice
-                                .find(|c| c == ' ' || c == '\r' || c == '\n' || c == '"' || c == '\'')
+                                .find([' ', '\r', '\n', '"', '\''])
                                 .unwrap_or(slice.len());
                             let token_part = &slice[..end_idx];
                             extracted_hash = Some(format!("#{}", token_part));
