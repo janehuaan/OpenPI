@@ -39,18 +39,23 @@ impl LocalVerdictEngine {
             return Err(anyhow!("Model or tokenizer missing in {:?}", dir));
         }
 
+        // ort::init() 可能会在缺少动态库时 panic，用 catch_unwind 守护
+        let session = match std::panic::catch_unwind(|| {
+            Session::builder()
+                .map_err(|e| anyhow!("ort session builder failed: {e}"))?
+                .with_intra_threads(2)
+                .map_err(|e| anyhow!("ort intra_threads failed: {e}"))?
+                .commit_from_file(&model_path)
+                .map_err(|e| anyhow!("ort commit_from_file failed: {e}"))
+        }) {
+            Ok(res) => res?,
+            Err(panic_err) => {
+                return Err(anyhow!("ONNX dynamic library runtime unavailable: {:?}", panic_err));
+            }
+        };
+
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow!("Failed to load tokenizer: {}", e))?;
-
-        // NOTE: `ort` resolves to a 2.0.0-rc.x build whose builder error type is
-        // `ort::Error<SessionBuilder>`; that payload is not Send + Sync, so it
-        // cannot be converted with `?` into a Send + Sync error box. Convert anyhow.
-        let session = Session::builder()
-            .map_err(|e| anyhow!("ort session builder failed: {e}"))?
-            .with_intra_threads(2)
-            .map_err(|e| anyhow!("ort intra_threads failed: {e}"))?
-            .commit_from_file(&model_path)
-            .map_err(|e| anyhow!("ort commit_from_file failed: {e}"))?;
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
@@ -128,8 +133,8 @@ impl LocalVerdictEngine {
 
                 // Mean pooling over real tokens only; padding positions are skipped.
                 let mut pooled = Vec::with_capacity(batch * hidden);
-                for i in 0..batch {
-                    let len = lengths[i].max(1);
+                for (i, &raw_len) in lengths.iter().enumerate().take(batch) {
+                    let len = raw_len.max(1);
                     let row = i * max_len;
                     for d in 0..hidden {
                         let mut sum = 0.0f32;
@@ -152,7 +157,7 @@ impl LocalVerdictEngine {
     async fn embed_unique<'a>(&self, texts: &'a [String]) -> Result<HashMap<&'a str, Vec<f32>>> {
         let mut unique: Vec<&str> = Vec::with_capacity(texts.len());
         for text in texts {
-            if !unique.iter().any(|seen| *seen == text.as_str()) {
+            if !unique.contains(&text.as_str()) {
                 unique.push(text.as_str());
             }
         }

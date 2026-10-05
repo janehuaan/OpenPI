@@ -74,6 +74,21 @@ pub struct KvRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CasStats {
+    pub blob_count: usize,
+    pub total_ref_count: usize,
+    pub unique_bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryTurnRecord {
+    pub turn_index: u64,
+    pub role: String,
+    pub content: String,
+    pub created_at: String,
+}
+
 impl Storage {
     pub fn in_memory() -> anyhow::Result<Self> {
         let conn = Connection::open_in_memory()?;
@@ -172,6 +187,23 @@ impl Storage {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS cas_blobs (
+                hash TEXT PRIMARY KEY,
+                content BLOB NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                ref_count INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS session_history (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_index INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content_hash TEXT NOT NULL REFERENCES cas_blobs(hash),
+                created_at TEXT NOT NULL
             );",
         )?;
         Ok(())
@@ -651,6 +683,108 @@ impl Storage {
         Ok(out)
     }
 
+    // ---------------------------------------------------------
+    // CAS (Content-Addressable Storage) & Session History
+    // ---------------------------------------------------------
+
+    /// Stores a payload in CAS by SHA-256 hash. If it already exists, increments ref_count.
+    /// Returns (hash, is_newly_inserted).
+    pub fn put_cas_blob(&self, content: &[u8]) -> anyhow::Result<(String, bool)> {
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(content));
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+
+        let updated = conn.execute(
+            "UPDATE cas_blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
+            params![hash],
+        )?;
+
+        if updated > 0 {
+            Ok((hash, false))
+        } else {
+            conn.execute(
+                "INSERT INTO cas_blobs (hash, content, size_bytes, ref_count, created_at)
+                 VALUES (?1, ?2, ?3, 1, ?4)",
+                params![hash, content, content.len() as i64, now],
+            )?;
+            Ok((hash, true))
+        }
+    }
+
+    /// Retrieves CAS blob content by SHA-256 hash.
+    pub fn get_cas_blob(&self, hash: &str) -> anyhow::Result<Option<Vec<u8>>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT content FROM cas_blobs WHERE hash = ?1")?;
+        let res = stmt.query_row(params![hash], |row| row.get(0)).optional()?;
+        Ok(res)
+    }
+
+    /// Appends a turn to session history, storing its text payload into CAS for zero-redundancy.
+    pub fn append_history_turn(
+        &self,
+        session_id: &str,
+        turn_index: u64,
+        role: &str,
+        content: &str,
+    ) -> anyhow::Result<String> {
+        let (hash, _) = self.put_cas_blob(content.as_bytes())?;
+        let id = format!("{}:{}", session_id, turn_index);
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO session_history (id, session_id, turn_index, role, content_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET content_hash = excluded.content_hash",
+            params![id, session_id, turn_index as i64, role, hash, now],
+        )?;
+        Ok(hash)
+    }
+
+    /// Fetches all history turns for a session in order, resolving content from CAS.
+    pub fn get_session_history(&self, session_id: &str) -> anyhow::Result<Vec<HistoryTurnRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT h.turn_index, h.role, b.content, h.created_at
+             FROM session_history h
+             JOIN cas_blobs b ON h.content_hash = b.hash
+             WHERE h.session_id = ?1
+             ORDER BY h.turn_index ASC",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            let blob: Vec<u8> = row.get(2)?;
+            let text = String::from_utf8_lossy(&blob).to_string();
+            Ok(HistoryTurnRecord {
+                turn_index: row.get::<_, i64>(0)? as u64,
+                role: row.get(1)?,
+                content: text,
+                created_at: row.get(3)?,
+            })
+        })?;
+        let mut res = Vec::new();
+        for r in rows {
+            res.push(r?);
+        }
+        Ok(res)
+    }
+
+    /// Returns storage-level CAS statistics (blob count, total ref count, total unique bytes).
+    pub fn get_cas_stats(&self) -> anyhow::Result<CasStats> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), COALESCE(SUM(ref_count), 0), COALESCE(SUM(size_bytes), 0)
+             FROM cas_blobs",
+        )?;
+        stmt.query_row([], |row| {
+            Ok(CasStats {
+                blob_count: row.get::<_, i64>(0)? as usize,
+                total_ref_count: row.get::<_, i64>(1)? as usize,
+                unique_bytes: row.get::<_, i64>(2)? as usize,
+            })
+        })
+        .map_err(Into::into)
+    }
+
     /// Upsert a task by id preserving the given `updated_at`/`created_at`.
     pub fn upsert_task_raw(&self, task: &TaskRecord) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -880,5 +1014,32 @@ mod tests {
         let step_runs = storage.list_step_runs_for_run("r1").unwrap();
         assert_eq!(step_runs.len(), 1);
         assert_eq!(step_runs[0].status, "succeeded");
+    }
+
+    #[test]
+    fn test_cas_deduplication() {
+        let storage = Storage::in_memory().unwrap();
+        let payload = "console.log('identical across 100 turns');";
+
+        let (hash1, inserted1) = storage.put_cas_blob(payload.as_bytes()).unwrap();
+        assert!(inserted1, "first insert should be new");
+
+        let (hash2, inserted2) = storage.put_cas_blob(payload.as_bytes()).unwrap();
+        assert_eq!(hash1, hash2);
+        assert!(!inserted2, "duplicate payload should reuse hash without re-inserting");
+
+        let stats = storage.get_cas_stats().unwrap();
+        assert_eq!(stats.blob_count, 1);
+        assert_eq!(stats.total_ref_count, 2);
+
+        let recovered = storage.get_cas_blob(&hash1).unwrap().unwrap();
+        assert_eq!(String::from_utf8(recovered).unwrap(), payload);
+
+        // Append to history
+        storage.append_history_turn("sess-1", 0, "user", "hi").unwrap();
+        storage.append_history_turn("sess-1", 1, "tool", payload).unwrap();
+        let history = storage.get_session_history("sess-1").unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].content, payload);
     }
 }

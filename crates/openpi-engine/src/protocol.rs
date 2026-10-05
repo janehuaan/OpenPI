@@ -53,6 +53,19 @@ pub struct ChatMessage {
     /// otherwise multi-turn tool calling is rejected or degraded.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// Optional offloaded artifact reference for large tool payloads (ActKV bypass)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<ArtifactRef>,
+}
+
+/// Reference metadata for offloaded large payloads
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ArtifactRef {
+    pub id: String,
+    pub original_len: usize,
+    pub preview: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_key: Option<String>,
 }
 
 impl ChatMessage {
@@ -64,6 +77,7 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             reasoning_content: None,
+            artifact: None,
         }
     }
 
@@ -75,6 +89,7 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             reasoning_content: None,
+            artifact: None,
         }
     }
 
@@ -86,6 +101,7 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: None,
             reasoning_content: None,
+            artifact: None,
         }
     }
 
@@ -97,6 +113,53 @@ impl ChatMessage {
             tool_calls: None,
             tool_call_id: Some(tool_call_id.into()),
             reasoning_content: None,
+            artifact: None,
+        }
+    }
+
+    /// Creates a tool result, automatically offloading large payloads to an ArtifactRef
+    /// if the content exceeds `max_inline_len` bytes. The inline message only retains a
+    /// compact preview + reference metadata, preventing LLM context bloat.
+    pub fn tool_result_with_bypass(
+        tool_call_id: impl Into<String>,
+        content: impl Into<String>,
+        max_inline_len: usize,
+    ) -> (Self, Option<String>) {
+        let text = content.into();
+        let call_id = tool_call_id.into();
+        if text.len() <= max_inline_len {
+            (Self::tool_result(call_id, text), None)
+        } else {
+            let original_len = text.len();
+            // Take first max_inline_len characters as preview
+            let preview_boundary = text
+                .char_indices()
+                .map(|(idx, _)| idx)
+                .take_while(|&idx| idx <= max_inline_len)
+                .last()
+                .unwrap_or(0);
+            let preview = text[..preview_boundary].to_string();
+            let artifact_id = format!("art_{}_{}", &call_id[..call_id.len().min(8)], original_len);
+            let inline_summary = format!(
+                "[Payload offloaded: {} bytes. Preview: {}... (artifact_id: {})]",
+                original_len, preview, artifact_id
+            );
+            let artifact = ArtifactRef {
+                id: artifact_id,
+                original_len,
+                preview,
+                storage_key: None,
+            };
+            let msg = Self {
+                role: "tool".into(),
+                content: Some(ChatContent::Text(inline_summary)),
+                name: None,
+                tool_calls: None,
+                tool_call_id: Some(call_id),
+                reasoning_content: None,
+                artifact: Some(artifact),
+            };
+            (msg, Some(text))
         }
     }
 }
@@ -199,4 +262,38 @@ pub struct ChatCompletionChunk {
     #[serde(default)]
     pub choices: Vec<ChunkChoice>,
     pub usage: Option<TokenUsage>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_result_small_payload_no_bypass() {
+        let small_content = "hello world";
+        let (msg, offloaded) = ChatMessage::tool_result_with_bypass("call_1", small_content, 100);
+        assert!(offloaded.is_none());
+        assert!(msg.artifact.is_none());
+        match msg.content {
+            Some(ChatContent::Text(t)) => assert_eq!(t, "hello world"),
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[test]
+    fn test_tool_result_large_payload_bypassed_with_artifact() {
+        let large_content = "A".repeat(500);
+        let (msg, offloaded) = ChatMessage::tool_result_with_bypass("call_large_123", &large_content, 50);
+        assert_eq!(offloaded, Some(large_content));
+        let art = msg.artifact.expect("artifact ref should be present");
+        assert_eq!(art.original_len, 500);
+        assert_eq!(art.preview.len(), 50);
+        match msg.content {
+            Some(ChatContent::Text(t)) => {
+                assert!(t.contains("[Payload offloaded: 500 bytes."));
+                assert!(t.contains(&art.id));
+            }
+            _ => panic!("expected text summary"),
+        }
+    }
 }

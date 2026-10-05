@@ -23,6 +23,12 @@ pub fn sessions_dir() -> PathBuf {
     openpi_dir().join("sessions")
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SamplingParams {
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub id: String,
@@ -33,6 +39,8 @@ pub struct ModelConfig {
     pub context_window: usize,
     pub max_tokens: usize,
     pub reasoning: bool,
+    #[serde(default)]
+    pub sampling_params_by_thinking_level: Option<HashMap<String, SamplingParams>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +157,10 @@ impl EngineConfig {
                                         .and_then(|r| r.as_bool())
                                         .unwrap_or(false);
 
+                                    let sampling_params = m
+                                        .get("samplingParamsByThinkingLevel")
+                                        .and_then(|v| serde_json::from_value::<HashMap<String, SamplingParams>>(v.clone()).ok());
+
                                     let cfg = ModelConfig {
                                         id: model_id.clone(),
                                         name: model_name,
@@ -158,6 +170,7 @@ impl EngineConfig {
                                         context_window,
                                         max_tokens,
                                         reasoning,
+                                        sampling_params_by_thinking_level: sampling_params,
                                     };
 
                                     // Store with both plain ID and "provider/id"
@@ -219,6 +232,7 @@ impl EngineConfig {
                     context_window: 128_000,
                     max_tokens: 8192,
                     reasoning: false,
+                    sampling_params_by_thinking_level: None,
                 });
             }
         }
@@ -246,6 +260,7 @@ impl EngineConfig {
                     context_window: 128_000,
                     max_tokens: 8192,
                     reasoning: false,
+                    sampling_params_by_thinking_level: None,
                 });
             }
         }
@@ -261,6 +276,7 @@ impl EngineConfig {
                 context_window: 128_000,
                 max_tokens: 8192,
                 reasoning: false,
+                sampling_params_by_thinking_level: None,
             });
         }
 

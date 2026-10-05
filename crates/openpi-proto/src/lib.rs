@@ -3,16 +3,13 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SessionMode {
     Chat,
+    #[default]
     Code,
 }
 
-impl Default for SessionMode {
-    fn default() -> Self {
-        SessionMode::Code
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

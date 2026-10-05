@@ -95,7 +95,7 @@ impl DynamicPortfolioScheduler {
 
         // 3b. 分配 Exploitation（高优先级深入）
         let max_exploit = if self.beta > 0.5 {
-            (self.max_parallelism + 1) / 2
+            self.max_parallelism.div_ceil(2)
         } else {
             self.max_parallelism.saturating_sub(selected_batch.len())
         };
