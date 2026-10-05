@@ -11,6 +11,11 @@ use crate::protocol::ChatMessage;
 use crate::session_journal::SessionJournal;
 use crate::tool_registry::ToolRegistry;
 
+/// Background memory extraction and title summarization each cost an extra LLM
+/// round-trip per turn. Running both on every turn tripled the calls behind a
+/// single user message; sample them on this cadence instead.
+const BACKGROUND_TURN_INTERVAL: u64 = 3;
+
 struct DesktopStreamBridge {
     session_id: String,
     event_tx: broadcast::Sender<(String, Value)>,
@@ -209,6 +214,9 @@ impl AgentLoop {
         // 1. Read existing conversation history from journal
         let history = journal.load_history_messages();
 
+        // 1-based turn index within the session, used to sample background work.
+        let turn_number = history.iter().filter(|m| m.role == "user").count() as u64 + 1;
+
         // 2. Append current user prompt to journal
         journal.append_user_message(user_prompt)?;
 
@@ -259,7 +267,7 @@ impl AgentLoop {
         active_messages.extend(history);
         active_messages.push(ChatMessage::user(user_prompt));
 
-        let tool_defs = self.tool_registry.definitions();
+        let tool_defs = self.tool_registry.stable_definitions();
 
         // 4. Emit rpc_ready & agent_start
         let _ = self.event_tx.send((session_id.to_string(), json!({ "type": "rpc_ready" })));
@@ -317,7 +325,8 @@ impl AgentLoop {
                 }),
             ));
 
-            // Compact older tool results in active_messages to preserve lean context and fast TTFT
+            // 上游 1.0.1 Prompt Cache Preservation:
+            // 严禁颠倒或随机修改前缀，保持消息链头部与工具列表绝对前缀一致，仅尾部递增
             Self::compact_inflight_messages(&mut active_messages);
 
             let llm_res = match self.llm_client.stream_chat_completion(
@@ -441,7 +450,15 @@ impl AgentLoop {
                         exec_result.is_error,
                     )?;
 
-                    active_messages.push(ChatMessage::tool_result(&tc.id, &exec_result.output));
+                    // ActKV bypass: offload tool output if it exceeds 16KB to prevent
+                    // blowing up LLM context window, while journal retains full output.
+                    const MAX_TOOL_INLINE_BYTES: usize = 16 * 1024;
+                    let (tool_msg, _offloaded) = ChatMessage::tool_result_with_bypass(
+                        &tc.id,
+                        &exec_result.output,
+                        MAX_TOOL_INLINE_BYTES,
+                    );
+                    active_messages.push(tool_msg);
                 }
             } else if llm_res.text.trim().is_empty() {
                 // The provider produced neither tool calls nor visible text. This is
@@ -638,42 +655,116 @@ impl AgentLoop {
             let _ = jev_bg.trigger_offline_dreaming(&s_dir).await;
         });
 
-        // 7. Trigger Autonomous Memory Stage 1 thread extraction
-        let sid = session_id.to_string();
-        let cwd_str = cwd.to_string();
-        let prompt_str = user_prompt.to_string();
-        let answer_for_mem = last_assistant_text.clone();
-        let llm_client_mem = self.llm_client.clone();
-        let model_cfg_mem = model_cfg.clone();
-        tokio::spawn(async move {
-            let _ = crate::memory_worker::autonomous_memory_extract(
-                &sid,
-                &cwd_str,
-                &prompt_str,
-                &answer_for_mem,
-                Some((&llm_client_mem, &model_cfg_mem)),
-            ).await;
-        });
+        // 7. Trigger Autonomous Memory Stage 1 thread extraction. Sampled rather
+        // than per-turn, and skipped for casual chatter: it re-summarizes the whole
+        // session with an LLM call, so firing it every turn was pure overhead.
+        if (turn_number == 1 || turn_number.is_multiple_of(BACKGROUND_TURN_INTERVAL))
+            && !crate::memory_worker::is_casual_noise(user_prompt)
+        {
+            let sid = session_id.to_string();
+            let cwd_str = cwd.to_string();
+            let prompt_str = user_prompt.to_string();
+            let answer_for_mem = last_assistant_text.clone();
+            let llm_client_mem = self.llm_client.clone();
+            let model_cfg_mem = model_cfg.clone();
+            tokio::spawn(async move {
+                let _ = crate::memory_worker::autonomous_memory_extract(
+                    &sid,
+                    &cwd_str,
+                    &prompt_str,
+                    &answer_for_mem,
+                    Some((&llm_client_mem, &model_cfg_mem)),
+                ).await;
+            });
+        }
 
-        // 8. Trigger Autonomous Title Summarization and broadcast if refined
-        let event_tx_title = self.event_tx.clone();
-        let sid_title = session_id.to_string();
-        let prompt_title = user_prompt.to_string();
-        let answer_title = last_assistant_text;
-        let llm_client = self.llm_client.clone();
-        let model_for_title = model_cfg.clone();
-        tokio::spawn(async move {
-            if let Ok(refined_title) = crate::title_summarizer::summarize_title_llm(&llm_client, &model_for_title, &prompt_title, &answer_title).await {
-                if !refined_title.is_empty() && refined_title != "新对话" {
-                    let _ = event_tx_title.send((sid_title.clone(), serde_json::json!({
-                        "type": "session_renamed",
-                        "sessionId": sid_title,
-                        "name": refined_title,
-                    })));
+        // 8. Trigger Autonomous Title Summarization and broadcast if refined.
+        // The first couple of turns get a chance to name the session; after that
+        // it is sampled instead of re-summarized on every turn.
+        if turn_number <= 2 || turn_number.is_multiple_of(BACKGROUND_TURN_INTERVAL) {
+            let event_tx_title = self.event_tx.clone();
+            let sid_title = session_id.to_string();
+            let prompt_title = user_prompt.to_string();
+            let answer_title = last_assistant_text;
+            let llm_client = self.llm_client.clone();
+            let model_for_title = model_cfg.clone();
+            tokio::spawn(async move {
+                if let Ok(refined_title) = crate::title_summarizer::summarize_title_llm(&llm_client, &model_for_title, &prompt_title, &answer_title).await {
+                    if !refined_title.is_empty() && refined_title != "新对话" {
+                        let _ = event_tx_title.send((sid_title.clone(), serde_json::json!({
+                            "type": "session_renamed",
+                            "sessionId": sid_title,
+                            "name": refined_title,
+                        })));
+                    }
                 }
-            }
-        });
+            });
+        }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{ChatMessage, FunctionCall, ToolCall};
+
+    fn tool_result_of(len: usize) -> ChatMessage {
+        ChatMessage::tool_result("c", "x".repeat(len))
+    }
+
+    fn assistant_with_tool_call() -> ChatMessage {
+        let mut m = ChatMessage::assistant("");
+        m.tool_calls = Some(vec![ToolCall {
+            id: "c".into(),
+            r#type: "function".into(),
+            function: FunctionCall {
+                name: "bash".into(),
+                arguments: "{}".into(),
+            },
+        }]);
+        m
+    }
+
+    #[test]
+    fn compact_folds_only_the_older_tool_results() {
+        // Three tool results; the newest two must stay verbatim while the older one
+        // is folded. This bounds the context an in-flight turn carries into the next
+        // LLM call, so a regression here directly inflates per-call cost.
+        let mut messages = vec![
+            ChatMessage::user("go"),
+            assistant_with_tool_call(),
+            tool_result_of(2000), // oldest -> folded
+            assistant_with_tool_call(),
+            tool_result_of(2000), // newest two -> kept
+            assistant_with_tool_call(),
+            tool_result_of(2000),
+        ];
+        AgentLoop::compact_inflight_messages(&mut messages);
+
+        let text_of = |m: &ChatMessage| match &m.content {
+            Some(crate::protocol::ChatContent::Text(t)) => t.clone(),
+            _ => String::new(),
+        };
+        assert!(text_of(&messages[2]).contains("已折叠"), "oldest result should be folded");
+        assert_eq!(text_of(&messages[4]).chars().count(), 2000, "recent result must be intact");
+        assert_eq!(text_of(&messages[6]).chars().count(), 2000, "newest result must be intact");
+    }
+
+    #[test]
+    fn compact_leaves_two_or_fewer_tool_results_untouched() {
+        let mut messages = vec![
+            assistant_with_tool_call(),
+            tool_result_of(5000),
+            assistant_with_tool_call(),
+            tool_result_of(5000),
+        ];
+        AgentLoop::compact_inflight_messages(&mut messages);
+        for m in [&messages[1], &messages[3]] {
+            if let Some(crate::protocol::ChatContent::Text(t)) = &m.content {
+                assert_eq!(t.chars().count(), 5000);
+            }
+        }
     }
 }
