@@ -41,11 +41,9 @@ pub fn run() {
             // Set up macOS menu bar system tray
             let _ = tray::create_tray(&handle);
 
-            // Connect to Rust daemon asynchronously
-            let client_clone = daemon_client.clone();
-            tauri::async_runtime::spawn(async move {
-                let _ = client_clone.ensure_connected().await;
-            });
+            // Connect to the Rust daemon and keep it alive: the supervisor also
+            // brings it back after a deploy swaps the binary, or after a crash.
+            daemon_client.spawn_supervisor();
 
             // Forward daemon stream events to frontend Webview
             let handle_events = handle.clone();

@@ -3,6 +3,7 @@ use openpi_proto::{ClientRequest, ServerMessage, ServerResponse};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -74,11 +75,24 @@ pub fn default_workspace() -> &'static str {
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 
+/// How long the supervisor waits between checks once it has nothing to do.
+const SUPERVISOR_TICK: Duration = Duration::from_secs(2);
+
+/// Whether the supervisor should bring the daemon up right now.
+///
+/// Split out so the rule is pinned by a test: an explicit `stop_daemon` must
+/// always win over the supervisor's eagerness.
+fn should_restart(desired_running: bool, connected: bool) -> bool {
+    desired_running && !connected
+}
+
 #[derive(Clone)]
 pub struct DaemonClient {
     write_half: Arc<Mutex<Option<OwnedWriteHalf>>>,
     pending: PendingMap,
     event_tx: mpsc::Sender<(String, Value)>,
+    /// Cleared by `stop_daemon`, so a deliberate stop is not undone below.
+    desired_running: Arc<AtomicBool>,
 }
 
 impl DaemonClient {
@@ -87,6 +101,46 @@ impl DaemonClient {
             write_half: Arc::new(Mutex::new(None)),
             pending: Arc::new(Mutex::new(HashMap::new())),
             event_tx,
+            desired_running: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    /// Records whether the daemon is supposed to be running.
+    pub fn set_desired_running(&self, desired: bool) {
+        self.desired_running.store(desired, Ordering::SeqCst);
+    }
+
+    pub async fn is_connected(&self) -> bool {
+        self.write_half.lock().await.is_some()
+    }
+
+    /// Keep the daemon alive for as long as the app is.
+    ///
+    /// Every high-frequency path is passive — the UI polls `get_snapshot`, which
+    /// goes through `request_passive` and deliberately refuses to start a daemon
+    /// — and startup connected exactly once. So nothing ever brought one back:
+    /// after `install-daemon.sh` replaced the binary the app sat with no daemon
+    /// until some active request happened along, and while it was down so were
+    /// scheduled tasks and cloud sync.
+    pub fn spawn_supervisor(&self) {
+        let client = self.clone();
+        tauri::async_runtime::spawn(async move {
+            client.supervise().await;
+        });
+    }
+
+    async fn supervise(&self) {
+        loop {
+            if should_restart(
+                self.desired_running.load(Ordering::SeqCst),
+                self.is_connected().await,
+            ) {
+                match self.ensure_connected().await {
+                    Ok(()) => info!("Daemon supervisor: daemon is up"),
+                    Err(e) => warn!("Daemon supervisor: could not start the daemon: {e}"),
+                }
+            }
+            tokio::time::sleep(SUPERVISOR_TICK).await;
         }
     }
 
@@ -360,5 +414,42 @@ impl DaemonClient {
                 Err("Passive request timed out".to_string())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supervisor_restarts_a_missing_daemon_but_respects_a_deliberate_stop() {
+        assert!(should_restart(true, false), "a missing daemon must be brought back");
+        assert!(!should_restart(true, true), "a healthy daemon needs no action");
+        assert!(
+            !should_restart(false, false),
+            "an explicit stop_daemon must not be undone by the supervisor"
+        );
+    }
+
+    /// The rule above is only useful if the loop actually honours it. `stop_daemon`
+    /// must leave the daemon down, so the supervisor has to sit still rather than
+    /// start one behind the user's back.
+    #[tokio::test]
+    async fn supervisor_leaves_a_deliberately_stopped_daemon_alone() {
+        let (tx, _rx) = mpsc::channel(8);
+        let client = DaemonClient::new(tx);
+        client.set_desired_running(false);
+
+        let supervisor = tokio::spawn({
+            let client = client.clone();
+            async move { client.supervise().await }
+        });
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            !client.is_connected().await,
+            "the supervisor started a daemon even though it was deliberately stopped"
+        );
+        supervisor.abort();
     }
 }
