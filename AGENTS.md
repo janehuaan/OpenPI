@@ -28,6 +28,23 @@ yarn check:targets          # 非本机架构的 cfg 分支
 
 ## 已完成的修复记录
 
+- **gateway 入站鉴权的三个坑（WIP，未提交时审出的）**：
+  1. 绑定锁曾用 `split(':').next()` 取 host 且把**空 host 当回环**——`TcpListener::bind(":8788")` 实际监听
+     0.0.0.0，等于不开 `OPENPI_GATEWAY_ALLOW_PUBLIC` 也能裸奔公网。现在统一走 `is_loopback_bind()`：
+     解析成 `IpAddr` 判定，空 host/解析不了的主机名一律按非回环拒绝（宁可起不来）。
+  2. `~/.openpi/gateway-key` 权限过宽时**自动收紧为 600**（不拒绝启动），日志里说明。
+  3. key 比较用 `ct_eq` 常数时间（已有）。
+  运维断层提醒：**引擎侧 models.json 里指向 gateway 的 provider，`api_key` 必须填这把入站 key**，
+  否则鉴权上线后全部 401。现在有 `scripts/sync-gateway-key.sh`（key 缺失自动生成、收紧 600、
+  按 baseUrl 端口匹配 provider 同步 apiKey、改前备份；`--dry-run` 可预览）串这俩了。
+  另外：llm_client 的 400 回滚重试现在**只在错误体提到 cache_control 时触发**（`is_cache_rejection`），
+  无关 400 直接失败，不白烧一次上游往返。
+  gateway 的 `cc_openai_usage` 折叠缓存 token 时会用上游自报的 `totalTokens` 做**自检**：
+  折叠后超出上游总账说明 `inputTokens` 已含缓存（OpenAI 语义），此时不折叠并打日志提醒人工对账——
+  上游语义若变了不会静默双计。
+
+## 已完成的修复记录
+
 - **daemon 覆写自己**：`cp target/debug/openpi-daemon /Applications/OpenPI.app/.../bin/openpi-daemon && kill <自己 pid>`
   会作废运行中 Mach-O 的映射页，进程**静默冻结**（不崩溃），UI 却因为信任内存里的 `runningTools`
   标志把这一轮谎报成"执行中"两小时。修法：`App.tsx` 活性看门狗 + `gate.rs` 自我保护规则 +

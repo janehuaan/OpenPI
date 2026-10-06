@@ -360,6 +360,8 @@ impl AgentLoop {
                         &model_cfg.id,
                         0,
                         0,
+                        0,
+                        0,
                         "error",
                     );
                     let _ = self.event_tx.send((
@@ -379,6 +381,8 @@ impl AgentLoop {
 
             let in_tok = llm_res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
             let out_tok = llm_res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+            let cache_read_tok = llm_res.usage.as_ref().map(|u| u.cache_read_tokens()).unwrap_or(0);
+            let cache_write_tok = llm_res.usage.as_ref().map(|u| u.cache_creation_tokens()).unwrap_or(0);
 
             if !llm_res.tool_calls.is_empty() {
                 empty_streak = 0;
@@ -391,6 +395,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "toolUse",
                 )?;
 
@@ -507,6 +513,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "error",
                 )?;
                 let asst_now = chrono::Utc::now().timestamp_millis();
@@ -537,6 +545,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "stop",
                 )?;
 
@@ -597,6 +607,8 @@ impl AgentLoop {
                     last_assistant_text = synth_text.clone();
                     let in_tok = res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
                     let out_tok = res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+                    let cache_read_tok = res.usage.as_ref().map(|u| u.cache_read_tokens()).unwrap_or(0);
+                    let cache_write_tok = res.usage.as_ref().map(|u| u.cache_creation_tokens()).unwrap_or(0);
 
                     let _ = journal.append_assistant_message(
                         &synth_text,
@@ -606,6 +618,8 @@ impl AgentLoop {
                         &model_cfg.id,
                         in_tok,
                         out_tok,
+                        cache_read_tok,
+                        cache_write_tok,
                         "stop",
                     );
 
@@ -635,6 +649,8 @@ impl AgentLoop {
                         &[],
                         &model_cfg.provider,
                         &model_cfg.id,
+                        0,
+                        0,
                         0,
                         0,
                         "stop",

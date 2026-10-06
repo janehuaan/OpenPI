@@ -29,6 +29,39 @@ pub struct SamplingParams {
     pub top_p: Option<f32>,
 }
 
+/// Whether to send Anthropic-style prompt-cache breakpoints for a provider.
+///
+/// Many OpenAI-compatible relays (huaan.space, cc-style proxies) are backed by
+/// Anthropic and only populate `usage.prompt_tokens_details.cached_tokens` when
+/// the request carries an explicit `cache_control` breakpoint. Without it the
+/// usage panel reports a permanent 0% hit rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PromptCacheMode {
+    /// Send a breakpoint on the system prompt (default).
+    #[default]
+    Auto,
+    /// Never send cache breakpoints (for providers that reject the field).
+    Off,
+}
+
+impl PromptCacheMode {
+    pub fn enabled(self) -> bool {
+        matches!(self, PromptCacheMode::Auto)
+    }
+
+    /// Lenient parse of a models.json `"promptCache"` value. Anything other
+    /// than an explicit disable keeps the default (on).
+    pub fn from_json(value: Option<&Value>) -> Self {
+        match value.and_then(Value::as_str).map(|s| s.trim().to_ascii_lowercase()) {
+            Some(s) if matches!(s.as_str(), "off" | "none" | "disabled" | "false" | "no") => {
+                PromptCacheMode::Off
+            }
+            _ => PromptCacheMode::Auto,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub id: String,
@@ -41,6 +74,10 @@ pub struct ModelConfig {
     pub reasoning: bool,
     #[serde(default)]
     pub sampling_params_by_thinking_level: Option<HashMap<String, SamplingParams>>,
+    /// Prompt-cache policy; defaults to `Auto` so relays start caching without
+    /// any config change. Set `"promptCache": "off"` on the provider to opt out.
+    #[serde(default)]
+    pub prompt_cache: PromptCacheMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +171,7 @@ impl EngineConfig {
                                 },
                             );
 
+                            // Provider-level default; individual models may override it.
                             if let Some(m_arr) = prov_val.get("models").and_then(|m| m.as_array()) {
                                 for m in m_arr {
                                     let model_id = match m.get("id").and_then(|id| id.as_str()) {
@@ -171,6 +209,9 @@ impl EngineConfig {
                                         max_tokens,
                                         reasoning,
                                         sampling_params_by_thinking_level: sampling_params,
+                                        prompt_cache: PromptCacheMode::from_json(
+                                            m.get("promptCache").or_else(|| prov_val.get("promptCache")),
+                                        ),
                                     };
 
                                     // Store with both plain ID and "provider/id"
@@ -233,6 +274,7 @@ impl EngineConfig {
                     max_tokens: 8192,
                     reasoning: false,
                     sampling_params_by_thinking_level: None,
+                    prompt_cache: PromptCacheMode::Auto,
                 });
             }
         }
@@ -261,6 +303,7 @@ impl EngineConfig {
                     max_tokens: 8192,
                     reasoning: false,
                     sampling_params_by_thinking_level: None,
+                    prompt_cache: PromptCacheMode::Auto,
                 });
             }
         }
@@ -277,6 +320,7 @@ impl EngineConfig {
                 max_tokens: 8192,
                 reasoning: false,
                 sampling_params_by_thinking_level: None,
+                prompt_cache: PromptCacheMode::Auto,
             });
         }
 

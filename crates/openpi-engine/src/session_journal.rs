@@ -528,6 +528,8 @@ impl SessionJournal {
         model: &str,
         input_tokens: usize,
         output_tokens: usize,
+        cache_read_tokens: usize,
+        cache_creation_tokens: usize,
         stop_reason: &str,
     ) -> Result<String> {
         let entry_id = Uuid::new_v4().simple().to_string()[..8].to_string();
@@ -571,9 +573,14 @@ impl SessionJournal {
                 "api": "openai-completions",
                 "provider": provider,
                 "model": model,
+                // `input` excludes the cached portion so the usage panel's
+                // hit-rate (cacheRead / (input + cacheRead)) is not double-counted;
+                // totalTokens stays the full prompt + completion.
                 "usage": {
-                    "input": input_tokens,
+                    "input": input_tokens.saturating_sub(cache_read_tokens),
                     "output": output_tokens,
+                    "cacheRead": cache_read_tokens,
+                    "cacheWrite": cache_creation_tokens,
                     "totalTokens": input_tokens + output_tokens
                 },
                 "stopReason": stop_reason,

@@ -26,6 +26,56 @@ pub struct LlmClient {
     client: reqwest::Client,
 }
 
+/// Builds the streaming chat-completion payload.
+///
+/// Prompt caching: Anthropic-backed relays only populate
+/// `prompt_tokens_details.cached_tokens` when the request carries an explicit
+/// `cache_control` breakpoint, so without this the usage panel can only ever
+/// report a 0% hit rate. `"promptCache": "off"` on the provider opts out.
+///
+/// Returns the body plus the `(index, original)` of the message we marked, so
+/// the caller can roll the breakpoint back if the provider rejects it.
+fn build_request_body(
+    config: &ModelConfig,
+    messages: Vec<ChatMessage>,
+    tools: Option<Vec<ToolDefinition>>,
+    temperature: Option<f32>,
+) -> (ChatCompletionRequest, Option<(usize, ChatMessage)>) {
+    let mut messages = messages;
+    let cache_breakpoint = if config.prompt_cache.enabled() {
+        mark_system_cache_breakpoint(&mut messages)
+    } else {
+        None
+    };
+    let body = ChatCompletionRequest {
+        model: config.id.clone(),
+        messages,
+        tools,
+        stream: true,
+        max_tokens: Some(config.max_tokens),
+        temperature,
+        stream_options: Some(StreamOptions {
+            include_usage: true,
+        }),
+    };
+    (body, cache_breakpoint)
+}
+
+/// Marks the last system/developer message as an Anthropic cache breakpoint.
+/// Returns `(index, original)` so the caller can roll the change back if the
+/// provider rejects the field.
+fn mark_system_cache_breakpoint(messages: &mut [ChatMessage]) -> Option<(usize, ChatMessage)> {
+    let idx = messages
+        .iter()
+        .rposition(|m| m.role == "system" || m.role == "developer")?;
+    let original = messages[idx].clone();
+    if messages[idx].mark_cache_breakpoint() {
+        Some((idx, original))
+    } else {
+        None
+    }
+}
+
 pub trait StreamEventHandler: Send + Sync {
     fn on_reasoning_start(&self) {}
     fn on_reasoning_delta(&self, _delta: &str) {}
@@ -87,24 +137,17 @@ impl LlmClient {
             (Some(0.2), None)
         };
 
-        let req_body = ChatCompletionRequest {
-            model: config.id.clone(),
-            messages,
-            tools,
-            stream: true,
-            max_tokens: Some(config.max_tokens),
-            temperature: dyn_temperature,
-            stream_options: Some(StreamOptions {
-                include_usage: true,
-            }),
-        };
+        let (req_body, mut cache_breakpoint) =
+            build_request_body(config, messages, tools, dyn_temperature);
 
         debug!("Posting chat completion request to: {}", url);
 
         let mut attempts = 0;
         let max_attempts = 3;
         let mut response_opt = None;
+        let mut cache_retry_used = false;
 
+        let mut req_body = req_body;
         while attempts < max_attempts {
             attempts += 1;
             let req_future = self.client.post(&url).headers(headers.clone()).json(&req_body).send();
@@ -121,6 +164,26 @@ impl LlmClient {
                     if status.is_success() {
                         response_opt = Some(resp);
                         break;
+                    } else if status.as_u16() == 400 && !cache_retry_used && cache_breakpoint.is_some() {
+                        // A provider that validates strictly can reject the
+                        // non-standard `cache_control` field. Roll it back and
+                        // retry once so caching never becomes an outage — but
+                        // only when the 400 is actually about caching, so an
+                        // unrelated bad request does not burn a round trip.
+                        let err_body = resp.text().await.unwrap_or_default();
+                        if !is_cache_rejection(&err_body) {
+                            error!("LLM API returned error 400: {}", err_body);
+                            bail!("LLM API error (400): {}", err_body);
+                        }
+                        cache_retry_used = true;
+                        if let Some((idx, original)) = cache_breakpoint.take() {
+                            req_body.messages[idx] = original;
+                        }
+                        warn!(
+                            "LLM provider rejected the cache_control breakpoint (HTTP 400); retrying without prompt caching. \
+                             Set \"promptCache\": \"off\" on this provider to avoid the extra round trip."
+                        );
+                        continue;
                     } else if (status.as_u16() == 502 || status.as_u16() == 503 || status.as_u16() == 504 || status.as_u16() == 429) && attempts < max_attempts {
                         let err_body = resp.text().await.unwrap_or_default();
                         warn!("LLM API transient error {} (attempt {}/{}): {}, retrying in {}ms...", status, attempts, max_attempts, err_body, attempts * 1500);
@@ -360,4 +423,96 @@ impl Default for LlmClient {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Whether an HTTP 400 body points at the `cache_control` field specifically.
+/// Providers phrase it differently, so a few spellings are accepted; anything
+/// else must NOT trigger the rollback retry (an unrelated 400 should fail fast).
+fn is_cache_rejection(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("cache_control") || lower.contains("cach_control") || lower.contains("cachecontrol")
+}
+
+#[cfg(test)]
+mod prompt_cache_tests {
+    use super::*;
+    use crate::config::PromptCacheMode;
+
+    fn model(prompt_cache: PromptCacheMode) -> ModelConfig {
+        ModelConfig {
+            id: "gemini-3.8-flash-high".into(),
+            name: None,
+            provider: "自建".into(),
+            base_url: "https://example.test/v1".into(),
+            api_key: "k".into(),
+            context_window: 1_000_000,
+            max_tokens: 4096,
+            reasoning: true,
+            sampling_params_by_thinking_level: None,
+            prompt_cache,
+        }
+    }
+
+    fn messages() -> Vec<ChatMessage> {
+        vec![
+            ChatMessage::system("system prompt"),
+            ChatMessage::user("hello"),
+            ChatMessage::assistant("hi"),
+            ChatMessage::user("again"),
+        ]
+    }
+
+    #[test]
+    fn cache_breakpoint_lands_on_the_system_message_only() {
+        let (body, mark) = build_request_body(&model(PromptCacheMode::Auto), messages(), None, Some(0.2));
+        assert!(mark.is_some());
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(
+            v["messages"][0]["content"],
+            serde_json::json!([{ "type": "text", "text": "system prompt",
+                                 "cache_control": { "type": "ephemeral" } }])
+        );
+        // Everything after the system message must stay byte-identical, so the
+        // cached prefix is not perturbed.
+        assert_eq!(v["messages"][1]["content"], serde_json::json!("hello"));
+        assert_eq!(v["messages"][3]["content"], serde_json::json!("again"));
+    }
+
+    #[test]
+    fn prompt_cache_off_sends_no_breakpoint() {
+        let (body, mark) = build_request_body(&model(PromptCacheMode::Off), messages(), None, None);
+        assert!(mark.is_none());
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(v["messages"][0]["content"], serde_json::json!("system prompt"));
+        assert!(v.to_string().find("cache_control").is_none());
+    }
+
+    #[test]
+    fn rolling_the_breakpoint_back_restores_the_original_payload() {
+        let (mut body, mark) = build_request_body(&model(PromptCacheMode::Auto), messages(), None, None);
+        let (idx, original) = mark.expect("breakpoint should be set");
+        body.messages[idx] = original;
+        let v = serde_json::to_value(&body).unwrap();
+        assert_eq!(v["messages"][0]["content"], serde_json::json!("system prompt"));
+    }
+
+    #[test]
+    fn a_conversation_without_a_system_message_is_untouched() {
+        let msgs = vec![ChatMessage::user("hello"), ChatMessage::assistant("hi")];
+        let (body, mark) = build_request_body(&model(PromptCacheMode::Auto), msgs, None, None);
+        assert!(mark.is_none());
+        let v = serde_json::to_value(&body).unwrap();
+        assert!(v.to_string().find("cache_control").is_none());
+    }
+}
+
+#[test]
+fn only_cache_related_400s_trigger_the_rollback_retry() {
+    assert!(is_cache_rejection(
+        r#"{"error":{"message":"cache_control: Field 'content[0].cache_control' is not supported"}}"#
+    ));
+    assert!(is_cache_rejection("Invalid request: unknown field cachecontrol"));
+    // Unrelated 400s must fail fast instead of burning a retry round trip.
+    assert!(!is_cache_rejection(r#"{"error":{"message":"max_tokens is too large"}}"#));
+    assert!(!is_cache_rejection(""));
 }

@@ -61,11 +61,26 @@ mod tests {
             &[tc],
             "自建",
             "gemini-3.8-flash-high",
-            100,
+            1000,
             25,
+            768,
+            0,
             "toolUse",
         ).unwrap();
         assert!(!asst_id.is_empty());
+
+        // Cache accounting must survive the round-trip to disk: the usage panel
+        // reads its stats straight from this journal file.
+        let raw = std::fs::read_to_string(&journal.file_path).unwrap();
+        let assistant_entry = raw
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|entry| entry.get("id").and_then(|v| v.as_str()) == Some(asst_id.as_str()))
+            .expect("assistant entry present in journal");
+        let usage = &assistant_entry["message"]["usage"];
+        assert_eq!(usage["cacheRead"], 768);
+        assert_eq!(usage["cacheWrite"], 0);
+        assert_eq!(usage["input"], 232, "input must exclude the cached portion");
 
         let tool_res_id = journal.append_tool_result("call_123", "read", "[package]\nname = ...", false).unwrap();
         assert!(!tool_res_id.is_empty());

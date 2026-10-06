@@ -12,9 +12,26 @@ pub enum ChatContent {
 #[serde(tag = "type")]
 pub enum ChatContentPart {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        text: String,
+        /// Anthropic-style prompt-cache breakpoint. Only serialized when set, so
+        /// ordinary requests stay byte-identical to before.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
     #[serde(rename = "image_url")]
     ImageUrl { image_url: ImageUrlContent },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheControl {
+    pub r#type: String,
+}
+
+impl CacheControl {
+    pub fn ephemeral() -> Self {
+        Self { r#type: "ephemeral".into() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +125,40 @@ impl ChatMessage {
             tool_call_id: None,
             reasoning_content: None,
             artifact: None,
+        }
+    }
+
+    /// Marks this message as an Anthropic prompt-cache breakpoint by putting
+    /// `cache_control: {"type":"ephemeral"}` on its last text part. String
+    /// content is widened into a single text part. Returns false when the
+    /// message has no text part to attach to (nothing was modified).
+    pub fn mark_cache_breakpoint(&mut self) -> bool {
+        match self.content.take() {
+            Some(ChatContent::Text(text)) => {
+                self.content = Some(ChatContent::Parts(vec![ChatContentPart::Text {
+                    text,
+                    cache_control: Some(CacheControl::ephemeral()),
+                }]));
+                true
+            }
+            Some(ChatContent::Parts(mut parts)) => {
+                let slot = parts.iter_mut().rev().find_map(|part| match part {
+                    ChatContentPart::Text { cache_control, .. } => Some(cache_control),
+                    _ => None,
+                });
+                match slot {
+                    Some(slot) => {
+                        *slot = Some(CacheControl::ephemeral());
+                        self.content = Some(ChatContent::Parts(parts));
+                        true
+                    }
+                    None => {
+                        self.content = Some(ChatContent::Parts(parts));
+                        false
+                    }
+                }
+            }
+            None => false,
         }
     }
 
@@ -226,6 +277,60 @@ pub struct TokenUsage {
     pub total_tokens: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<usize>,
+    /// OpenAI-style cache accounting: `prompt_tokens_details.cached_tokens`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    /// DeepSeek-style: `prompt_cache_hit_tokens`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub prompt_cache_hit_tokens: usize,
+    /// DeepSeek-style: `prompt_cache_miss_tokens`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub prompt_cache_miss_tokens: usize,
+    /// Anthropic-through-a-compat-proxy: `cache_read_input_tokens`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cache_read_input_tokens: usize,
+    /// Anthropic-through-a-compat-proxy: `cache_creation_input_tokens`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cache_creation_input_tokens: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: usize,
+    /// Some Anthropic-compatible relays nest cache-write accounting here
+    /// (e.g. huaan.space reports `cached_creation_tokens`).
+    #[serde(default)]
+    pub cached_creation_tokens: usize,
+    #[serde(default)]
+    pub cache_write_tokens: usize,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+impl TokenUsage {
+    /// Prompt tokens served from the provider's cache, normalized across the
+    /// shapes we see in the wild: OpenAI `prompt_tokens_details.cached_tokens`,
+    /// DeepSeek `prompt_cache_hit_tokens`, Anthropic `cache_read_input_tokens`.
+    pub fn cache_read_tokens(&self) -> usize {
+        let openai = self.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0);
+        self.cache_read_input_tokens
+            .max(self.prompt_cache_hit_tokens)
+            .max(openai)
+    }
+
+    /// Prompt tokens written to the provider's cache, normalized across
+    /// Anthropic's top-level field and the nested variants some relays emit.
+    pub fn cache_creation_tokens(&self) -> usize {
+        let nested = self
+            .prompt_tokens_details
+            .as_ref()
+            .map(|d| d.cached_creation_tokens.max(d.cache_write_tokens))
+            .unwrap_or(0);
+        self.cache_creation_input_tokens.max(nested)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -273,6 +378,89 @@ pub struct ChatCompletionChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_usage_reads_provider_cache_fields() {
+        let openai: TokenUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 1000, "completion_tokens": 50,
+            "prompt_tokens_details": { "cached_tokens": 768 }
+        }))
+        .unwrap();
+        assert_eq!(openai.cache_read_tokens(), 768);
+
+        let deepseek: TokenUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 1000, "completion_tokens": 50,
+            "prompt_cache_hit_tokens": 640, "prompt_cache_miss_tokens": 360
+        }))
+        .unwrap();
+        assert_eq!(deepseek.cache_read_tokens(), 640);
+
+        let anthropic: TokenUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 5, "completion_tokens": 5,
+            "cache_read_input_tokens": 900, "cache_creation_input_tokens": 128
+        }))
+        .unwrap();
+        assert_eq!(anthropic.cache_read_tokens(), 900);
+        assert_eq!(anthropic.cache_creation_tokens(), 128);
+
+        // A provider that reports no cache fields stays at zero (no false hits).
+        let plain: TokenUsage =
+            serde_json::from_value(serde_json::json!({ "prompt_tokens": 10, "completion_tokens": 2 })).unwrap();
+        assert_eq!(plain.cache_read_tokens(), 0);
+        assert_eq!(plain.cache_creation_tokens(), 0);
+    }
+
+    #[test]
+    fn token_usage_reads_nested_cache_write_fields() {
+        // huaan.space-style relay: cache accounting nested under
+        // prompt_tokens_details, with a non-standard write field name.
+        let relay: TokenUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 9000, "completion_tokens": 20,
+            "prompt_tokens_details": {
+                "cached_tokens": 4077,
+                "cached_creation_tokens": 512,
+                "cache_write_tokens": 0
+            }
+        }))
+        .unwrap();
+        assert_eq!(relay.cache_read_tokens(), 4077);
+        assert_eq!(relay.cache_creation_tokens(), 512);
+
+        let alt: TokenUsage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 10, "completion_tokens": 2,
+            "prompt_tokens_details": { "cache_write_tokens": 640 }
+        }))
+        .unwrap();
+        assert_eq!(alt.cache_creation_tokens(), 640);
+    }
+
+    #[test]
+    fn cache_breakpoint_widens_string_content() {
+        let mut msg = ChatMessage::system("hello");
+        assert!(msg.mark_cache_breakpoint());
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(
+            v["content"],
+            serde_json::json!([{ "type": "text", "text": "hello", "cache_control": { "type": "ephemeral" } }])
+        );
+        // Idempotent: re-marking must not duplicate parts.
+        assert!(msg.mark_cache_breakpoint());
+        let v2 = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn cache_breakpoint_leaves_plain_messages_untouched() {
+        // Nothing is serialized when no breakpoint is set, so non-caching
+        // providers keep receiving the exact same payload as before.
+        let msg = ChatMessage::user("hi");
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["content"], serde_json::json!("hi"));
+
+        let mut empty = ChatMessage { content: None, ..ChatMessage::user("x") };
+        assert!(!empty.mark_cache_breakpoint());
+        assert!(empty.content.is_none());
+    }
 
     #[test]
     fn test_tool_result_small_payload_no_bypass() {
