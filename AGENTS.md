@@ -26,7 +26,7 @@ yarn check:targets          # 非本机架构的 cfg 分支
 
 改完 Rust 至少跑 `yarn check:targets`；它比 `cargo check` 强，是 clippy 级别。
 
-## 已完成的三轮修复
+## 已完成的修复记录
 
 - **daemon 覆写自己**：`cp target/debug/openpi-daemon /Applications/OpenPI.app/.../bin/openpi-daemon && kill <自己 pid>`
   会作废运行中 Mach-O 的映射页，进程**静默冻结**（不崩溃），UI 却因为信任内存里的 `runningTools`
@@ -41,6 +41,15 @@ yarn check:targets          # 非本机架构的 cfg 分支
   现在 `message_chars()` 三者都算，裁剪按"谁大砍谁"处理：arguments 折叠超长字符串值（保 JSON 结构、
   保留 `path` 等小字段），reasoning 折叠成标记（字段仍在，符合需要回传的 provider），工具结果继续对半砍。
   实测 `db2133cc` 852,334 → 40,435 字符。
+- **`install-daemon.sh` 是假重启**：脚本发完 `shutdown` 就关 socket，而请求是 spawn 出去的 —— 客户端一断连，
+  读循环立刻结束并跑 `requests.abort_all()`，把还没走到 `process::exit` 的 handler **abort 掉**。daemon
+  继续跑（还是旧二进制），脚本却打印"已请求重启"。现在 `Shutdown` 在 `ipc.rs` 的读循环里**内联处理**
+  （不再能被 abort），ack 会等 writer 取走再退；脚本改成**先 health 拿 pid、再轮询进程表**确认真的退出，
+  失败 `exit 1` 并说明原因；替换 bundle 内 daemon 后**重新签名**（否则 bundle seal 是破的）。
+  回归测试 `crates/openpi-daemon/tests/daemon_shutdown_test.rs` 起真二进制、发完就挂断，钉住这个行为
+  （先确认它在旧代码上会红，再确认修复后变绿）。
+  另外两个部署相关事实：**退出 app 不会杀掉 daemon**（它会被孤儿化，所以换二进制只能靠 `install-daemon.sh`）；
+  新 daemon 是**懒启动**的，脚本跑完要等 app 下一次请求才真正起来。
 
 ## 移动端 M1：局域网实时 + 手机发指令（功能已完成，待真机验收）
 
