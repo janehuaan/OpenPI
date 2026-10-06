@@ -629,16 +629,21 @@ pub async fn handle_invoke(
         }
 
         "start_daemon" => {
+            client.set_desired_running(true);
             let _ = client.ensure_connected().await;
             Ok(json!(true))
         }
 
         "stop_daemon" => {
+            // Tell the supervisor first: otherwise it would see a dead daemon and
+            // start a new one before the user's stop even lands.
+            client.set_desired_running(false);
             let _ = client.request(ClientRequest::Shutdown { id: Uuid::new_v4().to_string() }).await;
             Ok(json!(true))
         }
 
         "restart_daemon" => {
+            client.set_desired_running(true);
             let _ = client.request(ClientRequest::Shutdown { id: Uuid::new_v4().to_string() }).await;
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let _ = client.ensure_connected().await;

@@ -48,8 +48,11 @@ yarn check:targets          # 非本机架构的 cfg 分支
   失败 `exit 1` 并说明原因；替换 bundle 内 daemon 后**重新签名**（否则 bundle seal 是破的）。
   回归测试 `crates/openpi-daemon/tests/daemon_shutdown_test.rs` 起真二进制、发完就挂断，钉住这个行为
   （先确认它在旧代码上会红，再确认修复后变绿）。
-  另外两个部署相关事实：**退出 app 不会杀掉 daemon**（它会被孤儿化，所以换二进制只能靠 `install-daemon.sh`）；
-  新 daemon 是**懒启动**的，脚本跑完要等 app 下一次请求才真正起来。
+  另外：**退出 app 不会杀掉 daemon**（它会被孤儿化，所以换二进制只能靠 `install-daemon.sh`）。
+- **daemon 死了没人管**：`lib.rs` 只在启动时 `ensure_connected()` 一次，而 UI 高频走的 `get_snapshot` 用的是
+  `request_passive` —— 它**故意不启动 daemon**。所以 daemon 一旦消失就再也不会回来：部署换完二进制后 app 会
+  一直空转（实测 30s 不动），期间定时任务和云同步也是停的。现在 `DaemonClient::spawn_supervisor()` 每 2s 检查
+  一次，断了就拉起来；`stop_daemon` 先清 `desired_running`，所以**手动停止不会被它撤销**（这条规则有单测钉住）。
 
 ## 移动端 M1：局域网实时 + 手机发指令（功能已完成，待真机验收）
 
