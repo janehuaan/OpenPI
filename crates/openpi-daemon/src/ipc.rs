@@ -183,6 +183,32 @@ async fn handle_connection(
             }
         };
 
+        // A shutdown is answered on this task, never spawned. Its caller is
+        // `scripts/install-daemon.sh`, which hangs up as soon as it has sent the
+        // request; that ends this read loop and runs `requests.abort_all()`
+        // below, which used to cancel the spawned handler before it reached
+        // `process::exit`. The daemon therefore kept running while the script
+        // reported that it had restarted it. Handling it inline removes the race.
+        if matches!(request, ClientRequest::Shutdown { .. }) {
+            if let Err(e) = handle_request(
+                request,
+                supervisor.clone(),
+                storage.clone(),
+                scheduler.clone(),
+                pi_cli_path.clone(),
+                start_time,
+                subscribed_sessions.clone(),
+                write_tx.clone(),
+                last_active.clone(),
+                cloud.clone(),
+            )
+            .await
+            {
+                warn!("Client request error: {}", e);
+            }
+            continue;
+        }
+
         let supervisor = supervisor.clone();
         let storage = storage.clone();
         let scheduler = scheduler.clone();
@@ -361,6 +387,15 @@ async fn handle_request(
             ClientRequest::Shutdown { id } => {
                 supervisor.shutdown_all().await;
                 let _ = write_tx.send(ServerMessage::ok(id, serde_json::json!({"shutting_down": true})).to_json_line()?).await;
+                // The socket belongs to the writer task, so wait for it to pick
+                // the acknowledgement up before the process disappears. Bounded,
+                // so a wedged client can never hold the exit hostage.
+                for _ in 0..20 {
+                    if write_tx.capacity() == write_tx.max_capacity() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
                 std::process::exit(0);
             }
         };
