@@ -33,12 +33,16 @@ else
     TARGET_DIR="$DIR/target/release"
 fi
 
+# Let Tauri CLI pick up the cross-compile target via the canonical env var.
+# Passing --target on the CLI is unreliable across Tauri versions.
+[[ -n "$CARGO_TARGET" ]] && export CARGO_BUILD_TARGET="$CARGO_TARGET"
+
 if [[ "${OPENPI_SKIP_BUILD:-0}" != "1" ]]; then
     echo "🎨 1. Building desktop frontend and daemon..."
     yarn --cwd apps/desktop build
     cargo build --release --locked -p openpi-daemon ${CARGO_TARGET:+--target "$CARGO_TARGET"}
     echo "📦 2. Building Tauri application bundle..."
-    yarn --cwd apps/desktop tauri build --bundles app ${CARGO_TARGET:+--target "$CARGO_TARGET"}
+    yarn --cwd apps/desktop tauri build --bundles app
 else
     echo "Resuming packaging from existing release build..."
 fi
