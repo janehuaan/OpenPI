@@ -18,21 +18,38 @@ done
     exit 1
 }
 
-ARCH="$(uname -m)"
+# Support cross-compilation via CARGO_TARGET (e.g. x86_64-apple-darwin).
+# When unset, build natively for the host architecture.
+CARGO_TARGET="${CARGO_TARGET:-}"
+if [[ -n "$CARGO_TARGET" ]]; then
+    case "$CARGO_TARGET" in
+        x86_64-apple-darwin)  ARCH="x86_64" ;;
+        aarch64-apple-darwin) ARCH="arm64" ;;
+        *) echo "error: unsupported CARGO_TARGET: $CARGO_TARGET" >&2; exit 1 ;;
+    esac
+    TARGET_DIR="$DIR/target/$CARGO_TARGET/release"
+else
+    ARCH="$(uname -m)"
+    TARGET_DIR="$DIR/target/release"
+fi
+
+# Let Tauri CLI pick up the cross-compile target via the canonical env var.
+# Passing --target on the CLI is unreliable across Tauri versions.
+[[ -n "$CARGO_TARGET" ]] && export CARGO_BUILD_TARGET="$CARGO_TARGET"
 
 if [[ "${OPENPI_SKIP_BUILD:-0}" != "1" ]]; then
     echo "🎨 1. Building desktop frontend and daemon..."
     yarn --cwd apps/desktop build
-    cargo build --release --locked -p openpi-daemon
+    cargo build --release --locked -p openpi-daemon ${CARGO_TARGET:+--target "$CARGO_TARGET"}
     echo "📦 2. Building Tauri application bundle..."
     yarn --cwd apps/desktop tauri build --bundles app
 else
     echo "Resuming packaging from existing release build..."
 fi
 
-APP_BUNDLE="$DIR/target/release/bundle/macos/OpenPI.app"
+APP_BUNDLE="$TARGET_DIR/bundle/macos/OpenPI.app"
 RUNTIME="$APP_BUNDLE/Contents/Resources/openpi"
-DAEMON="$DIR/target/release/openpi-daemon"
+DAEMON="$TARGET_DIR/openpi-daemon"
 [[ -d "$APP_BUNDLE/Contents/MacOS" && -x "$DAEMON" ]] || {
     echo "error: Tauri app or daemon build output is missing" >&2
     exit 1
@@ -82,7 +99,7 @@ echo "   signed by: $(codesign -dv "$APP_BUNDLE" 2>&1 | grep -E 'TeamIdentifier|
 
 echo "🗜️ 6. Compressing application archive with maximum compression..."
 VERSION="$(grep -m1 '"version"' "$DIR/apps/desktop/src-tauri/tauri.conf.json" | cut -d'"' -f4)"
-ZIP="$DIR/target/release/bundle/OpenPI_${VERSION}_${ARCH}.zip"
+ZIP="$TARGET_DIR/bundle/OpenPI_${VERSION}_${ARCH}.zip"
 rm -f "$ZIP"
 ditto -c -k --zlibCompressionLevel 9 --noextattr --noacl --noqtn --keepParent "$APP_BUNDLE" "$ZIP"
 unzip -tq "$ZIP"
