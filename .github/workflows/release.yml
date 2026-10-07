@@ -27,7 +27,7 @@ permissions:
 jobs:
   build-desktop:
     name: Build (${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-15
     defaults:
       run:
         shell: bash
@@ -35,10 +35,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13
-            arch: x86_64
-          - os: macos-14
-            arch: arm64
+          - arch: x86_64
+            rust_target: x86_64-apple-darwin
+          - arch: arm64
+            rust_target: aarch64-apple-darwin
 
     steps:
       - name: Checkout release tag
@@ -53,27 +53,30 @@ jobs:
           cache: yarn
           cache-dependency-path: yarn.lock
 
-      - name: Validate tag and runner architecture
+      - name: Validate tag
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-          EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          test "$(uname -m)" = "$EXPECTED_ARCH"
           test "$RELEASE_TAG" = "v$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")"
           test "$(git tag --points-at HEAD --list "$RELEASE_TAG")" = "$RELEASE_TAG"
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile --non-interactive
 
+      - name: Add Rust cross-compile target
+        run: rustup target add ${{ matrix.rust_target }}
+
       - name: Build and package complete Tauri app
+        env:
+          CARGO_TARGET: ${{ matrix.rust_target }}
         run: bash scripts/package-tauri-app.sh
 
       - name: Upload verified app archive
         uses: actions/upload-artifact@v4
         with:
           name: openpi-macos-${{ matrix.arch }}
-          path: target/release/bundle/OpenPI_*.zip
+          path: target/${{ matrix.rust_target }}/release/bundle/OpenPI_*.zip
           if-no-files-found: error
           retention-days: 7
 
