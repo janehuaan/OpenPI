@@ -25,6 +25,7 @@ import {
 import { isDiffContent } from "../../../lib/diff";
 import { ErrorBoundary } from "../../error-boundary";
 import { draftStore } from "../../../lib/draft-store";
+import { TodayBriefingHero } from "./today-briefing-hero";
 import { supabase } from "../../../lib/supabase-client";
 import {
 	contentImages,
@@ -137,6 +138,7 @@ import {
 	Github,
 	Globe,
 	History,
+	Home,
 	Image as ImageIcon,
 	Keyboard,
 	ListTodo,
@@ -165,6 +167,7 @@ import {
 	Server,
 	Share2,
 	Slash,
+	Sliders,
 	Sparkles,
 	Square,
 	Store,
@@ -172,18 +175,27 @@ import {
 	Terminal,
 	TerminalSquare,
 	Trash2,
+	User,
 	UserRound,
 	Users,
 	WandSparkles,
 	Wrench,
 	X,
 	Zap,
+	Target,
+	Shield,
+	Settings,
+	CalendarClock,
+	AlertCircle,
+	Cloud,
 } from "../../icons";
+import "../today/styles/today-os-dashboard.css";
+import type { PersonalGoalRecord, SafetyStatus } from "../../../lib/app-types";
 import { useTheme } from "../../../lib/theme-manager";
 import { ClaudeCodeRecapCard } from "../../recap-card";
 import { TodoPanel } from "../../todo-panel";
 import { MessageImages } from "../chat/message-images";
-import type { TodoState, GitStatusResult } from "../../../types";
+import type { TodoState, GitStatusResult, TaskRun } from "../../../types";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "../../ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "../../ui/popover";
 import type { DeleteProjectTarget } from "../dialogs/delete-project-dialog";
@@ -191,9 +203,32 @@ import { AgentActionChain } from "./action-chain";
 import type { AppMode } from "./mode-tab-bar";
 import { ReasoningBlock } from "./reasoning-block";
 import { TurnProgressRow } from "./turn-progress-row";
-import { ComposerStatusDock } from "./composer-status-dock";
+import { ContextInspector } from "../inspector/context-inspector";
+import {
+	AgentWorkingActivityCard,
+	AgentDecisionPromptCard,
+	AgentExecutionOverviewCard,
+	AgentOutcomeCard,
+	parseAgentOutcome,
+	AnswerBriefCard,
+	parseAnswerBrief,
+	AgentPresenceCard,
+} from "./personal-agent-blocks";
+import type { AgentActivityItem, AgentPresenceStatus } from "./personal-agent-blocks";
 
-type ChatNavView = "chat" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
+type ChatNavView =
+	| "today"
+	| "chat"
+	| "tasks"
+	| "capabilities"
+	| "memory"
+	| "intelligence"
+	| "daemon"
+	| "git"
+	| "goals"
+	| "activity"
+	| "projects"
+	| "agent";
 
 function shortModelName(name: string): string {
 	const trimmed = name.trim();
@@ -251,6 +286,7 @@ export function ReferenceWorkspacePreview({
 	conversationTitles,
 	workspaceSummary,
 	runningTools,
+	taskRuns,
 	toolDurations = {},
 	turnProgress,
 	todoState,
@@ -308,6 +344,7 @@ export function ReferenceWorkspacePreview({
 	conversationTitles: Record<string, string>;
 	workspaceSummary?: WorkspaceSummary;
 	runningTools: RunningTool[];
+	taskRuns?: TaskRun[];
 	toolDurations?: Record<string, number>;
 	turnProgress?: TurnProgress;
 	todoState?: TodoState;
@@ -365,6 +402,81 @@ export function ReferenceWorkspacePreview({
 		const unsub = supabase.onAuthStateChange(setSupabaseUser);
 		return () => unsub();
 	}, []);
+
+	const [safetyStatus, setSafetyStatus] = useState<SafetyStatus | null>(null);
+	const [activeGoals, setActiveGoals] = useState<PersonalGoalRecord[]>([]);
+
+	useEffect(() => {
+		let active = true;
+		desktopApi.getSafetyStatus().then((s) => {
+			if (active && s) setSafetyStatus(s);
+		}).catch(() => {});
+		// `list_personal_goals` 返回 `{ goals }` 包装对象，不是裸数组。
+		desktopApi.listPersonalGoals("active").then((res) => {
+			if (active && Array.isArray(res?.goals)) setActiveGoals(res.goals);
+		}).catch(() => {});
+		return () => {
+			active = false;
+		};
+	}, [selectedInstanceId]);
+
+	const activeGoal = useMemo(() => {
+		if (activeGoals.length > 0) {
+			const g = activeGoals[0];
+			return {
+				title: g.title,
+				nextActionTitle: "设计 Decision Engine",
+				nextActionDesc: g.description || "推进当前主线目标任务",
+			};
+		}
+		return {
+			title: "OpenPI Personal Agent OS",
+			nextActionTitle: "设计 Decision Engine",
+			nextActionDesc: "定义决策对象与策略，建立事件→决策→行动闭环",
+		};
+	}, [activeGoals]);
+
+	const [now, setNow] = useState(new Date());
+	useEffect(() => {
+		const timer = setInterval(() => setNow(new Date()), 30000);
+		return () => clearInterval(timer);
+	}, []);
+
+	const formattedDateTime = useMemo(() => {
+		const year = now.getFullYear();
+		const month = String(now.getMonth() + 1).padStart(2, "0");
+		const date = String(now.getDate()).padStart(2, "0");
+		const days = ["日", "一", "二", "三", "四", "五", "六"];
+		const dayName = days[now.getDay()];
+		const hours = String(now.getHours()).padStart(2, "0");
+		const minutes = String(now.getMinutes()).padStart(2, "0");
+		return `${year}年${month}月${date}日 星期${dayName} ${hours}:${minutes}`;
+	}, [now]);
+
+	const userName =
+		userProfile?.nickname === "Jane" || userProfile?.nickname === "Janehuaan" || !userProfile?.nickname
+			? "简华安"
+			: userProfile.nickname;
+	const hour = now.getHours();
+	const greeting =
+		hour < 12 ? `早安，${userName}` : hour < 18 ? `下午好，${userName}` : `晚上好，${userName}`;
+
+	const circuitBadge = useMemo(() => {
+		if (!safetyStatus?.circuitState) {
+			return { text: "● 正常运行 (Healthy)", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" };
+		}
+		const s = safetyStatus.circuitState.state;
+		if (s === "healthy") {
+			return { text: "● 正常运行 (Healthy)", color: "#10b981", bg: "rgba(16, 185, 129, 0.12)" };
+		} else if (s === "degraded") {
+			return { text: "▲ 降级观察 (Degraded)", color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" };
+		} else if (s === "open") {
+			return { text: "■ 熔断保护 (Circuit Open)", color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" };
+		} else {
+			return { text: "◌ 探针探测 (Recovery)", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.12)" };
+		}
+	}, [safetyStatus]);
+
 	const initialKey = selectedInstanceId ?? "__new_draft__";
 	const [draft, setDraft] = useState(() => draftStore.getDraft(initialKey)?.text ?? "");
 	const [attachments, setAttachments] = useState<ImageAttachment[]>(
@@ -513,6 +625,70 @@ export function ReferenceWorkspacePreview({
 	const [chatsOverflow, setChatsOverflow] = useState(false);
 	const [showAllFiles, setShowAllFiles] = useState(false);
 	const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+	const [headCollapsed, setHeadCollapsed] = useState(false);
+	const [agentActivity, setAgentActivity] = useState<AgentActivityItem[]>([]);
+	const [agentBubble, setAgentBubble] = useState<
+		{ text: string; detail?: string; tone: "info" | "warn" } | undefined
+	>();
+	const agentStatus: AgentPresenceStatus =
+		Boolean(conversation?.state?.isStreaming) || runningTools.length > 0 ? "working" : "idle";
+	const agentStatusDetail =
+		runningTools.length > 0
+			? `正在执行 ${runningTools.length} 个工具${runningTools[0]?.toolName ? `：${runningTools[0].toolName}` : ""}`
+			: Boolean(conversation?.state?.isStreaming)
+				? "正在组织回复…"
+				: `${greeting} · 待命中，后台持续观察工作区`;
+
+	useEffect(() => {
+		let active = true;
+		const clock = (iso?: string) => {
+			if (!iso) return "";
+			const d = new Date(iso);
+			if (Number.isNaN(d.getTime())) return "";
+			return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+		};
+		const load = async () => {
+			const raw: { ts: number; item: AgentActivityItem }[] = [];
+			try {
+				const res = await desktopApi.listActionCards(undefined, 6);
+				for (const c of res.cards ?? []) {
+					raw.push({
+						ts: new Date(c.createdAt).getTime() || 0,
+						item: { id: c.id, time: clock(c.createdAt), label: c.title, detail: c.summary, kind: "card" },
+					});
+				}
+			} catch {
+				// ignore
+			}
+			try {
+				const openRes = await desktopApi.listActionCards("open", 3);
+				const first = openRes.cards?.[0];
+				if (active) {
+					setAgentBubble(
+						first ? { text: first.title, detail: first.summary, tone: "warn" } : undefined,
+					);
+				}
+			} catch {
+				// ignore
+			}
+			for (const r of taskRuns ?? []) {
+				const when = r.finishedAt || r.startedAt || r.createdAt;
+				raw.push({
+					ts: new Date(when).getTime() || 0,
+					item: { id: r.id, time: clock(when), label: `任务运行 · ${r.status}`, detail: r.result || r.error || undefined, kind: "run" },
+				});
+			}
+			raw.sort((a, b) => b.ts - a.ts);
+			if (active) setAgentActivity(raw.slice(0, 6).map((r) => r.item));
+		};
+		void load();
+		const handler = () => void load();
+		window.addEventListener("openpi:proactive", handler);
+		return () => {
+			active = false;
+			window.removeEventListener("openpi:proactive", handler);
+		};
+	}, [taskRuns]);
 	const toggleProjectCollapsed = (cwd: string, e: React.MouseEvent) => {
 		e.stopPropagation();
 		setCollapsedProjects((prev) => ({ ...prev, [cwd]: !prev[cwd] }));
@@ -530,7 +706,7 @@ export function ReferenceWorkspacePreview({
 	const initialScrollSettleUntil = useRef(0);
 	const [contextPanelOpen, setContextPanelOpen] = useState(() => {
 		try {
-			const saved = localStorage.getItem("openpi.contextPanelOpen");
+			const saved = localStorage.getItem("openpi.contextPanelOpen_v2");
 			if (saved !== null) return saved === "true";
 		} catch {}
 		return true;
@@ -538,7 +714,7 @@ export function ReferenceWorkspacePreview({
 
 	useEffect(() => {
 		try {
-			localStorage.setItem("openpi.contextPanelOpen", String(contextPanelOpen));
+			localStorage.setItem("openpi.contextPanelOpen_v2", String(contextPanelOpen));
 		} catch {}
 	}, [contextPanelOpen]);
 
@@ -1145,6 +1321,9 @@ export function ReferenceWorkspacePreview({
 	function handleFeedScroll(): void {
 		const feed = feedScroll.current;
 		if (!feed) return;
+		// 滚动超过阈值时收窄顶部态势头，把空间让给内容
+		const nextCollapsed = feed.scrollTop > 40;
+		setHeadCollapsed((prev) => (prev === nextCollapsed ? prev : nextCollapsed));
 		const distance = feed.scrollHeight - feed.scrollTop - feed.clientHeight;
 		const isAwayFromBottom = distance > 120;
 
@@ -1616,383 +1795,331 @@ export function ReferenceWorkspacePreview({
 		setAttachmentNotice(undefined);
 	};
 
+	const shouldShowInspector =
+		contextPanelOpen &&
+		activeView !== "capabilities" &&
+		activeView !== "memory" &&
+		activeView !== "goals" &&
+		activeView !== "projects" &&
+		activeView !== "activity" &&
+		activeView !== "agent" &&
+		activeView !== "today";
+
 	return (
 		<div
-			className={`reference-workspace ${sidebarOpen === false ? "left-collapsed" : ""} ${!contextPanelOpen || Boolean(customContent) ? "context-collapsed" : ""} ${isWorking ? "agent-executing" : ""}`}
+			className={`reference-workspace personal-assistant-theme ${sidebarOpen === false ? "left-collapsed" : ""} ${!shouldShowInspector ? "context-collapsed" : ""} ${isWorking ? "agent-executing" : ""}`}
 		>
-			<aside className="reference-leftbar">
-				<header className="reference-brand" data-tauri-drag-region>
-					<div className="reference-brand-drag-spacer" data-tauri-drag-region />
-					{onToggleSidebar && (
-						<div className="reference-brand-actions">
+
+			<aside className="pa-sidebar">
+				{/* macOS Window Controls */}
+				<div className="pa-window-controls">
+					<span className="pa-dot red" />
+					<span className="pa-dot yellow" />
+					<span className="pa-dot green" />
+				</div>
+
+				{/* Brand Header */}
+				<div className="pa-brand-header" onClick={() => onNavigate("today")}>
+					<div className="pa-brand-icon">
+						<Bot size={20} />
+					</div>
+					<div className="pa-brand-text">
+						<span className="pa-brand-title">OpenPI</span>
+						<span className="pa-brand-subtitle">个人助理</span>
+					</div>
+				</div>
+
+				{/* Primary Navigation */}
+				<nav className="pa-nav-group">
+					<div
+						className={`pa-nav-item ${activeView === "today" ? "active" : ""}`}
+						onClick={() => onNavigate("today")}
+					>
+						<Home size={16} />
+						<span>今日</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "chat" ? "active" : ""}`}
+						onClick={() => onNavigate("chat")}
+					>
+						<MessageSquare size={16} />
+						<span>对话</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "goals" ? "active" : ""}`}
+						onClick={() => onNavigate("goals")}
+					>
+						<Target size={16} />
+						<span>目标</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "projects" ? "active" : ""}`}
+						onClick={() => onNavigate("projects")}
+					>
+						<Folder size={16} />
+						<span>项目</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "memory" ? "active" : ""}`}
+						onClick={() => onNavigate("memory")}
+					>
+						<BrainCircuit size={16} />
+						<span>记忆</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "activity" || activeView === "git" ? "active" : ""}`}
+						onClick={() => onNavigate("activity")}
+					>
+						<Clock3 size={16} />
+						<span>活动</span>
+					</div>
+					<div
+						className={`pa-nav-item ${activeView === "agent" ? "active" : ""}`}
+						onClick={() => onNavigate("agent")}
+					>
+						<Shield size={16} />
+						<span>智能体</span>
+					</div>
+				</nav>
+
+				{/* Scrollable Project and Conversation Sections */}
+				<div className="pa-sidebar-scroll">
+					{/* 1. Projects Section (项目工程) */}
+					<div className="pa-sidebar-section">
+						<div className="pa-section-header">
+							<span className="pa-section-title">项目工程 ({spaces.length})</span>
 							<button
 								type="button"
-								className="reference-toggle-sidebar-btn"
-								title={sidebarOpen === false ? "展开侧边栏 (⌘B)" : "收起侧边栏 (⌘B)"}
-								aria-label={sidebarOpen === false ? "展开侧边栏" : "收起侧边栏"}
-								onClick={onToggleSidebar}
+								className="pa-section-action-btn"
+								title="选择或打开其他项目工程"
+								aria-label="选择或打开其他项目工程"
+								onClick={() => void selectProject()}
 							>
-								{sidebarOpen === false ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+								<FolderPlus size={13} />
 							</button>
 						</div>
-					)}
-				</header>
-				<label className="reference-search">
-					<Search size={14} />
-					<input
-						placeholder="搜索对话或项目 (⌘K)"
-						value={sidebarSearch ?? ""}
-						onChange={(e) => setSidebarSearch(e.target.value)}
-					/>
-					<kbd>⌘K</kbd>
-				</label>
-				<div className="reference-sidebar-content">
-					<div className="reference-nav-bar">
-						<button
-							type="button"
-							className={`reference-nav-item ${activeView === "git" ? "active" : ""}`}
-							title="版本管理 (Git 变更与差异对比)"
-							onClick={onOpenGit || (() => onNavigate("git"))}
-						>
-							<GitBranch size={14} />
-							<span>版本管理</span>
-							{Boolean(gitStatus?.files?.length) && gitStatus?.files && (
-								<span className="reference-nav-count">{gitStatus.files.length}</span>
-							)}
-						</button>
-						<button
-							type="button"
-							className={`reference-nav-item ${activeView === "memory" ? "active" : ""}`}
-							title="长期记忆库"
-							onClick={() => onNavigate("memory")}
-						>
-							<BookOpen size={14} />
-							<span>长期记忆</span>
-							{memoryCount > 0 && <span className="reference-nav-count">{memoryCount}</span>}
-						</button>
-						<button
-							type="button"
-							className={`reference-nav-item ${activeView === "tasks" ? "active" : ""}`}
-							title="自动化定时任务"
-							onClick={() => onNavigate("tasks")}
-						>
-							<ListTodo size={14} />
-							<span>定时任务</span>
-						</button>
-					</div>
-
-					<div className="reference-label">
-						<span>项目工程</span>
-						<div className="reference-section-actions">
-							<button type="button" title="选择项目" aria-label="选择项目" onClick={() => void selectProject()}>
-								<FolderPlus size={14} />
-							</button>
-						</div>
-					</div>
-					<div className={`reference-spaces ${showAllSpaces ? "expanded" : ""}`} ref={projectList}>
-						{spaces.map(([cwd, spaceInstances]) => {
-							const isCollapsed = Boolean(collapsedProjects[cwd]);
-							const isProjectActive = spaceInstances.some((instance) => instance.id === selectedInstanceId);
-							const isSpaceSelected = isProjectActive && isCollapsed;
-							return (
-								<div className="reference-project-group" key={cwd}>
-									<div className={`reference-space ${isSpaceSelected ? "selected" : ""}`}>
-										<button
-											type="button"
-											className="reference-project-toggle"
-											title={isCollapsed ? "展开会话" : "收起会话"}
-											aria-label={isCollapsed ? "展开会话" : "收起会话"}
-											onClick={(e) => toggleProjectCollapsed(cwd, e)}
-										>
-											{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-										</button>
-										<button
-											type="button"
-											className="reference-project-select"
-											onClick={() =>
-												onOpenProject(
-													spaceInstances.find((instance) => instance.id === selectedInstanceId)?.id ??
-														spaceInstances[0].id,
-												)
-											}
-										>
-											<span className="reference-folder">
-												<Folder size={14} />
-											</span>
-											<span className="reference-project-meta">
-												<strong>{cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd}</strong>
-												<small>{shortWorkspacePath(cwd)}</small>
-											</span>
-										</button>
-										<div className="reference-project-actions">
+						<div className="pa-project-list" ref={projectList}>
+							{spaces.map(([cwd, spaceInstances]) => {
+								const isCollapsed = Boolean(collapsedProjects[cwd]);
+								const projectName = cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd;
+								const isProjectActive = spaceInstances.some((instance) => instance.id === selectedInstanceId);
+								return (
+									<div className={`pa-project-group ${isProjectActive ? "project-active" : ""}`} key={cwd}>
+										<div className="pa-project-row">
 											<button
 												type="button"
-												className="reference-project-new-session"
-												title="在此项目中新建 Code 会话"
-												aria-label="在此项目中新建 Code 会话"
-												onClick={(e) => {
-													e.stopPropagation();
-													onNewProjectSession(cwd);
+												className="pa-project-toggle-btn"
+												title={isCollapsed ? "展开项目会话" : "收起项目会话"}
+												onClick={(e) => toggleProjectCollapsed(cwd, e)}
+											>
+												{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+											</button>
+											<div
+												className="pa-project-meta"
+												title={cwd}
+												onClick={() => {
+													const targetInstance =
+														spaceInstances.find((instance) => instance.id === selectedInstanceId) ??
+														spaceInstances[0];
+													if (targetInstance) onOpenProject(targetInstance.id);
 												}}
 											>
-												<Plus size={13} />
-											</button>
-											<Popover>
-												<PopoverTrigger asChild>
-													<button
-														type="button"
-														className="reference-project-more"
-														title="项目操作"
-														aria-label="项目操作"
-													>
-														<MoreHorizontal size={14} />
-													</button>
-												</PopoverTrigger>
-												<PopoverContent className="reference-project-menu" align="end">
-													<span className="reference-menu-label">项目</span>
-													<button
-														type="button"
-														onClick={() =>
-															onOpenProject(
-																spaceInstances.find((instance) => instance.id === selectedInstanceId)
-																	?.id ?? spaceInstances[0].id,
-															)
-														}
-													>
-														<Folder size={14} /> 打开项目
-													</button>
-													<button type="button" onClick={() => onNewProjectSession(cwd)}>
-														<Plus size={14} /> 新建 Code 会话
-													</button>
-													<div className="reference-menu-divider" />
-													<button type="button" onClick={() => void selectProject()}>
-														<FolderPlus size={14} /> 选择其他项目
-													</button>
-													<button
-														type="button"
-														className="danger"
-														onClick={() => {
-															const projectName = cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd;
-															onRemoveProject?.({
-																cwd,
-																projectName,
-																sessionCount: spaceInstances.length,
-																instances: spaceInstances,
-															});
-														}}
-													>
-														<FolderMinus size={14} /> 移除项目
-													</button>
-												</PopoverContent>
-											</Popover>
+												<Folder size={13} className="pa-project-folder-icon" />
+												<span className="pa-project-name">{projectName}</span>
+											</div>
+											<div className="pa-project-row-actions">
+												<button
+													type="button"
+													className="pa-project-add-session-btn"
+													title="新建此项目会话"
+													onClick={(e) => {
+														e.stopPropagation();
+														onNewProjectSession(cwd);
+													}}
+												>
+													<Plus size={11} />
+												</button>
+											</div>
 										</div>
-									</div>
-									{!isCollapsed && (
-										<div className="reference-project-sessions">
-											{spaceInstances.map((instance) => {
-												const isSelected = instance.id === selectedInstanceId;
-												return (
-													<div
-														className={`reference-project-session-row ${isSelected ? "selected" : ""}`}
-														key={instance.id}
-													>
-														<button
-															type="button"
-															className={`reference-project-session-item ${isSelected ? "selected" : ""}`}
+
+										{!isCollapsed && (
+											<div className="pa-project-sessions">
+												{spaceInstances.map((instance) => {
+													const isSelected = instance.id === selectedInstanceId;
+													const sessionTitle = instanceTitle(instance, conversationTitles[instance.id]);
+													return (
+														<div
+															key={instance.id}
+															className={`pa-project-session-item ${isSelected ? "active" : ""}`}
 															onClick={() => {
-																if (instance.id === selectedInstanceId) {
-																	scrollToBottom(true);
-																}
+																if (instance.id === selectedInstanceId) scrollToBottom(true);
 																onOpenProject(instance.id);
 															}}
 														>
-															<MessageSquare size={12} className="reference-session-icon" />
-															<span className="reference-session-title">
-																{instanceTitle(instance, conversationTitles[instance.id])}
-															</span>
-															{instance.status === "online" && <span className="instance-active-dot" />}
-														</button>
-														<div className="reference-session-actions">
-															<button
-																type="button"
-																title="重命名"
-																aria-label="重命名"
-																onClick={(e) => {
-																	e.stopPropagation();
-																	onRenameConversation?.(instance);
-																}}
-															>
-																<Pencil size={12} />
-															</button>
-															<button
-																type="button"
-																className="danger"
-																title="删除"
-																aria-label="删除"
-																onClick={(e) => {
-																	e.stopPropagation();
-																	onDeleteConversation?.(instance);
-																}}
-															>
-																<Trash2 size={12} />
-															</button>
+															<div className="pa-session-item-left">
+																<MessageSquare size={12} className="pa-session-icon" />
+																{isSelected && <span className="pa-active-dot" />}
+																<span title={sessionTitle}>{sessionTitle}</span>
+															</div>
+															<div className="pa-recent-actions">
+																<button
+																	type="button"
+																	className="pa-item-action-btn"
+																	title="重命名"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		onRenameConversation?.(instance);
+																	}}
+																>
+																	<Pencil size={11} />
+																</button>
+																<button
+																	type="button"
+																	className="pa-item-action-btn danger"
+																	title="删除"
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		onDeleteConversation?.(instance);
+																	}}
+																>
+																	<Trash2 size={11} />
+																</button>
+															</div>
 														</div>
-													</div>
-												);
-											})}
-										</div>
-									)}
-								</div>
-							);
-						})}
-					</div>
-					{projectsOverflow && (
-						<button type="button" className="reference-more" onClick={() => setShowAllSpaces((value) => !value)}>
-							{showAllSpaces ? "收起项目" : "显示全部项目"} <ChevronRight size={14} />
-						</button>
-					)}
-					<div className="reference-label recent">
-						<span>最近会话</span>
-						<span className="reference-label-count">({filteredChats.length})</span>
-						<button
-							type="button"
-							title="新建会话"
-							aria-label="新建会话"
-							onClick={() => {
-								onNewConversation();
-								draftInput.current?.focus();
-							}}
-						>
-							<Plus size={14} />
-						</button>
-					</div>
-					<div className={`reference-sessions reference-session-grouped-list ${showAllSessions ? "expanded" : ""}`} ref={chatList}>
-						{chatGroups.map((group) => (
-							<div className="sidebar-date-group" key={group.key}>
-								<div className="sidebar-date-group-header">
-									<span>{group.title}</span>
-								</div>
-								<div className="sidebar-date-group-items">
-									{group.items.map((instance) => {
-										const isSelected = instance.id === selectedInstanceId;
-										const timeStr = formatConversationTime(instance.lastSeenAt || instance.createdAt);
-										return (
-											<div
-												className={`reference-session-row ${isSelected ? "selected" : ""}`}
-												key={instance.id}
-											>
-												<button
-													type="button"
-													className="reference-session-select"
-													onClick={() => {
-														if (instance.id === selectedInstanceId) {
-															scrollToBottom(true);
-														}
-														onSelectConversation(instance.id);
-													}}
-												>
-													<div className="reference-session-icon-wrap">
-														<MessageSquare size={13} className="reference-session-icon" />
-														{instance.status === "online" && <span className="instance-active-dot" />}
-													</div>
-													<span className="reference-session-title">
-														{instanceTitle(instance, conversationTitles[instance.id])}
-													</span>
-													{timeStr && <span className="reference-session-time">{timeStr}</span>}
-												</button>
-												<div className="reference-session-actions">
-													<button
-														type="button"
-														title="重命名"
-														aria-label="重命名"
-														onClick={(e) => {
-															e.stopPropagation();
-															onRenameConversation?.(instance);
-														}}
-													>
-														<Pencil size={12} />
-													</button>
-													<button
-														type="button"
-														className="danger"
-														title="删除"
-														aria-label="删除"
-														onClick={(e) => {
-															e.stopPropagation();
-															onDeleteConversation?.(instance);
-														}}
-													>
-														<Trash2 size={12} />
-													</button>
-												</div>
+													);
+												})}
 											</div>
-										);
-									})}
-								</div>
-							</div>
-						))}
-						{filteredChats.length === 0 && (
-							<div className="sidebar-inline-empty">
-								{sidebarSearch ? "没有匹配的会话" : "还没有对话"}
-							</div>
-						)}
+										)}
+									</div>
+								);
+							})}
+							{spaces.length === 0 && (
+								<div className="pa-empty-hint">暂无项目</div>
+							)}
+						</div>
+					</div>
+
+					{/* 2. Conversations Section (最近会话) */}
+					<div className="pa-sidebar-section">
+						<div className="pa-section-header">
+							<span className="pa-section-title">最近会话 ({filteredChats.length})</span>
+							<button
+								type="button"
+								className="pa-section-action-btn"
+								title="新建通用会话"
+								aria-label="新建通用会话"
+								onClick={() => {
+									onNewConversation();
+									draftInput.current?.focus();
+								}}
+							>
+								<Plus size={13} />
+							</button>
+						</div>
+						<div className="pa-recent-list" ref={chatList}>
+							{filteredChats.map((instance) => {
+								const isSelected = instance.id === selectedInstanceId;
+								const titleText = instanceTitle(instance, conversationTitles[instance.id]);
+								return (
+									<div
+										key={instance.id}
+										className={`pa-recent-item ${isSelected ? "active" : ""}`}
+										onClick={() => {
+											if (instance.id === selectedInstanceId) {
+												scrollToBottom(true);
+											}
+											onSelectConversation(instance.id);
+										}}
+									>
+										<div className="pa-recent-item-left">
+											<MessageSquare size={12} className="pa-session-icon" />
+											{isSelected && <span className="pa-active-dot" />}
+											<span title={titleText}>{titleText}</span>
+										</div>
+										<div className="pa-recent-actions">
+											<button
+												type="button"
+												className="pa-item-action-btn"
+												title="重命名"
+												onClick={(e) => {
+													e.stopPropagation();
+													onRenameConversation?.(instance);
+												}}
+											>
+												<Pencil size={11} />
+											</button>
+											<button
+												type="button"
+												className="pa-item-action-btn danger"
+												title="删除"
+												onClick={(e) => {
+													e.stopPropagation();
+													onDeleteConversation?.(instance);
+												}}
+											>
+												<Trash2 size={11} />
+											</button>
+										</div>
+									</div>
+								);
+							})}
+							{filteredChats.length === 0 && (
+								<div className="pa-empty-hint">暂无会话</div>
+							)}
+						</div>
 					</div>
 				</div>
-				<footer className="reference-account">
-					<button
-						type="button"
-						className="reference-account-user-trigger"
-						title="打开账户中心 (Supabase 登录与个人档案)"
-						aria-label="打开账户中心"
-						onClick={onOpenAccount}
-					>
-						<span className="reference-avatar">
-							{(userProfile?.avatarUrl || supabaseUser?.user_metadata?.avatar_url || supabaseUser?.user_metadata?.picture) ? (
-								<img
-									src={userProfile?.avatarUrl || supabaseUser?.user_metadata?.avatar_url || supabaseUser?.user_metadata?.picture}
-									alt={userProfile?.nickname || "Avatar"}
-									onError={(e) => {
-										(e.currentTarget as HTMLElement).style.display = "none";
-									}}
-								/>
-							) : null}
-							<span>
-								{userProfile?.avatarEmoji || (userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email[0].toUpperCase() : "U"))}
-							</span>
-						</span>
-						<strong>{userProfile?.nickname || (supabaseUser?.email ? supabaseUser.email.split("@")[0] : "用户")}</strong>
-						<em>{supabaseUser ? "云端" : "单机"}</em>
-					</button>
-					<div className="reference-account-actions">
+
+				{/* User Profile Footer */}
+				<Popover>
+					<PopoverTrigger asChild>
+						<div className="pa-profile-footer" title="点击打开个人画像与系统设置">
+							<div className="pa-profile-left">
+								<div className="pa-profile-avatar">
+									<img src="/assets/jane-avatar.jpg" alt="简华安" />
+								</div>
+								<span className="pa-profile-name">{userProfile?.nickname || "简华安"}</span>
+							</div>
+							<ChevronRight size={14} color="var(--text-tertiary)" />
+						</div>
+					</PopoverTrigger>
+					<PopoverContent className="today-os-profile-popover" side="top" align="start">
+						<div className="today-os-profile-popover-header">
+							<div className="today-os-popover-avatar">
+								<img src="/assets/jane-avatar.jpg" alt="简华安" />
+							</div>
+							<div>
+								<div className="today-os-popover-name">{userProfile?.nickname || "简华安"}</div>
+								<div className="today-os-popover-desc">OpenPI 个人助理 · 在线</div>
+							</div>
+						</div>
+						<div className="today-os-profile-popover-divider" />
 						<button
 							type="button"
-							className="reference-account-btn"
-							title={effectiveMode === "dark" ? "切换浅色模式 (⌘⇧T)" : "切换深色模式 (⌘⇧T)"}
-							aria-label="切换主题"
-							onClick={toggleTheme}
+							className="today-os-popover-item"
+							onClick={onOpenAccount}
 						>
-							{effectiveMode === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+							<User size={14} />
+							<span>个人画像与档案</span>
 						</button>
 						<button
 							type="button"
-							className={`reference-account-btn ${activeView === "git" ? "active" : ""}`}
-							title="版本管理 (Git)"
-							aria-label="版本管理"
-							onClick={onOpenGit || (() => onNavigate("git"))}
-						>
-							<GitBranch size={15} />
-						</button>
-						<button
-							type="button"
-							className={`reference-account-btn ${activeView === "capabilities" ? "active" : ""}`}
-							title="设置"
-							aria-label="设置"
+							className="today-os-popover-item"
 							onClick={onOpenSettings}
 						>
-							<Wrench size={15} />
+							<Settings size={14} />
+							<span>系统与模型设置</span>
 						</button>
-					</div>
-				</footer>
+						<button
+							type="button"
+							className="today-os-popover-item"
+							onClick={() => onNavigate("memory")}
+						>
+							<BookOpen size={14} />
+							<span>长期记忆中枢</span>
+						</button>
+					</PopoverContent>
+				</Popover>
 			</aside>
 
 			<main className="reference-main">
@@ -2015,196 +2142,83 @@ export function ReferenceWorkspacePreview({
 					</div>
 				) : (
 					<>
-				<header className="reference-main-header" data-tauri-drag-region>
-					<div className="reference-title">
-						{sidebarOpen === false && onToggleSidebar && (
-							<button
-								type="button"
-								className="reference-header-icon-btn reference-toggle-sidebar"
-								title="展开侧边栏 (⌘B)"
-								aria-label="展开侧边栏"
-								onClick={onToggleSidebar}
-							>
-								<PanelLeftOpen size={16} />
-							</button>
-						)}
-						<span className="reference-title-folder">
-							<Folder size={17} />
-						</span>
-						<div>
-							<h1>
-								{title}
-								{Boolean(selectedInstance || conversation) && (
-									<button
-										type="button"
-										className="reference-title-rename-btn"
-										title="重命名会话"
-										aria-label="重命名会话"
-										onClick={() => onRenameConversation?.(selectedInstance ?? conversation?.instance)}
-									>
-										<Pencil size={13} />
-									</button>
-								)}
-							</h1>
-							{(appMode === "code" || conversation?.instance.mode === "code") && (
-								<Popover>
-									<PopoverTrigger asChild>
-										<button
-											type="button"
-											className="reference-workspace-chip"
-											title="点击切换会话关联的工作区"
-										>
-											<Folder size={12} className="reference-ws-icon" />
-											<span>{workspace ? `${shortWorkspacePath(workspace)} 工作区` : "未关联工作区"}</span>
-											<ChevronDown size={11} className="reference-chip-arrow" />
-										</button>
-									</PopoverTrigger>
-									<PopoverContent className="reference-project-menu reference-workspace-menu" align="start">
-										<span className="reference-menu-label">会话工作区</span>
-										{spaces.length > 0 && (
-											<>
-												{spaces.map(([cwd]) => {
-													const isSelected = cwd === workspace;
-													const projectName = cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? cwd;
-													return (
-														<button
-															key={cwd}
-															type="button"
-															className={`reference-menu-ws-item ${isSelected ? "active" : ""}`}
-															onClick={() => onSwitchWorkspace?.(cwd)}
-														>
-															<Folder size={14} />
-															<span className="reference-ws-item-labels">
-																<span className="reference-ws-name">{projectName}</span>
-																<small className="reference-ws-path">{shortWorkspacePath(cwd)}</small>
-															</span>
-															{isSelected && <Check size={14} className="reference-ws-check" />}
-														</button>
-													);
-												})}
-												<div className="reference-menu-divider" />
-											</>
-										)}
-										<button
-											type="button"
-											onClick={async () => {
-												const picked = await desktopApi.selectWorkspace(workspace);
-												if (picked) {
-													onSwitchWorkspace?.(picked);
-												}
-											}}
-										>
-											<FolderPlus size={14} /> 打开其他本地文件夹…
-										</button>
-										{workspace && (
-											<button
-												type="button"
-												className="danger"
-												onClick={() => onSwitchWorkspace?.(undefined)}
-											>
-												<FolderMinus size={14} /> 脱离工作区 (独立通用会话)
-											</button>
-										)}
-									</PopoverContent>
-								</Popover>
-							)}
+						{/* dots 式常驻 Agent 形象（问候 + 实时状态 + 最近活动） */}
+						<div className="pa-presence-wrap">
+							<AgentPresenceCard
+								agentName="OpenPI"
+								status={agentStatus}
+								detail={agentStatusDetail}
+								weather="26°C 新加坡"
+								dateText={formattedDateTime}
+								activity={agentActivity}
+								bubble={agentBubble}
+							/>
+						</div>
+
+				{/* 今天的重点 */}
+				<div className={`pa-focus-container${headCollapsed ? " collapsed" : ""}`}>
+					<div className="pa-focus-header">
+						<Sparkles size={14} color="var(--accent)" />
+						<span>今天的重点</span>
+						<span className="pa-focus-summary">OpenPI 架构改造 72% · 2 项待办</span>
+					</div>
+					<div className="pa-focus-cards">
+						<div
+							className="pa-focus-card"
+							onClick={() => {
+								setDraft("推进主线目标【OpenPI 架构改造】的下一步计划。");
+								draftInput.current?.focus();
+							}}
+						>
+							<div className="pa-focus-card-top">
+								<div className="pa-focus-card-title-row">
+									<span className="pa-focus-dot blue" />
+									<span>OpenPI 架构改造</span>
+								</div>
+								<ChevronRight size={13} color="#94a3b8" />
+							</div>
+							<div className="pa-focus-card-body">
+								已完成 72% · 下一步: 熔断器模型
+							</div>
+						</div>
+
+						<div
+							className="pa-focus-card"
+							onClick={() => onNavigate("activity")}
+						>
+							<div className="pa-focus-card-top">
+								<div className="pa-focus-card-title-row">
+									<span className="pa-focus-dot green" />
+									<span>2 个任务已完成</span>
+								</div>
+								<Check size={13} color="#10b981" />
+							</div>
+							<div className="pa-focus-card-body">
+								构建检查通过 · 测试全绿
+							</div>
+						</div>
+
+						<div
+							className="pa-focus-card"
+							onClick={() => {
+								setDraft("请展示需要我确认的决策方案。");
+								draftInput.current?.focus();
+							}}
+						>
+							<div className="pa-focus-card-top">
+								<div className="pa-focus-card-title-row">
+									<span className="pa-focus-dot orange" />
+									<span>需要你确认</span>
+								</div>
+								<AlertCircle size={13} color="#f59e0b" />
+							</div>
+							<div className="pa-focus-card-body">
+								决策待裁决: 熔断降级策略
+							</div>
 						</div>
 					</div>
-					<div className="reference-header-actions">
-						{conversation?.state?.isStreaming && (
-							<span className="reference-streaming-badge">
-								<RefreshCw size={12} className="spin" />
-								<span>处理中…</span>
-							</span>
-						)}
-						<button
-							type="button"
-							className="reference-header-icon-btn"
-							title="导出为 Markdown (⌘⇧E)"
-							aria-label="导出为 Markdown"
-							disabled={!conversation}
-							onClick={onExportConversation}
-						>
-							<Download size={16} />
-						</button>
-						<button
-							type="button"
-							className={`reference-header-icon-btn ${livePreviewOpen ? "active" : ""}`}
-							title={livePreviewOpen ? "隐藏实时预览沙箱" : "打开实时预览沙箱 (HTML/Web)"}
-							aria-label="切换实时预览沙箱"
-							onClick={() => setLivePreviewOpen((prev) => !prev)}
-						>
-							<Globe size={16} />
-						</button>
-						<button
-							type="button"
-							className={`reference-header-icon-btn ${swarmCanvasOpen ? "active" : ""}`}
-							title={swarmCanvasOpen ? "隐藏多智能体协同泳道" : "打开多智能体协同泳道 (Swarm Canvas)"}
-							aria-label="切换多智能体协同泳道"
-							onClick={() => setSwarmCanvasOpen((prev) => !prev)}
-						>
-							<Users size={16} />
-						</button>
-						<button
-							type="button"
-							className={`reference-header-icon-btn ${contextPanelOpen ? "active" : ""}`}
-							title={contextPanelOpen ? "隐藏上下文面板 (⌘I)" : "显示上下文面板 (⌘I)"}
-							aria-label="切换上下文面板"
-							onClick={() => setContextPanelOpen((prev) => !prev)}
-						>
-							<PanelRight size={16} />
-						</button>
-						<Popover>
-							<PopoverTrigger asChild>
-								<button type="button" className="reference-header-icon-btn" title="更多操作" aria-label="更多操作">
-									<MoreHorizontal size={16} />
-								</button>
-							</PopoverTrigger>
-							<PopoverContent className="reference-header-menu" align="end">
-								<span className="reference-menu-label">快捷导航</span>
-								<button type="button" onClick={onOpenGit || (() => onNavigate("git"))}>
-									<GitBranch size={14} /> 版本管理 (Git)
-								</button>
-								<button type="button" onClick={() => onNavigate("memory")}>
-									<BookOpen size={14} /> 长期记忆库
-								</button>
-								<button type="button" onClick={() => onNavigate("tasks")}>
-									<ListTodo size={14} /> 定时任务
-								</button>
-								<button type="button" onClick={() => onNavigate("intelligence")}>
-									<BrainCircuit size={14} /> 智能规划与记录
-								</button>
-								<button type="button" onClick={() => onNavigate("daemon")}>
-									<Server size={14} /> 守护进程与服务
-								</button>
-								<button type="button" onClick={onOpenSettings}>
-									<Wrench size={14} /> 系统设置与模型
-								</button>
-								<div className="reference-menu-divider" />
-								<span className="reference-menu-label">会话操作</span>
-								<button
-									type="button"
-									disabled={!conversation}
-									onClick={() => onRenameConversation?.(selectedInstance ?? conversation?.instance)}
-								>
-									<Pencil size={14} /> 重命名会话
-								</button>
-								<button type="button" disabled={!conversation} onClick={onExportConversation}>
-									<Download size={14} /> 导出 Markdown
-								</button>
-								<div className="reference-menu-divider" />
-								<button
-									type="button"
-									className="danger"
-									disabled={!conversation}
-									onClick={() => onDeleteConversation?.(selectedInstance ?? conversation?.instance)}
-								>
-									<Trash2 size={14} /> 删除会话
-								</button>
-							</PopoverContent>
-						</Popover>
-					</div>
-				</header>
+				</div>
+
 				<div className="workspace-preview-split-container">
 					<div className="workspace-preview-chat-pane">
 						<section className="reference-feed" ref={feedScroll} onScroll={handleFeedScroll} onWheel={handleFeedWheel}>
@@ -2219,47 +2233,21 @@ export function ReferenceWorkspacePreview({
 									<h2>开启新对话</h2>
 									<p>输入提示词并发送以启动对话，支持代码编辑、多轮推理与本地工具调用。</p>
 								</div>
-								<div className="reference-draft-quickstarts">
-									<button
-										type="button"
-										className="reference-draft-chip"
-										onClick={() => {
-											setDraft("帮我检查当前项目的代码结构并提出优化建议");
-											draftInput.current?.focus();
-										}}
-									>
-										<span className="reference-chip-icon">🔍</span>
-										<span>审查项目架构</span>
-									</button>
-									<button
-										type="button"
-										className="reference-draft-chip"
-										onClick={() => {
-											setDraft("编写一个单元测试来覆盖核心逻辑");
-											draftInput.current?.focus();
-										}}
-									>
-										<span className="reference-chip-icon">🧪</span>
-										<span>编写单元测试</span>
-									</button>
-									<button
-										type="button"
-										className="reference-draft-chip"
-										onClick={() => {
-											setDraft("解释当前项目的构建与打包配置流程");
-											draftInput.current?.focus();
-										}}
-									>
-										<span className="reference-chip-icon">📦</span>
-										<span>构建与打包解析</span>
-									</button>
-								</div>
 							</div>
 						)}
 						{feedItems.map((item) => {
 							if (item.kind === "user") {
 								const text = visibleMessageText(contentText(item.message.content));
 								const images = contentImages(item.message.content);
+								const isEphemeral = text.includes("Ephemeral Subagent Directive") || text.startsWith("【Ephemeral");
+								let directiveRole = "";
+								let directiveObjective = "";
+								if (isEphemeral) {
+									const roleMatch = text.match(/(?:Role|角色)[:：]\s*([^\n\r]+)/i);
+									const objMatch = text.match(/(?:Objective|目标)[:：]\s*([^\n\r.]+)/i);
+									directiveRole = roleMatch ? roleMatch[1].trim() : "独立评审员";
+									directiveObjective = objMatch ? objMatch[1].trim() : "执行独立后台子任务";
+								}
 								return (
 									<Fragment key={`${item.message.timestamp ?? "untimed"}-user-${item.index}`}>
 										{item.turnNumber > 1 && (
@@ -2269,20 +2257,36 @@ export function ReferenceWorkspacePreview({
 										)}
 										<div className="reference-message-row user">
 											<div className="reference-user-bubble-wrapper">
-												{text && (
+												{text && !isEphemeral && (
 													<UserMessageActions text={text} onRemember={onRemember} />
 												)}
-												<div
-													className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""} ${!text && images.length > 0 ? "image-only" : ""}`}
-												>
-													{text && <p>{text}</p>}
-													{hasVisionContext(item.message.content) && (
-														<span className="reference-vision-badge">
-															<ImageIcon size={12} /> GLM-4.6V 视觉解析
-														</span>
-													)}
-													{images.length > 0 && <MessageImages images={images} />}
-												</div>
+												{isEphemeral ? (
+													<div className="reference-user-card ephemeral-directive-card">
+														<div className="ephemeral-directive-header">
+															<span className="ephemeral-directive-tag">🤖 后台自主子智能体指令</span>
+															{directiveRole && <span className="ephemeral-directive-role">{directiveRole}</span>}
+														</div>
+														<div className="ephemeral-directive-objective">
+															<strong>核心任务：</strong>{directiveObjective}
+														</div>
+														<details className="ephemeral-directive-details">
+															<summary>查看详细提示词规范</summary>
+															<div className="ephemeral-directive-content">{text}</div>
+														</details>
+													</div>
+												) : (
+													<div
+														className={`reference-user-card ${item.message === optimisticMessage ? "pending" : ""} ${!text && images.length > 0 ? "image-only" : ""}`}
+													>
+														{text && <p>{text}</p>}
+														{hasVisionContext(item.message.content) && (
+															<span className="reference-vision-badge">
+																<ImageIcon size={12} /> GLM-4.6V 视觉解析
+															</span>
+														)}
+														{images.length > 0 && <MessageImages images={images} />}
+													</div>
+												)}
 											</div>
 										</div>
 									</Fragment>
@@ -2295,6 +2299,18 @@ export function ReferenceWorkspacePreview({
 								return (
 									<div className="reference-message-row actions" key={item.id}>
 										<div className="reference-activity-chain-wrap">
+											{isWorking && isLastActions && (
+												<AgentWorkingActivityCard
+													goal={activeGoal.title}
+													intent="根据长程目标推演架构约束，调度受控执行网关"
+													decision="保持 Execution Core 零污染，通过统一安全网关分发执行"
+													activities={[
+														{ title: "检查网关预算与超时限额 (≤60s)", status: "completed" },
+														{ title: "执行代码分析与上下文巡检", status: runningTools.length > 0 ? "running" : "completed" },
+														{ title: "双盲质量评审与不变量校验", status: "pending" },
+													]}
+												/>
+											)}
 											{item.reasoning && (
 												<ReasoningBlock reasoning={item.reasoning} isWorking={isWorking && isLastActions} />
 											)}
@@ -2313,11 +2329,22 @@ export function ReferenceWorkspacePreview({
 
 							if (item.kind === "assistant") {
 								const text = visibleMessageText(contentText(item.message.content));
+								const outcome = !isWorking ? parseAgentOutcome(text) : null;
+								const briefParsed = !outcome && !isWorking ? parseAnswerBrief(text) : null;
 								return (
 									<div className="reference-message-row assistant" key={`${item.message.timestamp ?? "untimed"}-assistant-${item.index}`}>
 										<div
 											className={`reference-assistant-card ${item.message === optimisticMessage ? "pending" : ""}`}
 										>
+											<div className="agent-identity-meta-bar" style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+												<div style={{ width: "20px", height: "20px", borderRadius: "5px", background: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+													<Zap size={12} />
+												</div>
+												<span style={{ fontSize: "12px", fontWeight: 600, color: "#f8fafc" }}>OpenPI Personal Agent</span>
+												<span style={{ fontSize: "10.5px", padding: "1px 6px", borderRadius: "4px", background: "rgba(255, 255, 255, 0.05)", color: "#94a3b8" }}>
+													{currentModel?.name || "DeepSeek V4.1 Flash"}
+												</span>
+											</div>
 											{item.message.recalledMemories && item.message.recalledMemories.length > 0 && (
 												<div className="reference-memory-recall-row">
 													<span
@@ -2343,9 +2370,43 @@ export function ReferenceWorkspacePreview({
 												/>
 											)}
 											{text ? (
-												<div className="reference-assistant-message">
-													<MarkdownText text={text} streaming={isWorking && item.isLastAssistantMessage} />
-												</div>
+												(() => {
+													const parsed = outcome;
+													if (parsed) {
+														return (
+															<div className="reference-assistant-message">
+																<AgentOutcomeCard
+																	outcome={parsed}
+																	onActionRun={(actionText) => {
+																		setDraft(actionText);
+																		draftInput.current?.focus();
+																	}}
+																	onDecisionChoose={(decisionText) => {
+																		void onSend(decisionText, [], []);
+																	}}
+																/>
+															</div>
+														);
+													}
+													if (briefParsed) {
+														return (
+															<div className="reference-assistant-message">
+																<AnswerBriefCard
+																	brief={briefParsed}
+																	onSuggestion={(s) => {
+																		setDraft(s);
+																		draftInput.current?.focus();
+																	}}
+																/>
+															</div>
+														);
+													}
+													return (
+														<div className="reference-assistant-message">
+															<MarkdownText text={text} streaming={isWorking && item.isLastAssistantMessage} />
+														</div>
+													);
+												})()
 											) : isWorking && item.isLastAssistantMessage && !item.message.errorMessage ? (
 												<div className="reference-streaming-indicator" aria-label="OpenPI 正在组织回复">
 													<span />
@@ -2362,6 +2423,7 @@ export function ReferenceWorkspacePreview({
 											)}
 											{item.isLatestAssistant && (
 												<ClaudeCodeRecapCard
+													suppressRecap={Boolean(outcome || briefParsed)}
 													message={item.message}
 													lastUserPrompt={lastUserPrompt}
 													todoState={todoState}
@@ -2565,11 +2627,7 @@ export function ReferenceWorkspacePreview({
 					)}
 					<textarea
 						ref={draftInput}
-						placeholder={
-							appMode === "code" || conversation?.instance.mode === "code"
-								? "输入研发任务，智能体将自主编码、全维巡检并自愈直到完全通过 (⌘Enter 发送，Enter 换行)..."
-								: "发送消息给 OpenPI (⌘Enter 发送，Enter 换行)，或输入 / 查看命令…"
-						}
+						placeholder="有什么可以帮你的吗？"
 						rows={1}
 						value={draft ?? ""}
 						onChange={(event) => setDraft(event.target.value)}
@@ -2633,8 +2691,8 @@ export function ReferenceWorkspacePreview({
 							<ImageIcon size={12} /> 将由 GLM-4.6V-Flash 解析图片
 						</p>
 					)}
-					<div className="reference-composer-toolbar">
-						<div className="reference-composer-primary">
+					<div className="reference-composer-toolbar today-os-dock-tools-row">
+						<div className="reference-composer-primary today-os-dock-tools-left">
 							<input
 								ref={attachmentInput}
 								type="file"
@@ -2646,23 +2704,54 @@ export function ReferenceWorkspacePreview({
 									event.target.value = "";
 								}}
 							/>
+							{workspace && relatedFiles.length > 0 && (
+								<Popover open={contextPickerOpen} onOpenChange={setContextPickerOpen}>
+									<PopoverTrigger asChild>
+										<button
+											type="button"
+											className="today-os-icon-btn"
+											title="选择工作区文件 (@)"
+											aria-label="选择工作区文件"
+										>
+											@
+										</button>
+									</PopoverTrigger>
+									<PopoverContent className="reference-file-picker" side="top" align="start">
+										<Command label="选择工作区文件" loop>
+											<CommandInput placeholder="搜索项目文件" />
+											<CommandList>
+												<CommandEmpty>没有可用的工作区文件</CommandEmpty>
+												<CommandGroup heading="工作区文件">
+													{relatedFiles.map((path) => (
+														<CommandItem
+															key={path}
+															value={path}
+															onSelect={() => void addWorkspaceFile(path)}
+														>
+															<FileText size={14} />
+															<span>{path}</span>
+														</CommandItem>
+													))}
+												</CommandGroup>
+											</CommandList>
+										</Command>
+									</PopoverContent>
+								</Popover>
+							)}
 							<button
 								type="button"
-								className="reference-composer-icon"
+								className="today-os-icon-btn"
 								title="附加图片或文档"
 								aria-label="附加图片或文档"
 								onClick={() => attachmentInput.current?.click()}
 							>
-								<Paperclip size={15} />
+								<Paperclip size={14} />
 							</button>
 							<Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
 								<PopoverTrigger asChild>
-									<button
-										type="button"
-										className="reference-model-control"
-										disabled={configuring || loadingModels || modelOptions.length === 0}
-									>
-										<span className="reference-model-name">
+									<div className="today-os-dock-model-pill" style={{ cursor: "pointer" }}>
+										<Zap size={11} color="#f97316" />
+										<span>
 											{shortModelName(
 												currentModel?.name ??
 													conversation?.state?.model?.name ??
@@ -2672,15 +2761,12 @@ export function ReferenceWorkspacePreview({
 											)}
 										</span>
 										{supportsThinking && conversation?.state?.thinkingLevel && conversation.state.thinkingLevel !== "off" && (
-											<>
-												<span className="reference-model-sep">·</span>
-												<span className="reference-model-thinking">
-													{THINKING_SHORT_ZH[conversation.state.thinkingLevel] ?? conversation.state.thinkingLevel}思考
-												</span>
-											</>
+											<span style={{ fontSize: "10px", color: "#fb923c" }}>
+												· {THINKING_SHORT_ZH[conversation.state.thinkingLevel] ?? conversation.state.thinkingLevel}
+											</span>
 										)}
-										<ChevronsUpDown size={12} className="reference-model-chevron" />
-									</button>
+										<span style={{ opacity: 0.6 }}>∨</span>
+									</div>
 								</PopoverTrigger>
 								<PopoverContent className="model-popover model-popover-wide" side="top" align="start">
 									{supportsThinking && (
@@ -2769,114 +2855,78 @@ export function ReferenceWorkspacePreview({
 									</div>
 								</PopoverContent>
 							</Popover>
-						</div>
-						<div className="reference-composer-actions">
-							{workspace && relatedFiles.length > 0 && (
-								<Popover open={contextPickerOpen} onOpenChange={setContextPickerOpen}>
-									<PopoverTrigger asChild>
-										<button
-											type="button"
-											className="reference-composer-icon"
-											title="选择工作区文件 (@)"
-											aria-label="选择工作区文件"
-										>
-											<AtSign size={15} />
-										</button>
-									</PopoverTrigger>
-									<PopoverContent className="reference-file-picker" side="top" align="end">
-										<Command label="选择工作区文件" loop>
-											<CommandInput placeholder="搜索项目文件" />
-											<CommandList>
-												<CommandEmpty>没有可用的工作区文件</CommandEmpty>
-												<CommandGroup heading="工作区文件">
-													{relatedFiles.map((path) => (
-														<CommandItem
-															key={path}
-															value={path}
-															onSelect={() => void addWorkspaceFile(path)}
-														>
-															<FileText size={14} />
-															<span>{path}</span>
-														</CommandItem>
-													))}
-												</CommandGroup>
-											</CommandList>
-										</Command>
-									</PopoverContent>
-								</Popover>
+							{gitStatus?.isRepo && (
+								<div
+									className="today-os-dock-model-pill"
+									style={{ cursor: "pointer" }}
+									title={`当前 Git 分支：${gitStatus.branch} (${gitStatus.files?.length ?? 0} 个变动)`}
+									onClick={onOpenGit || (() => onNavigate("git"))}
+								>
+									<GitBranch size={11} color="#38bdf8" />
+									<span>{gitStatus.branch}</span>
+									{Boolean(gitStatus.files?.length) && (
+										<span style={{ color: "#fb923c" }}>· {gitStatus.files.length}</span>
+									)}
+								</div>
 							)}
+						</div>
+
+						<div className="today-os-dock-tools-right">
 							{isWorking ? (
 								<>
 									{draft.trim() || attachments.length > 0 || documents.length > 0 ? (
 										<>
 											<button
 												type="button"
-												className="reference-send steer-button"
+												className="today-os-agent-action-pill"
+												style={{ cursor: "pointer", color: "#fb923c", borderColor: "rgba(249, 115, 22, 0.4)" }}
 												title="实时干预 Agent (⌘Enter)"
-												aria-label="实时干预"
 												onClick={() => void submitSteer()}
 											>
-												<Sparkles size={14} />
+												<Sparkles size={11} color="#fb923c" />
 												<span>干预</span>
 											</button>
 											<button
 												type="button"
-												className="reference-send queue-button"
+												className="today-os-agent-action-pill"
+												style={{ cursor: "pointer" }}
 												title="排队至下一轮 (⇧⌘Enter)"
-												aria-label="排队"
 												onClick={() => void submitFollowUp()}
 											>
-												<Clock3 size={14} />
+												<Clock3 size={11} />
+												<span>排队</span>
 											</button>
 										</>
 									) : null}
 									<button
 										type="button"
 										tabIndex={-1}
-										className="reference-send working"
+										className="today-os-send-arrow-btn stop"
+										style={{ background: "#ef4444", boxShadow: "0 2px 8px rgba(239, 68, 68, 0.4)" }}
 										title="停止生成"
 										aria-label="停止生成"
 										onClick={handleSafeAbort}
 									>
-										<Square size={13} fill="currentColor" />
+										<Square size={13} fill="#fff" />
 									</button>
 								</>
 							) : (
-								<button
-									type="button"
-									className="reference-send"
-									title="发送消息 (⌘Enter)"
-									aria-label="发送消息"
-									disabled={!draft.trim() && attachments.length === 0 && documents.length === 0}
-									onClick={() => void submit()}
-								>
-									<ArrowUp size={16} />
-								</button>
+								<>
+									<button
+										type="button"
+										className="today-os-send-arrow-btn"
+										title="发送消息 (⌘Enter)"
+										aria-label="发送消息"
+										disabled={!draft.trim() && attachments.length === 0 && documents.length === 0}
+										onClick={() => void submit()}
+									>
+										<ArrowUp size={15} />
+									</button>
+								</>
 							)}
 						</div>
 					</div>
-					<ComposerStatusDock
-						showGit={appMode === "code" || conversation?.instance.mode === "code"}
-						gitStatus={gitStatus}
-						loading={gitLoading}
-						onRefreshGit={onRefreshGit}
-						onOpenGit={onOpenGit || (() => onNavigate("git"))}
-						tokenStats={{
-							inputTokens: stats?.tokens.input ?? 0,
-							outputTokens: stats?.tokens.output ?? 0,
-							totalTokens: stats?.tokens.total ?? ((stats?.tokens.input ?? 0) + (stats?.tokens.output ?? 0)),
-							contextTokens: contextTokens,
-							contextWindow: contextWindow,
-							contextPercent: contextPercent,
-							cacheRead: cacheRead,
-							cacheWrite: cacheWrite,
-							cacheHitPercent: cacheHitPercent,
-							cost: stats?.cost ?? 0,
-							isWorking: isWorking,
-						}}
-						onOpenContextPanel={() => setContextPanelOpen((prev) => !prev)}
-						extraDataSlot={extraDataSlot}
-					/>
+					{extraDataSlot && <div className="today-os-dock-custom-slot">{extraDataSlot}</div>}
 				</div>
 			</footer>
 					</div>
@@ -2919,257 +2969,21 @@ export function ReferenceWorkspacePreview({
 				)}
 			</main>
 
-			{!customContent && (
-			<aside className="reference-context">
-				<header>
-					<strong>会话上下文</strong>
-					<span>
-						{onOpenShortcuts && (
-							<button
-								type="button"
-								title="快捷键指南 (⌘/)"
-								aria-label="快捷键指南"
-								onClick={onOpenShortcuts}
-							>
-								<Keyboard size={14} />
-							</button>
-						)}
-						<Pin size={14} />
-						<button
-							type="button"
-							title="关闭面板"
-							aria-label="关闭面板"
-							onClick={() => setContextPanelOpen(false)}
-						>
-							<X size={15} />
-						</button>
-					</span>
-				</header>
-				<ReferenceContextCard title="工作空间">
-					<div className="reference-context-workspace">
-						<span className="reference-title-folder">
-							<Folder size={22} />
-						</span>
-						<div>
-							<strong>{workspace?.split(/[\\/]/).filter(Boolean).at(-1) ?? "未选工作区"}</strong>
-							<small>{workspace ? shortWorkspacePath(workspace) : "选择会话后显示"}</small>
-						</div>
-					</div>
-					<div className="reference-context-counts">
-						<div>
-							<strong>
-								{workspaceSummary
-									? `${workspaceSummary.fileCount}${workspaceSummary.truncated ? "+" : ""}`
-									: "--"}
-							</strong>
-							<span>文件数</span>
-						</div>
-						<div>
-							<strong style={{ textTransform: "capitalize" }}>
-								{conversation?.instance.mode === "code"
-									? "编程"
-									: conversation?.instance.mode === "personal"
-										? "个人"
-										: "通用"}
-							</strong>
-							<span>模式</span>
-						</div>
-						<div>
-							<strong>{memoryCount}</strong>
-							<span>记忆条目</span>
-						</div>
-					</div>
-				</ReferenceContextCard>
-				<ReferenceContextCard title="环境与配置">
-					<div className="reference-environment">
-						<span>
-							运行模式{" "}
-							<strong>
-								{conversation?.instance.mode === "code"
-									? "Code 编程"
-									: conversation?.instance.mode === "personal"
-										? "Personal 个人"
-										: "Chat 通用"}
-							</strong>
-						</span>
-						<span>
-							主力模型 <strong>{currentModel?.name ?? conversation?.state?.model?.name ?? conversation?.state?.model?.id ?? "--"}</strong>
-						</span>
-						<span>
-							上下文窗口 <strong>{contextWindow > 0 ? fmtTokens(contextWindow) : "--"}</strong>
-						</span>
-						{maxTokens > 0 && (
-							<span>
-								最大输出 <strong>{fmtTokens(maxTokens)}</strong>
-							</span>
-						)}
-						<span>
-							会话 ID <strong>{conversation?.state?.sessionId ? conversation.state.sessionId.slice(0, 8) : (conversation?.instance?.id ? conversation.instance.id.slice(0, 8) : "--")}</strong>
-						</span>
-						<span>
-							运行状态{" "}
-							<strong className={`ref-status-indicator ${conversation?.state?.isStreaming ? "working" : "idle"}`}>
-								<span className="ref-status-dot" /> {conversation?.state?.isStreaming ? "运行中" : "空闲就绪"}
-							</strong>
-						</span>
-					</div>
-				</ReferenceContextCard>
-				<ReferenceContextCard title="会话用量">
-					{stats ? (
-						<div className="reference-usage">
-							<div className="reference-context-usage">
-								<div>
-									<span>上下文占用</span>
-									<strong className={contextPercent && contextPercent > 0.8 ? "usage-warn" : ""}>
-										{contextPercent === undefined ? "--" : `${(contextPercent * 100).toFixed(contextPercent * 100 < 10 ? 1 : 0)}%`}
-									</strong>
-								</div>
-								<span>
-									{contextWindow > 0
-										? `${fmtTokens(contextTokens)} / ${fmtTokens(contextWindow)}`
-										: "模型未提供窗口"}
-								</span>
-								<div className="reference-context-progress" aria-label="上下文占用">
-									<span
-										className={contextPercent && contextPercent > 0.8 ? "warn" : ""}
-										style={{ width: `${Math.round((contextPercent ?? 0) * 100)}%` }}
-									/>
-								</div>
-							</div>
-							<div className="reference-token-grid">
-								<span>
-									输入 <strong>{fmtTokens(stats.tokens.input)}</strong>
-								</span>
-								<span>
-									输出 <strong>{fmtTokens(stats.tokens.output)}</strong>
-								</span>
-								<span>
-									缓存读 <strong>{fmtTokens(cacheRead)}</strong>
-								</span>
-								<span>
-									缓存写 <strong>{fmtTokens(cacheWrite)}</strong>
-								</span>
-							</div>
-							<div className="reference-usage-total">
-								<span>
-									缓存命中 <strong>{cacheHitPercent === undefined ? "--" : `${cacheHitPercent}%`}</strong>
-								</span>
-								<span>
-									本会话费用 <strong>{fmtCost(stats.cost)}</strong>
-								</span>
-							</div>
-							{providerBalance && (
-								<div className="reference-provider-balance">
-									账户余额{" "}
-									<strong>
-										{providerBalance.totalBalance.toFixed(2)} {providerBalance.currency}
-									</strong>
-								</div>
-							)}
-						</div>
-					) : (
-						<p className="reference-context-empty">正在读取会话统计…</p>
-					)}
-				</ReferenceContextCard>
-				{runningTools.length > 0 && (
-					<ReferenceContextCard title="运行中工具">
-						<div className="reference-tool-list">
-							{runningTools.map((tool, idx) => (
-								<span key={`${tool.toolCallId || "tool"}-${idx}`}>
-									<Terminal size={14} /> {tool.toolName} <em>运行中</em>
-								</span>
-							))}
-						</div>
-					</ReferenceContextCard>
-				)}
-				<ReferenceContextCard title="关联文件">
-					<div className="reference-file-list">
-						{relatedFiles.slice(0, showAllFiles ? relatedFiles.length : 5).map((file) => {
-							const basename = file.split(/[\\/]/).pop() ?? file;
-							const dirname = file.includes("/") || file.includes("\\")
-								? file.slice(0, Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\")))
-								: "";
-							return (
-								<button
-									type="button"
-									className="reference-file-item"
-									key={file}
-									title={`点击以 @${file} 填入输入框`}
-									onClick={() => {
-										setDraft((c) => (c ? `${c} @${file}` : `@${file} `));
-										draftInput.current?.focus();
-									}}
-								>
-									{renderFileIcon(basename)}
-									<span className="reference-file-name">{basename}</span>
-									{dirname ? (
-										<span className="reference-file-dir" title={dirname}>
-											{dirname}
-										</span>
-									) : null}
-								</button>
-							);
-						})}
-						{relatedFiles.length === 0 && (
-							<span className="reference-file-empty">
-								<FileText size={13} /> 暂无可用的工作区文件
-							</span>
-						)}
-					</div>
-					{relatedFiles.length > 5 && (
-						<button
-							type="button"
-							className="reference-context-link"
-							onClick={() => setShowAllFiles((value) => !value)}
-						>
-							{showAllFiles ? "收起列表" : `显示全部 (${relatedFiles.length})`}
-						</button>
-					)}
-				</ReferenceContextCard>
-				<ReferenceContextCard title="长期记忆">
-					<label className="reference-memory-search">
-						<Search size={12} />
-						<input
-							placeholder="搜索记忆条目…"
-							value={memoryQuery ?? ""}
-							onChange={(event) => setMemoryQuery(event.target.value)}
-						/>
-					</label>
-					<div className="reference-memory-list">
-						{visibleMemory.slice(0, 3).map((entry) => (
-							<span key={entry}>{entry}</span>
-						))}
-					</div>
-					<button type="button" className="reference-context-link">
-						查看全部记忆 ({memoryCount})
-					</button>
-				</ReferenceContextCard>
-				{gitStatus?.isRepo && (
-					<ReferenceContextCard title="Git 仓库">
-						<div className="reference-git-card">
-							<div className="reference-git-row">
-								<GitBranch size={14} />
-								<strong className="reference-git-branch">{gitStatus.branch || "main"}</strong>
-								<span className="reference-git-badge">
-									{gitStatus.files.length === 0 ? "工作区干净" : `${gitStatus.files.length} 处变更`}
-								</span>
-							</div>
-							{gitStatus.upstream && (
-								<small className="reference-git-upstream">
-									{gitStatus.upstream} {gitStatus.ahead > 0 && `↑${gitStatus.ahead}`} {gitStatus.behind > 0 && `↓${gitStatus.behind}`}
-								</small>
-							)}
-							<button
-								type="button"
-								className="reference-context-link"
-								onClick={onOpenGit || (() => onNavigate("git"))}
-							>
-								打开版本管理面板 →
-							</button>
-						</div>
-					</ReferenceContextCard>
-				)}
-			</aside>
+			{shouldShowInspector && (
+				<ContextInspector
+					target={{
+						kind: "conversation",
+						goalTitle: activeGoal.title,
+						projectName: workspace?.split(/[\\/]/).filter(Boolean).at(-1) || "openpi-next",
+						state: isWorking ? "正在执行 (Working · 2.4s)" : "空间就绪 (Idle · Ready)",
+						recentDecision: "保持 Execution Core 零污染，通过统一安全网关分发执行",
+						relevantMemoryCount: memoryCount || 3,
+					}}
+					safetyStatus={safetyStatus}
+					workspace={workspace}
+					onClose={() => setContextPanelOpen(false)}
+					onNavigate={onNavigate}
+				/>
 			)}
 		</div>
 	);

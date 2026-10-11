@@ -28,11 +28,17 @@ export { DaemonSurface } from "./panels/daemon-surface";
 export { CapabilitiesSurface, ModelProvidersPanel } from "./panels/capabilities-surface";
 export { TasksSurface } from "./panels/tasks-surface";
 export { GitSurface } from "./panels/git-surface";
+export { GoalsSurface } from "./panels/goals-surface";
+export { ProjectsSurface } from "./panels/projects-surface";
+export { ActivitySurface } from "./panels/activity-surface";
+export { AgentSurface } from "./panels/agent-surface";
 
 // HUD
 
 
 // Workspace
+export { NowSurface } from "./now/now-surface";
+export { TodayOsDashboard } from "./today/today-os-dashboard";
 export { ReferenceWorkspacePreview } from "./workspace/workspace-preview";
 export { ComposerStatusDock, type TokenStatsData } from "./workspace/composer-status-dock";
 export { AgentActionChain } from "./workspace/action-chain";

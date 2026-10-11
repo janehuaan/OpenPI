@@ -3,6 +3,7 @@ import {
 	BookOpen,
 	BrainCircuit,
 	GitBranch,
+	Home,
 	ListTodo,
 	MessageSquare,
 	Moon,
@@ -12,11 +13,11 @@ import {
 import type { TaskDefinition, TaskRun } from "../../../types";
 import { useTheme } from "../../../lib/theme-manager";
 
-export type MoreView = "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
+export type MoreView = "today" | "tasks" | "capabilities" | "memory" | "intelligence" | "daemon" | "git";
 
 export const MORE_ITEMS: Array<{ id: MoreView; label: string; hint: string; icon: typeof BookOpen }> = [
 	{ id: "git", label: "版本管理", hint: "Git 仓库与变更管理", icon: GitBranch },
-	{ id: "memory", label: "记忆", hint: "跨对话记住的偏好", icon: BookOpen },
+	{ id: "memory", label: "记忆与目标", hint: "跨对话记住的偏好与长程目标", icon: BookOpen },
 	{ id: "tasks", label: "定时任务", hint: "后台自动化", icon: ListTodo },
 	{ id: "capabilities", label: "能力与扩展", hint: "技能 / MCP / 工具", icon: Blocks },
 	{ id: "intelligence", label: "智能规划", hint: "多步计划记录", icon: BrainCircuit },
@@ -45,13 +46,22 @@ export function AppRail({
 			<button
 				type="button"
 				className="brand-mark"
-				data-label="OpenPI"
-				title="OpenPI"
-				onClick={() => onNavigate("chat")}
+				data-label="今日 OS"
+				title="OpenPI Personal Agent OS"
+				onClick={() => onNavigate("today")}
 			>
 				π
 			</button>
 			<nav className="rail-navigation" aria-label="页面">
+				<button
+					type="button"
+					className={`rail-button ${activeView === "today" ? "active" : ""}`}
+					data-label="今日工作空间"
+					title="今日 (Personal Agent OS 仪表盘)"
+					onClick={() => onNavigate("today")}
+				>
+					<Home size={18} />
+				</button>
 				<button
 					type="button"
 					className={`rail-button ${activeView === "chat" ? "active" : ""}`}

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light" data-theme-flavor="light-default" class="light">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -34,7 +34,7 @@
 				document.documentElement.classList.add("platform-darwin");
 			}
 			try {
-				const theme = localStorage.getItem("openpi-theme") || "dark";
+				const theme = localStorage.getItem("openpi-theme") || "light";
 				const isDark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 				const effectiveMode = isDark ? "dark" : "light";
 				const flavor = localStorage.getItem("openpi-theme-flavor") || (isDark ? "dark-default" : "light-default");

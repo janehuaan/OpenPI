@@ -1,4 +1,4 @@
-export type TurnProgressStage = "submitted" | "starting" | "thinking" | "responding" | "tool" | "settled" | "error";
+export type TurnProgressStage = "submitted" | "starting" | "thinking" | "responding" | "tool" | "reviewing" | "settled" | "error";
 
 export interface TurnProgress {
 	instanceId: string;
@@ -23,6 +23,10 @@ export type TurnProgressEvent = {
 	maxSteps?: number;
 	model?: string;
 	error?: unknown;
+	reviewer?: unknown;
+	status?: unknown;
+	attempt?: unknown;
+	mode?: unknown;
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -132,6 +136,41 @@ export function reduceTurnProgress(
 		if (messageType === "text_delta") return { ...current, stage: "responding", label: "正在组织回复…" };
 		if (messageType === "toolcall_delta") return { ...current, stage: "tool", label: "正在准备下一步操作…" };
 	}
+	if (type === "review_start") {
+		const reviewer = typeof event.reviewer === "string" ? event.reviewer : "第三方独立模型";
+		const attempt = typeof event.attempt === "number" ? ` (第 ${event.attempt} 轮)` : "";
+		const isAsync = event.mode === "async";
+		return {
+			...current,
+			stage: "reviewing",
+			label: isAsync
+				? `🧐 ${reviewer} 正在后台质检… (不阻塞交互)`
+				: `🧐 ${reviewer} 正在对方案与修改进行双盲质检${attempt}…`,
+		};
+	}
+	if (type === "review_result") {
+		const status = event.status;
+		const reviewer = typeof event.reviewer === "string" ? event.reviewer : "评审模型";
+		const isAsync = event.mode === "async";
+		if (status === "rejected") {
+			return {
+				...current,
+				stage: "reviewing",
+				label: isAsync
+					? `⚠️ ${reviewer} 质检提示已记录至对话`
+					: `⚠️ ${reviewer} 质检驳回，主模型正在重新修正缺陷…`,
+			};
+		}
+		if (status === "approved") {
+			return {
+				...current,
+				stage: "responding",
+				label: isAsync
+					? `✅ ${reviewer} 质检通过`
+					: `✅ ${reviewer} 质检通过，正在完成本轮交付…`,
+			};
+		}
+	}
 	if (type === "agent_settled") return undefined;
 	if (type === "stream_error" || type === "stream_closed" || type === "abort" || type === "send_error")
 		return undefined;
@@ -153,6 +192,7 @@ export function turnProgressFromEvent(
  */
 export function turnVerb(progress: TurnProgress | undefined, seconds: number): string {
 	if (!progress) return "Reasoning";
+	if (progress.stage === "reviewing") return "Reviewing";
 	if (progress.stage === "tool") {
 		const tool = (progress.toolName || "").toLowerCase();
 		if (tool.includes("bash") || tool.includes("terminal") || tool.includes("exec")) return "Executing";

@@ -972,6 +972,97 @@
 	cursor: default;
 }
 
+.btn-set-reviewer {
+	font-size: 10.5px;
+	padding: 2.5px 8px;
+	border-radius: 5px;
+	border: 1px solid rgba(0, 0, 0, 0.12);
+	background: rgba(255, 255, 255, 0.45);
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: all 0.15s;
+	font-weight: 500;
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+[data-theme="dark"] .btn-set-reviewer {
+	background: rgba(255, 255, 255, 0.06);
+	border-color: rgba(255, 255, 255, 0.12);
+	color: #94a3b8;
+}
+
+.btn-set-reviewer:hover:not(:disabled) {
+	background: #8b5cf6;
+	color: #fff;
+	border-color: #8b5cf6;
+}
+
+.btn-set-reviewer.current {
+	background: rgba(139, 92, 246, 0.15);
+	color: #8b5cf6;
+	border-color: #8b5cf6;
+	font-weight: 650;
+	cursor: default;
+}
+
+.hero-reviewer-card {
+	position: relative;
+	background: linear-gradient(
+		135deg,
+		var(--glass-bg-elevated, rgba(255, 255, 255, 0.44)) 0%,
+		var(--glass-bg, rgba(255, 255, 255, 0.18)) 45%,
+		color-mix(in srgb, #8b5cf6 8%, var(--glass-bg-elevated, #fff)) 100%
+	);
+	backdrop-filter: blur(48px) saturate(230%);
+	-webkit-backdrop-filter: blur(48px) saturate(230%);
+	border: 1px solid var(--border);
+	border-radius: 22px;
+	padding: 22px 26px;
+	box-shadow: 
+		0 24px 60px -12px var(--shadow-soft, rgba(0, 0, 0, 0.08)),
+		0 8px 24px -4px rgba(15, 23, 42, 0.04),
+		inset 0 1.5px 2px 0 rgba(255, 255, 255, 0.95);
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	overflow: hidden;
+	transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+	margin-top: 14px;
+}
+
+[data-theme="dark"] .hero-reviewer-card {
+	background: linear-gradient(
+		135deg,
+		var(--bg-elevated) 0%,
+		var(--bg-muted) 50%,
+		color-mix(in srgb, #8b5cf6 12%, var(--bg-elevated)) 100%
+	);
+	border: 1px solid var(--border);
+	box-shadow: 
+		0 26px 64px -12px rgba(0, 0, 0, 0.55),
+		inset 0 1px 1.5px 0 rgba(255, 255, 255, 0.20);
+}
+
+.hero-reviewer-card.disabled {
+	opacity: 0.76;
+}
+
+.hero-reviewer-avatar {
+	width: 48px;
+	height: 48px;
+	border-radius: 14px;
+	background: #8b5cf6;
+	color: #ffffff;
+	display: grid;
+	place-items: center;
+	box-shadow: 
+		0 6px 20px rgba(139, 92, 246, 0.35),
+		inset 0 1px 1.5px rgba(255, 255, 255, 0.4);
+	flex-shrink: 0;
+}
+
 /* ── Mode Selection Cards (Chat / Code / Personal) ── */
 .workspace-modes-grid {
 	display: grid;

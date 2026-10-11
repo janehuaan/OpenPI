@@ -22,6 +22,11 @@ import {
 	FilePreviewDialog,
 	TasksSurface,
 	GitSurface,
+	GoalsSurface,
+	ProjectsSurface,
+	ActivitySurface,
+	AgentSurface,
+	NowSurface,
 } from "./components/surfaces";
 import { FilePreviewContext, type FilePreviewRequest } from "./lib/file-links";
 import {
@@ -275,9 +280,14 @@ export function App() {
 	/** Live token stream per instance, so text renders as it arrives instead of in
 	 *  poll-sized chunks (the poll only runs every few seconds while streaming). */
 	const liveStreamRef = useRef<Record<string, { text: string }>>({});
-	selectedInstanceIdRef.current = selectedInstanceId;
 	const clearRunningTools = useCallback((instanceId?: string): void => {
-		if (instanceId !== undefined && runningToolsInstanceIdRef.current !== instanceId) return;
+		if (
+			instanceId !== undefined &&
+			runningToolsInstanceIdRef.current &&
+			runningToolsInstanceIdRef.current !== instanceId
+		) {
+			return;
+		}
 		runningToolsInstanceIdRef.current = undefined;
 		setRunningTools([]);
 	}, []);
@@ -638,6 +648,11 @@ export function App() {
 				void refresh();
 				return;
 			}
+			if (payload.instanceId === "proactive") {
+				// 主动服务事件（行动卡片 / 今日晨报）→ 广播给 Today 界面实时刷新
+				window.dispatchEvent(new CustomEvent("openpi:proactive", { detail: payload.event }));
+				return;
+			}
 			const currentId = selectedInstanceIdRef.current;
 			const isMatch = currentId && (payload.instanceId === currentId || payload.instanceId.includes(currentId) || currentId.includes(payload.instanceId));
 			if (!isMatch) return;
@@ -694,6 +709,9 @@ export function App() {
 					maxSteps: typeof event.maxSteps === "number" ? event.maxSteps : undefined,
 					model: typeof event.model === "string" ? event.model : undefined,
 					error: event.error,
+					reviewer: event.reviewer,
+					status: event.status,
+					attempt: event.attempt,
 				}),
 			);
 			if (payload.instanceId) {
@@ -768,6 +786,31 @@ export function App() {
 				return;
 			}
 			if (eventType === "stream_closed" || eventType === "stream_error") {
+				const isBroadcast = payload.instanceId === "*";
+				if (isBroadcast) {
+					setStreamConnectedInstanceId(undefined);
+					clearRunningTools();
+					setStreamingInstances(new Set());
+					setPendingConversationUiRequests([]);
+					setTurnProgress(undefined);
+					setConversation((current) => {
+						if (!current) return current;
+						return {
+							...current,
+							state: { ...current.state, isStreaming: false },
+							messages: current.messages.map((m) => {
+								if (!m.toolCalls?.some((tc) => tc.status === "running")) return m;
+								return {
+									...m,
+									toolCalls: m.toolCalls.map((tc) =>
+										tc.status === "running" ? { ...tc, status: "error", result: "Daemon disconnected — run interrupted." } : tc
+									),
+								};
+							}),
+						};
+					});
+					return;
+				}
 				setStreamConnectedInstanceId((current) => (current === payload.instanceId ? undefined : current));
 				clearRunningTools(payload.instanceId);
 				setStreamingInstances((prev) => {
@@ -1076,13 +1119,14 @@ export function App() {
 		// the same from here — no successful contact.
 		const DAEMON_SILENCE_MS = 20_000;
 		const interval = setInterval(() => {
-			if (streamingInstances.size === 0 && !conversation?.state?.isStreaming) return;
-			const now = Date.now();
 			const activeId = selectedInstanceIdRef.current ?? selectedInstanceId;
 			if (!activeId) return;
 
+			const hasRunningTools = runningTools.length > 0;
 			const isMarkedStreaming = streamingInstances.has(activeId) || Boolean(conversation?.state?.isStreaming);
-			if (!isMarkedStreaming) return;
+			if (!isMarkedStreaming && !hasRunningTools) return;
+
+			const now = Date.now();
 
 			// Liveness first. Previously this returned early whenever a tool was
 			// marked running or a message was being sent, so a wedged daemon could
@@ -1095,14 +1139,7 @@ export function App() {
 					remaining.delete(activeId);
 					return remaining;
 				});
-				setRunningTools((current) =>
-					current.map((tool) => ({
-						...tool,
-						status: "failed" as const,
-						isError: true,
-						result: "Daemon unreachable — run interrupted.",
-					})),
-				);
+				clearRunningTools();
 				setTurnProgress(undefined);
 				setError("与 daemon 的连接已中断（进程可能已崩溃或卡死），本次运行已标记为中断。");
 				setSnapshot((current) => ({ ...current, daemonRunning: false }));
@@ -1113,21 +1150,22 @@ export function App() {
 			// stream is not proof the run ended — a model or a tool can stay silent
 			// for a long time while still working.
 			const lastActivity = lastStreamActivityRef.current[activeId];
-			if (!lastActivity || now - lastActivity <= QUIET_MS) return;
+			if (lastActivity && now - lastActivity <= QUIET_MS) return;
 
 			// Re-arm first so overlapping ticks cannot pile up requests.
 			lastStreamActivityRef.current[activeId] = now;
 			void desktopApi
 				.getConversation(activeId)
 				.then((next) => {
-					if (next?.state?.isStreaming) return; // still running — leave the UI alone
+					const isAliveAndStreaming = Boolean(next?.state?.isStreaming && next?.instance?.status !== "stopped");
+					if (isAliveAndStreaming) return; // still running — leave the UI alone
 					delete lastStreamActivityRef.current[activeId];
 					setStreamingInstances((prev) => {
 						const remaining = new Set(prev);
 						remaining.delete(activeId);
 						return remaining;
 					});
-					clearRunningTools(activeId);
+					clearRunningTools();
 					setTurnProgress(undefined);
 					setConversation((curr) =>
 						curr?.instance?.id === activeId ? { ...next, state: { ...next.state, isStreaming: false } } : curr,
@@ -1217,14 +1255,15 @@ export function App() {
 				const streamConnected = streamConnectedInstanceId === instanceId;
 				delay = (pending && !messageAccepted) || (next.state?.isStreaming && !streamConnected) ? 250 : 15_000;
 				if (!disposed) {
+					const isServerStopped = next.instance?.status === "stopped";
+					const isActivelyStreaming = !isServerStopped && Boolean(
+						streamingInstances.has(instanceId) ||
+						Boolean(next.state?.isStreaming),
+					);
 					setConversation((current) => {
 						if (!current || current.instance.id !== next.instance.id) {
-							return next;
+							return isServerStopped ? { ...next, state: { ...next.state, isStreaming: false } } : next;
 						}
-						const isActivelyStreaming = Boolean(
-							streamingInstances.has(instanceId) ||
-							Boolean(next.state?.isStreaming),
-						);
 						if (isActivelyStreaming) {
 							if (current.messages.length > next.messages.length) {
 								return {
@@ -1258,12 +1297,13 @@ export function App() {
 								state: { ...next.state, isStreaming: true },
 							};
 						}
+						const targetState = isServerStopped ? { ...next.state, isStreaming: false } : next.state;
 						// If idle and messages count, last message timestamp/role, and state are identical:
 						// return current to preserve object identity and completely prevent React re-rendering!
 						if (
 							current.messages.length === next.messages.length &&
-							current.state?.sessionName === next.state?.sessionName &&
-							current.state?.isStreaming === next.state?.isStreaming &&
+							current.state?.sessionName === targetState?.sessionName &&
+							current.state?.isStreaming === targetState?.isStreaming &&
 							current.instance.status === next.instance.status
 						) {
 							const curLast = current.messages[current.messages.length - 1];
@@ -1275,9 +1315,16 @@ export function App() {
 								return current;
 							}
 						}
-						return next;
+						return { ...next, state: targetState };
 					});
-					if (!next.state?.isStreaming && !streamingInstances.has(instanceId)) {
+					if (isServerStopped || !isActivelyStreaming) {
+						if (streamingInstances.has(instanceId)) {
+							setStreamingInstances((prev) => {
+								const nextSet = new Set(prev);
+								nextSet.delete(instanceId);
+								return nextSet;
+							});
+						}
 						clearRunningTools(instanceId);
 						setOptimisticMessage((current) =>
 							current?.instanceId === instanceId || !current?.instanceId ? undefined : current,
@@ -1637,7 +1684,6 @@ export function App() {
 			setConversation(undefined);
 			setOptimisticMessage(undefined);
 			setView("chat");
-			setSidebarOpen(false);
 			setSnapshot((current) => ({
 				...current,
 				daemonRunning: true,
@@ -1727,14 +1773,20 @@ export function App() {
 					current === pending ? { ...current, instanceId: instance.id } : current,
 				);
 				setView("chat");
-				setSidebarOpen(false);
 			}
 			if (!instanceId) throw new Error("未选择对话。");
 			const activeInstanceId = instanceId;
-			const sessionName =
-				pending.baselineMessageCount === 0
-					? (message.replace(/^[/@#*\s]+/, "").replace(/\s+/g, " ").trim() || documents[0]?.name || "Image conversation").slice(0, 32)
-					: undefined;
+			let sessionName: string | undefined;
+			if (pending.baselineMessageCount === 0) {
+				const cleanMsg = message.replace(/^[/@#*\s]+/, "").replace(/\s+/g, " ").trim();
+				if (/ephemeral\s*subagent/i.test(cleanMsg) || cleanMsg.includes("Ephemeral") || cleanMsg.startsWith("【Ephemeral")) {
+					const objMatch = cleanMsg.match(/(?:Objective|目标)[:：]\s*([^\n\r.]+)/i);
+					const roleMatch = cleanMsg.match(/(?:Role|角色)[:：]\s*([^\n\r]+)/i);
+					sessionName = objMatch ? `审计: ${objMatch[1].trim().slice(0, 20)}` : roleMatch ? `子任务: ${roleMatch[1].trim().slice(0, 20)}` : "后台审计任务";
+				} else {
+					sessionName = (cleanMsg || documents[0]?.name || "Image conversation").slice(0, 32);
+				}
+			}
 			if (sessionName) {
 				setConversationTitles((current) => ({ ...current, [activeInstanceId]: sessionName }));
 				setSnapshot((current) => ({
@@ -1748,6 +1800,7 @@ export function App() {
 				await desktopApi.watchConversation(activeInstanceId);
 				setStreamConnectedInstanceId(activeInstanceId);
 			}
+			lastStreamActivityRef.current[activeInstanceId] = Date.now();
 			setStreamingInstances((prev) => new Set(prev).add(activeInstanceId));
 			await desktopApi.sendMessage(activeInstanceId, prompt, images, sessionName);
 		} catch (caught) {
@@ -2398,7 +2451,25 @@ export function App() {
 
 	let pageContent: ReactNode = null;
 	let mainContent: ReactNode;
-	if (view === "capabilities") {
+	if (view === "today") {
+		// Agent OS 主屏：世界状态（我知道 / 我在做 / 我建议），Chat 退居为指令仪器。
+		pageContent = (
+			<NowSurface
+				workspace={selectedWorkspace ?? setup.workspace}
+				gitStatus={gitStatus}
+				gitLoading={gitLoading}
+				userProfile={userProfile}
+				instances={snapshot.instances}
+				taskRuns={snapshot.runs}
+				isStreaming={Boolean(isStreaming)}
+				runningTools={runningTools}
+				onNavigate={(next) => setView(next)}
+				onSendPrompt={(prompt) => void sendMessage(prompt, [])}
+				onRefreshGit={() => void loadGitStatus()}
+				onOpenSettings={() => setView("capabilities")}
+			/>
+		);
+	} else if (view === "capabilities") {
 		pageContent = (
 			<CapabilitiesSurface
 				conversation={conversation}
@@ -2566,6 +2637,74 @@ export function App() {
 				onPruneStopped={() => void perform("prune-stopped", desktopApi.pruneStoppedInstances)}
 			/>
 		);
+	} else if (view === "goals") {
+		pageContent = (
+			<GoalsSurface
+				workspace={selectedWorkspace}
+				onStartGoalWork={(goalTitle) => {
+					setView("chat");
+					setComposerDraftRequest({
+						id: crypto.randomUUID(),
+						text: `请针对主线目标【${goalTitle}】制定推进方案并开始执行。`,
+					});
+				}}
+				onClose={() => setView("today")}
+			/>
+		);
+	} else if (view === "projects") {
+		pageContent = (
+			<ProjectsSurface
+				projects={conversationList.projects}
+				activeWorkspace={selectedWorkspace}
+				onOpenProject={(instanceId) => {
+					setView("chat");
+					const project = snapshot.instances.find((instance) => instance.id === instanceId);
+					setAppMode("code");
+					setPreferredMode("code");
+					if (project?.cwd) setCodeWorkspace(project.cwd);
+					selectConversation(instanceId);
+				}}
+				onNewProjectSession={(workspace) => {
+					setView("chat");
+					setAppMode("code");
+					setPreferredMode("code");
+					setCodeWorkspace(workspace);
+					clearRunningTools();
+					void createConversation("code", workspace);
+				}}
+				onSelectProjectFolder={async () => {
+					const ws = await desktopApi.selectWorkspace(selectedWorkspace);
+					if (ws) {
+						setView("chat");
+						setAppMode("code");
+						setPreferredMode("code");
+						setCodeWorkspace(ws);
+						clearRunningTools();
+						void createConversation("code", ws);
+					}
+				}}
+			/>
+		);
+	} else if (view === "activity") {
+		pageContent = (
+			<ActivitySurface
+				cwd={selectedWorkspace ?? setup.workspace}
+				gitStatus={gitStatus}
+				loading={gitLoading}
+				taskRuns={taskRuns}
+				onRefresh={() => void loadGitStatus()}
+				onClose={() => setView("today")}
+			/>
+		);
+	} else if (view === "agent") {
+		pageContent = (
+			<AgentSurface
+				safetyStatus={null}
+				snapshot={snapshot}
+				onClose={() => setView("today")}
+				onNavigate={(next) => setView(next as View)}
+			/>
+		);
 	}
 
 	mainContent = (
@@ -2579,6 +2718,7 @@ export function App() {
 			conversationTitles={conversationTitles}
 			workspaceSummary={workspaceSummary}
 			runningTools={runningTools}
+			taskRuns={snapshot.runs}
 			toolDurations={toolDurations}
 			turnProgress={turnProgress}
 			todoState={todoState}
@@ -2604,6 +2744,7 @@ export function App() {
 			onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
 			onCollapseSidebar={() => setSidebarOpen(false)}
 			onSelectConversation={(instanceId) => {
+				// 打开具体会话 → 进入对话面板（Today 已是 Agent OS 主屏，不再等同 Chat）
 				setView("chat");
 				setAppMode("chat");
 				setPreferredMode("work");
@@ -2688,6 +2829,7 @@ export function App() {
 			prefillDraft={composerDraftRequest}
 		/>
 	);
+
 
 	return (
 		<FilePreviewContext.Provider value={filePreviewContextValue}>

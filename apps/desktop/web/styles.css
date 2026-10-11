@@ -9,6 +9,7 @@
 @import "./styles/git.css";
 @import "./styles/themes.css";
 @import "./styles/island.css";
+@import "./styles/personal-assistant.css";
 
 /* OpenPI Dynamic Island Overlay Mode — Pure Transparency & Zero Nesting */
 :root.island-mode,

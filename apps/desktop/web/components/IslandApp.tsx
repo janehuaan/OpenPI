@@ -176,7 +176,8 @@ export function IslandApp() {
 		isStreaming ||
 		runningTools.length > 0 ||
 		turnProgress?.stage === "thinking" ||
-		turnProgress?.stage === "tool";
+		turnProgress?.stage === "tool" ||
+		turnProgress?.stage === "reviewing";
 	isBusyRef.current = isBusy;
 
 	const currentMode: IslandMode = useMemo(() => {
@@ -712,6 +713,7 @@ export function IslandApp() {
 				return "WORKING";
 			}
 			const stage = turnProgress?.stage;
+			if (stage === "reviewing") return "REVIEWING";
 			if (stage === "thinking") return "THINKING";
 			if (stage === "responding") return "RESPONDING";
 			return "ANALYZING";
@@ -739,6 +741,9 @@ export function IslandApp() {
 		if (isBusy) {
 			if (activeTool) {
 				return activeToolTarget || "Running the command…";
+			}
+			if (turnProgress?.stage === "reviewing") {
+				return turnProgress.label || "Third-party critic reviewing code and results…";
 			}
 			if (turnProgress?.stage === "thinking") {
 				return latestReasoningSnippet || "Reviewing context and results to plan the next step";

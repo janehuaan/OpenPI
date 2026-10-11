@@ -46,13 +46,20 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 	return (
 		<div className="agent-runtime-hud" role="status" aria-live="polite">
 			<div className="agent-runtime-main-bar">
-				<div className="agent-runtime-badge">
-					<span className="agent-runtime-badge-icon">⌘</span>
+				<div className={`agent-runtime-badge ${progress?.stage === "reviewing" ? "is-reviewing" : ""}`}>
+					<span className="agent-runtime-badge-icon">{progress?.stage === "reviewing" ? "🧐" : "⌘"}</span>
 					<span className="agent-runtime-badge-verb">{verb}...</span>
 				</div>
 
 				<div className="agent-runtime-meta-stream">
 					<span className="agent-runtime-time">{elapsedStr}</span>
+
+					{progress?.stage === "reviewing" && progress.label && (
+						<>
+							<span className="agent-runtime-bullet">•</span>
+							<span style={{ color: "#a855f7", fontWeight: 500 }}>{progress.label}</span>
+						</>
+					)}
 
 					{tokenStr && (
 						<>

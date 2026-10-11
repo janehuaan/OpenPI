@@ -3,6 +3,7 @@ import {
 	Archive,
 	ArrowLeft,
 	BookOpen,
+	BrainCircuit,
 	Check,
 	FileText,
 	Layers,
@@ -17,6 +18,8 @@ import {
 	Zap,
 } from "../../icons.tsx";
 import { desktopApi } from "../../../api";
+import { PersonalTab } from "./memory/personal-tab";
+import type { PersonalMemoryRecord } from "../../../lib/app-types";
 import type { ArchivedMemoryEntry } from "../../../types";
 import {
 	formatAuditTimestamp,
@@ -106,7 +109,21 @@ export function MemorySurface({
 	onSaveEntry(memoryType: string, key: string, value: string): void;
 	onDelete(memoryType: string, key: string): void;
 }) {
-	const [activeTab, setActiveTab] = useState<MemorySurfaceTab>("handbook");
+	const [activeDomain, setActiveDomain] = useState<"user" | "knowledge" | "experience">("user");
+	const [knowledgeTab, setKnowledgeTab] = useState<"handbook" | "index" | "entries">("handbook");
+	const [experienceTab, setExperienceTab] = useState<"skills" | "rollout">("skills");
+	const [personalMemories, setPersonalMemories] = useState<PersonalMemoryRecord[]>([]);
+	const [loadingPersonal, setLoadingPersonal] = useState(false);
+
+	const loadPersonalAgentData = async () => {
+		setLoadingPersonal(true);
+		try {
+			const res = await desktopApi.listPersonalMemories().catch(() => ({ memories: [] }));
+			if (res?.memories) setPersonalMemories(res.memories);
+		} finally {
+			setLoadingPersonal(false);
+		}
+	};
 	const [filter, setFilter] = useState("");
 	const [typeFilter, setTypeFilter] = useState<string>("all");
 
@@ -142,6 +159,7 @@ export function MemorySurface({
 
 	useEffect(() => {
 		void loadHub();
+		void loadPersonalAgentData();
 	}, [workspace]);
 
 	const handleConsolidateNow = async () => {
@@ -248,22 +266,23 @@ export function MemorySurface({
 				)}
 				<div className="surface-heading">
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						<strong>两阶段长期记忆中枢 (Memory Hub)</strong>
+						<strong>Personal Agent 记忆中枢 (Memory Space)</strong>
 						<span
 							style={{
-								fontSize: 11,
-								padding: "2px 6px",
-								borderRadius: 4,
-								background: "var(--accent-soft)",
-								color: "var(--accent)",
+								fontSize: 10.5,
+								padding: "2px 7px",
+								borderRadius: 6,
+								background: "rgba(249, 115, 22, 0.15)",
+								color: "#fb923c",
+								border: "1px solid rgba(249, 115, 22, 0.3)",
 								fontWeight: 600,
 							}}
 						>
-							Codex Architecture
+							Architecture v2
 						</span>
 					</div>
 					<span>
-						文件型知识手册 + 渐进式检索 · 当前作用域：{scopeLabel}
+						User Model · Project Knowledge · Agent Experience · 当前作用域：{scopeLabel}
 					</span>
 				</div>
 				<div className="surface-actions">
@@ -359,53 +378,93 @@ export function MemorySurface({
 				</div>
 			)}
 
-			{/* 5-Tab Navigation Bar */}
-			<div className="memory-tabs-bar">
+			{/* 3-Domain Architecture Navigation Bar (UI Architecture v2) */}
+			<div className="memory-tabs-bar" style={{ display: "flex", gap: 8, padding: "0 24px", background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)" }}>
 				<button
 					type="button"
-					onClick={() => setActiveTab("handbook")}
-					className={`context-tab ${activeTab === "handbook" ? "active" : ""}`}
+					onClick={() => setActiveDomain("user")}
+					className={`context-tab ${activeDomain === "user" ? "active" : ""}`}
+				>
+					<BrainCircuit size={14} />
+					<span>USER MODEL (用户画像与偏好 · {personalMemories.length})</span>
+				</button>
+				<button
+					type="button"
+					onClick={() => setActiveDomain("knowledge")}
+					className={`context-tab ${activeDomain === "knowledge" ? "active" : ""}`}
 				>
 					<BookOpen size={14} />
-					<span>知识手册 (MEMORY.md)</span>
+					<span>PROJECT KNOWLEDGE (项目知识与决策)</span>
 				</button>
 				<button
 					type="button"
-					onClick={() => setActiveTab("index")}
-					className={`context-tab ${activeTab === "index" ? "active" : ""}`}
-				>
-					<FileText size={14} />
-					<span>认知索引 (Prompt 常驻)</span>
-				</button>
-				<button
-					type="button"
-					onClick={() => setActiveTab("rollout")}
-					className={`context-tab ${activeTab === "rollout" ? "active" : ""}`}
-				>
-					<Layers size={14} />
-					<span>会话证据归档 ({hubData?.rolloutSummaries.length ?? 0})</span>
-				</button>
-				<button
-					type="button"
-					onClick={() => setActiveTab("skills")}
-					className={`context-tab ${activeTab === "skills" ? "active" : ""}`}
+					onClick={() => setActiveDomain("experience")}
+					className={`context-tab ${activeDomain === "experience" ? "active" : ""}`}
 				>
 					<Zap size={14} />
-					<span>进化技能库 ({hubData?.skills.length ?? 0})</span>
-				</button>
-				<button
-					type="button"
-					onClick={() => setActiveTab("entries")}
-					className={`context-tab ${activeTab === "entries" ? "active" : ""}`}
-				>
-					<Archive size={14} />
-					<span>结构化条目 ({parsedEntries.length})</span>
+					<span>AGENT EXPERIENCE (智能体经验与技能 · {hubData?.skills.length ?? 0})</span>
 				</button>
 			</div>
 
 			<div className="operation-panel-body" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "24px 28px" }}>
-				{/* ----------------- TAB 1: HANDBOOK (MEMORY.md) ----------------- */}
-				{activeTab === "handbook" && (
+				{/* ----------------- DOMAIN 1: USER MODEL ----------------- */}
+				{activeDomain === "user" && (
+					<PersonalTab
+						memories={personalMemories}
+						loading={loadingPersonal}
+						onRefresh={() => void loadPersonalAgentData()}
+					/>
+				)}
+
+				{/* ----------------- DOMAIN 2: PROJECT KNOWLEDGE ----------------- */}
+				{activeDomain === "knowledge" && (
+					<div style={{ maxWidth: 1000, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+						<div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+							<button
+								type="button"
+								className={`button secondary ${knowledgeTab === "handbook" ? "active" : ""}`}
+								style={{
+									background: knowledgeTab === "handbook" ? "var(--accent-soft)" : undefined,
+									borderColor: knowledgeTab === "handbook" ? "var(--accent)" : undefined,
+									color: knowledgeTab === "handbook" ? "var(--accent)" : undefined,
+									fontWeight: knowledgeTab === "handbook" ? 600 : undefined,
+								}}
+								onClick={() => setKnowledgeTab("handbook")}
+							>
+								<BookOpen size={13} />
+								<span>知识手册 (MEMORY.md)</span>
+							</button>
+							<button
+								type="button"
+								className={`button secondary ${knowledgeTab === "index" ? "active" : ""}`}
+								style={{
+									background: knowledgeTab === "index" ? "var(--accent-soft)" : undefined,
+									borderColor: knowledgeTab === "index" ? "var(--accent)" : undefined,
+									color: knowledgeTab === "index" ? "var(--accent)" : undefined,
+									fontWeight: knowledgeTab === "index" ? 600 : undefined,
+								}}
+								onClick={() => setKnowledgeTab("index")}
+							>
+								<FileText size={13} />
+								<span>认知索引 (Prompt 常驻)</span>
+							</button>
+							<button
+								type="button"
+								className={`button secondary ${knowledgeTab === "entries" ? "active" : ""}`}
+								style={{
+									background: knowledgeTab === "entries" ? "var(--accent-soft)" : undefined,
+									borderColor: knowledgeTab === "entries" ? "var(--accent)" : undefined,
+									color: knowledgeTab === "entries" ? "var(--accent)" : undefined,
+									fontWeight: knowledgeTab === "entries" ? 600 : undefined,
+								}}
+								onClick={() => setKnowledgeTab("entries")}
+							>
+								<Archive size={13} />
+								<span>结构化条目 ({parsedEntries.length})</span>
+							</button>
+						</div>
+
+						{knowledgeTab === "handbook" && (
 					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
 							className="glass-card"
@@ -514,9 +573,7 @@ export function MemorySurface({
 						)}
 					</div>
 				)}
-
-				{/* ----------------- TAB 2: INDEX (memory_summary.md) ----------------- */}
-				{activeTab === "index" && (
+						{knowledgeTab === "index" && (
 					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
 						<div
 							className="glass-card"
@@ -567,185 +624,7 @@ export function MemorySurface({
 						</div>
 					</div>
 				)}
-
-				{/* ----------------- TAB 3: ROLLOUT SUMMARIES ----------------- */}
-				{activeTab === "rollout" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
-						<div
-							className="glass-card"
-							style={{
-								padding: "16px 20px",
-							}}
-						>
-							<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>会话回溯与证据链归档 (Rollout Summaries)</h3>
-							<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
-								Stage 1 在每轮会话结束后自动异步提取，归档到 <code>~/.openpi/memories/rollout_summaries/</code>，提供事实溯源支撑。
-							</p>
-						</div>
-
-						{hubData?.rolloutSummaries && hubData.rolloutSummaries.length > 0 ? (
-							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-								{hubData.rolloutSummaries.map((item) => {
-									const isExpanded = expandedRollout === item.fileName;
-									return (
-										<div
-											key={item.fileName}
-											className="glass-card"
-											style={{
-												padding: "18px 22px",
-											}}
-										>
-											<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-												<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-													<span
-														style={{
-															fontSize: 11,
-															padding: "2px 6px",
-															borderRadius: 4,
-															background: "var(--bg-muted)",
-															color: "var(--text-secondary)",
-															fontWeight: 600,
-														}}
-													>
-														{item.date}
-													</span>
-													<strong style={{ fontSize: 13.5 }}>{item.slug}</strong>
-												</div>
-												<button
-													type="button"
-													className="button secondary"
-													onClick={() => setExpandedRollout(isExpanded ? null : item.fileName)}
-													style={{ fontSize: 11.5, padding: "3px 8px" }}
-												>
-													{isExpanded ? "收起" : "展开全文"}
-												</button>
-											</div>
-
-											{isExpanded ? (
-												<div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-													<MarkdownText text={item.content} />
-												</div>
-											) : (
-												<p
-													style={{
-														margin: 0,
-														fontSize: 12.5,
-														color: "var(--text-secondary)",
-														lineHeight: 1.5,
-														display: "-webkit-box",
-														WebkitLineClamp: 2,
-														WebkitBoxOrient: "vertical",
-														overflow: "hidden",
-													}}
-												>
-													{((item?.content || "").split("## Extracted Raw Memories")[0] ?? "").replace(/#.*\n/, "").trim()}
-												</p>
-											)}
-										</div>
-									);
-								})}
-							</div>
-						) : (
-							<div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-tertiary)" }}>
-								<Layers size={32} style={{ opacity: 0.4, marginBottom: 10 }} />
-								<p style={{ margin: 0, fontSize: 13.5 }}>尚无会话归档记录</p>
-								<p style={{ margin: "4px 0 0", fontSize: 12 }}>
-									与 Agent 完成对话后，系统将自动归档结构化会话总结
-								</p>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* ----------------- TAB 4: SKILLS ----------------- */}
-				{activeTab === "skills" && (
-					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
-						<div
-							className="glass-card"
-							style={{
-								padding: "16px 20px",
-								display: "flex",
-								justifyContent: "space-between",
-								alignItems: "center",
-								gap: 16,
-							}}
-						>
-							<div>
-								<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>自进化技能库 (Synthesized Skills)</h3>
-								<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
-									从重复排障与执行成功经验中提炼的标准可执行规约（存储在 <code>~/.openpi/memories/skills/</code>），从静态记忆蜕变为生产力。
-								</p>
-							</div>
-							<button
-								type="button"
-								onClick={handleConsolidateNow}
-								disabled={consolidating}
-								style={{
-									display: "flex",
-									alignItems: "center",
-									gap: 6,
-									padding: "7px 14px",
-									borderRadius: 6,
-									fontSize: 12.5,
-									fontWeight: 500,
-									cursor: consolidating ? "not-allowed" : "pointer",
-									background: "var(--accent)",
-									color: "#fff",
-									border: "none",
-									whiteSpace: "nowrap",
-									boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-									transition: "all 0.2s ease",
-								}}
-							>
-								<Sparkles size={14} />
-								<span>{consolidating ? "正在提炼技能中…" : "一键提炼自进化技能"}</span>
-							</button>
-						</div>
-
-						{hubData?.skills && hubData.skills.length > 0 ? (
-							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-								{hubData.skills.map((skill) => (
-									<div
-										key={skill.name}
-										className="glass-card"
-										style={{
-											padding: "18px 22px",
-										}}
-									>
-										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
-											<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-												<Zap size={15} style={{ color: "var(--accent)" }} />
-												<strong style={{ fontSize: 14 }}>{skill.name}</strong>
-												<span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-													skills/{skill.name}/SKILL.md
-												</span>
-											</div>
-											{skill.description && (
-												<span style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: "55%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-													{skill.description}
-												</span>
-											)}
-										</div>
-										<div style={{ padding: 14, borderRadius: 8, background: "var(--bg-muted)", fontSize: 13, lineHeight: 1.6 }}>
-											<MarkdownText text={skill.content ? (skill.content.trim().startsWith("---") && skill.content.split("---").length >= 3 ? skill.content.split("---").slice(2).join("---").trim() : skill.content) : (skill.description || "暂无具体正文规约")} />
-										</div>
-									</div>
-								))}
-							</div>
-						) : (
-							<div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-tertiary)" }}>
-								<Zap size={32} style={{ opacity: 0.4, marginBottom: 10 }} />
-								<p style={{ margin: 0, fontSize: 13.5 }}>暂无自动生成的自进化技能</p>
-								<p style={{ margin: "4px 0 0", fontSize: 12 }}>
-									当某一类排错或构建操作被重复验证多次时，全局整理会自动提炼为可复用标准技能
-								</p>
-							</div>
-						)}
-					</div>
-				)}
-
-				{/* ----------------- TAB 5: ENTRIES (LEGACY VIEW) ----------------- */}
-				{activeTab === "entries" && (
+						{knowledgeTab === "entries" && (
 					<div style={{ maxWidth: 1000, margin: "0 auto" }}>
 						<div
 							style={{
@@ -909,6 +788,217 @@ export function MemorySurface({
 								))}
 							</div>
 						)}
+					</div>
+				)}
+					</div>
+				)}
+
+				{/* ----------------- DOMAIN 3: AGENT EXPERIENCE ----------------- */}
+				{activeDomain === "experience" && (
+					<div style={{ maxWidth: 1000, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+						<div style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+							<button
+								type="button"
+								className={`button secondary ${experienceTab === "skills" ? "active" : ""}`}
+								style={{
+									background: experienceTab === "skills" ? "var(--accent-soft)" : undefined,
+									borderColor: experienceTab === "skills" ? "var(--accent)" : undefined,
+									color: experienceTab === "skills" ? "var(--accent)" : undefined,
+									fontWeight: experienceTab === "skills" ? 600 : undefined,
+								}}
+								onClick={() => setExperienceTab("skills")}
+							>
+								<Zap size={13} />
+								<span>自进化技能库 ({hubData?.skills.length ?? 0})</span>
+							</button>
+							<button
+								type="button"
+								className={`button secondary ${experienceTab === "rollout" ? "active" : ""}`}
+								style={{
+									background: experienceTab === "rollout" ? "var(--accent-soft)" : undefined,
+									borderColor: experienceTab === "rollout" ? "var(--accent)" : undefined,
+									color: experienceTab === "rollout" ? "var(--accent)" : undefined,
+									fontWeight: experienceTab === "rollout" ? 600 : undefined,
+								}}
+								onClick={() => setExperienceTab("rollout")}
+							>
+								<Layers size={13} />
+								<span>会话证据归档 ({hubData?.rolloutSummaries.length ?? 0})</span>
+							</button>
+						</div>
+
+						{experienceTab === "skills" && (
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
+						<div
+							className="glass-card"
+							style={{
+								padding: "16px 20px",
+								display: "flex",
+								justifyContent: "space-between",
+								alignItems: "center",
+								gap: 16,
+							}}
+						>
+							<div>
+								<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>自进化技能库 (Synthesized Skills)</h3>
+								<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+									从重复排障与执行成功经验中提炼的标准可执行规约（存储在 <code>~/.openpi/memories/skills/</code>），从静态记忆蜕变为生产力。
+								</p>
+							</div>
+							<button
+								type="button"
+								onClick={handleConsolidateNow}
+								disabled={consolidating}
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: 6,
+									padding: "7px 14px",
+									borderRadius: 6,
+									fontSize: 12.5,
+									fontWeight: 500,
+									cursor: consolidating ? "not-allowed" : "pointer",
+									background: "var(--accent)",
+									color: "#fff",
+									border: "none",
+									whiteSpace: "nowrap",
+									boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+									transition: "all 0.2s ease",
+								}}
+							>
+								<Sparkles size={14} />
+								<span>{consolidating ? "正在提炼技能中…" : "一键提炼自进化技能"}</span>
+							</button>
+						</div>
+
+						{hubData?.skills && hubData.skills.length > 0 ? (
+							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+								{hubData.skills.map((skill) => (
+									<div
+										key={skill.name}
+										className="glass-card"
+										style={{
+											padding: "18px 22px",
+										}}
+									>
+										<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 }}>
+											<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+												<Zap size={15} style={{ color: "var(--accent)" }} />
+												<strong style={{ fontSize: 14 }}>{skill.name}</strong>
+												<span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+													skills/{skill.name}/SKILL.md
+												</span>
+											</div>
+											{skill.description && (
+												<span style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: "55%", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+													{skill.description}
+												</span>
+											)}
+										</div>
+										<div style={{ padding: 14, borderRadius: 8, background: "var(--bg-muted)", fontSize: 13, lineHeight: 1.6 }}>
+											<MarkdownText text={skill.content ? (skill.content.trim().startsWith("---") && skill.content.split("---").length >= 3 ? skill.content.split("---").slice(2).join("---").trim() : skill.content) : (skill.description || "暂无具体正文规约")} />
+										</div>
+									</div>
+								))}
+							</div>
+						) : (
+							<div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-tertiary)" }}>
+								<Zap size={32} style={{ opacity: 0.4, marginBottom: 10 }} />
+								<p style={{ margin: 0, fontSize: 13.5 }}>暂无自动生成的自进化技能</p>
+								<p style={{ margin: "4px 0 0", fontSize: 12 }}>
+									当某一类排错或构建操作被重复验证多次时，全局整理会自动提炼为可复用标准技能
+								</p>
+							</div>
+						)}
+					</div>
+				)}
+						{experienceTab === "rollout" && (
+					<div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 960, margin: "0 auto" }}>
+						<div
+							className="glass-card"
+							style={{
+								padding: "16px 20px",
+							}}
+						>
+							<h3 style={{ margin: 0, fontSize: 14, fontWeight: 650 }}>会话回溯与证据链归档 (Rollout Summaries)</h3>
+							<p style={{ margin: "2px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+								Stage 1 在每轮会话结束后自动异步提取，归档到 <code>~/.openpi/memories/rollout_summaries/</code>，提供事实溯源支撑。
+							</p>
+						</div>
+
+						{hubData?.rolloutSummaries && hubData.rolloutSummaries.length > 0 ? (
+							<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+								{hubData.rolloutSummaries.map((item) => {
+									const isExpanded = expandedRollout === item.fileName;
+									return (
+										<div
+											key={item.fileName}
+											className="glass-card"
+											style={{
+												padding: "18px 22px",
+											}}
+										>
+											<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+												<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+													<span
+														style={{
+															fontSize: 11,
+															padding: "2px 6px",
+															borderRadius: 4,
+															background: "var(--bg-muted)",
+															color: "var(--text-secondary)",
+															fontWeight: 600,
+														}}
+													>
+														{item.date}
+													</span>
+													<strong style={{ fontSize: 13.5 }}>{item.slug}</strong>
+												</div>
+												<button
+													type="button"
+													className="button secondary"
+													onClick={() => setExpandedRollout(isExpanded ? null : item.fileName)}
+													style={{ fontSize: 11.5, padding: "3px 8px" }}
+												>
+													{isExpanded ? "收起" : "展开全文"}
+												</button>
+											</div>
+
+											{isExpanded ? (
+												<div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+													<MarkdownText text={item.content} />
+												</div>
+											) : (
+												<p
+													style={{
+														margin: 0,
+														fontSize: 12.5,
+														color: "var(--text-secondary)",
+														lineHeight: 1.5,
+														display: "-webkit-box",
+														WebkitLineClamp: 2,
+														WebkitBoxOrient: "vertical",
+														overflow: "hidden",
+													}}
+												>
+													{((item?.content || "").split("## Extracted Raw Memories")[0] ?? "").replace(/#.*\n/, "").trim()}
+												</p>
+											)}
+										</div>
+									);
+								})}
+							</div>
+						) : (
+							<div style={{ textAlign: "center", padding: "40px 20px", color: "var(--text-tertiary)" }}>
+								<Layers size={32} style={{ opacity: 0.4, marginBottom: 10 }} />
+								<p style={{ margin: 0, fontSize: 13.5 }}>尚无会话归档记录</p>
+								<p style={{ margin: "4px 0 0", fontSize: 12 }}>
+									与 Agent 完成对话后，系统将自动归档结构化会话总结
+								</p>
+							</div>
+						)}
+					</div>
+				)}
 					</div>
 				)}
 			</div>
