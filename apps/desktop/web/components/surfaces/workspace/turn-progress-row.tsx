@@ -42,6 +42,12 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 
 	const elapsedStr = formatElapsed(seconds);
 	const tokenStr = formatTokens(tokens);
+	// 「最近活动」是分辨「在推进」与「卡住」的唯一硬信号：它只由真实事件推进。
+	const lastEventAt = progress?.lastEventAt;
+	const idleSeconds = lastEventAt ? Math.max(0, Math.floor((now - lastEventAt) / 1_000)) : undefined;
+	const idleStr =
+		idleSeconds === undefined ? "" : idleSeconds < 3 ? "刚刚有响应" : `${formatElapsed(idleSeconds)} 无响应`;
+	const toolCount = progress?.toolCount ?? 0;
 
 	return (
 		<div className="agent-runtime-hud" role="status" aria-live="polite">
@@ -53,6 +59,28 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 
 				<div className="agent-runtime-meta-stream">
 					<span className="agent-runtime-time">{elapsedStr}</span>
+
+					{toolCount > 0 && (
+						<>
+							<span className="agent-runtime-bullet">•</span>
+							<span className="agent-runtime-tools" title="本轮已执行的工具调用次数">
+								第 {toolCount} 次工具调用
+							</span>
+						</>
+					)}
+
+					{idleStr && (
+						<>
+							<span className="agent-runtime-bullet">•</span>
+							<span
+								className="agent-runtime-idle"
+								style={idleSeconds !== undefined && idleSeconds >= 60 ? { color: "#d97706", fontWeight: 500 } : undefined}
+								title="距最近一次真实事件（模型输出或工具结果）的时间"
+							>
+								{idleStr}
+							</span>
+						</>
+					)}
 
 					{progress?.stage === "reviewing" && progress.label && (
 						<>
@@ -71,6 +99,13 @@ export function TurnProgressRow({ progress, isWorking, tokens }: TurnProgressRow
 					)}
 				</div>
 			</div>
+
+			{progress?.guardMessage && (
+				<div className="agent-runtime-guard" role="note">
+					<span className="agent-runtime-guard-icon">🛡️</span>
+					<span>{progress.guardMessage}</span>
+				</div>
+			)}
 		</div>
 	);
 }

@@ -712,6 +712,10 @@ export function App() {
 					reviewer: event.reviewer,
 					status: event.status,
 					attempt: event.attempt,
+					toolCalls: event.toolCalls,
+					budget: event.budget,
+					level: event.level,
+					message: event.message,
 				}),
 			);
 			if (payload.instanceId) {
