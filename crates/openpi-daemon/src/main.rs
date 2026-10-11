@@ -31,6 +31,38 @@ async fn main() -> anyhow::Result<()> {
     let supervisor = Supervisor::new();
     let cloud = openpi_daemon::CloudSync::new(storage.clone());
 
+    // 事件生产者：把真实系统信号（文件 / Git / 心跳）灌入事件总线
+    let bus = supervisor.event_bus.clone();
+    let supervisor_for_events = supervisor.clone();
+    tokio::spawn(async move {
+        openpi_daemon::producers::spawn_all(bus, supervisor_for_events);
+    });
+
+    // 主动服务循环：消费事件 → 决策 → 卡片 / 晨报 / 经网关执行
+    let supervisor_for_proactive = supervisor.clone();
+    let storage_for_proactive = storage.clone();
+    tokio::spawn(async move {
+        openpi_daemon::run_proactive_loop(supervisor_for_proactive, storage_for_proactive).await;
+    });
+
+    // 统一执行网关的真实分发器：把「个人层主动执行」穿透到执行核心。
+    // 只读、受超时约束；返回真实 token 消耗供预算 Meter 核销。
+    let dispatcher_supervisor = supervisor.clone();
+    let dispatcher: openpi_daemon::gateway::Dispatcher =
+        std::sync::Arc::new(move |req: openpi_daemon::gateway::PersonalExecutionRequest| {
+            let sup = dispatcher_supervisor.clone();
+            Box::pin(async move {
+                let cwd = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+                let timeout_secs = (req.constraint.timeout_ms / 1000).max(10);
+                let text = sup
+                    .run_ephemeral_subagent(&req.context, "proactive-agent", &cwd, timeout_secs)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok((text.len() / 4) as u64)
+            })
+        });
+    supervisor.gateway.set_dispatcher(dispatcher);
+
     // Spawn cloud sync background loop (no-op until the renderer pushes a token)
     let cloud_for_loop = cloud.clone();
     tokio::spawn(async move {

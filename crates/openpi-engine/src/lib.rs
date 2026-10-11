@@ -10,7 +10,7 @@ pub mod title_summarizer;
 pub mod skill_synthesizer;
 
 pub use agent_loop::AgentLoop;
-pub use config::{EngineConfig, ModelConfig, PersonaConfig};
+pub use config::{EngineConfig, ModelConfig, PersonaConfig, ReviewerConfig};
 pub use llm_client::LlmClient;
 pub use session_manager::EngineSessionManager;
 pub use tool_registry::ToolRegistry;
@@ -18,6 +18,23 @@ pub use skill_synthesizer::{SynthesizedSkill, save_synthesized_skill, scan_all_s
 
 pub fn engine_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// 基于当前工程与用户提示词，安全提取个人记忆上下文切片 (Personal Intelligence Context)
+pub fn build_personal_context_directive(cwd: &str, user_prompt: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let db_path = std::env::var("OPENPI_DB_PATH").unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
+    if let Ok(storage) = openpi_storage::Storage::open(&db_path) {
+        let active_project = std::path::Path::new(cwd)
+            .file_name()
+            .and_then(|n| n.to_str());
+        if let Ok(pkg) = openpi_memory::ContextBuilder::build(&storage, user_prompt, active_project, 1500) {
+            if !pkg.prompt_fragment.is_empty() {
+                return format!("\n\n{}", pkg.prompt_fragment);
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]

@@ -53,8 +53,7 @@ pub fn handle(op: &str, args: &Value) -> Result<Value, String> {
             for line in stdout.lines() {
                 if line.starts_with("##") {
                     let b_info = line.trim_start_matches('#').trim();
-                    let branch_part = b_info.split_whitespace().next().unwrap_or("main");
-                    branch = branch_part.split("...").next().unwrap_or("main").to_string();
+                    branch = parse_branch_line(line);
                     if let Some(pos) = b_info.find('[') {
                         let bracket = &b_info[pos..];
                         if let Some(ahead_pos) = bracket.find("ahead ") {
@@ -440,6 +439,22 @@ pub fn handle(op: &str, args: &Value) -> Result<Value, String> {
     }
 }
 
+/// 从 `git status -sb` 的 `## ...` 行解析当前分支名。
+///
+/// 注意：**尚无任何提交**的仓库会输出 `## No commits yet on master`，
+/// 直接取第一个 token 会得到 `"No"`（真机上真实出现过）。
+fn parse_branch_line(line: &str) -> String {
+    let info = line.trim_start_matches('#').trim();
+    let info = info.strip_prefix("No commits yet on ").unwrap_or(info);
+    info.split_whitespace()
+        .next()
+        .unwrap_or("main")
+        .split("...")
+        .next()
+        .unwrap_or("main")
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,6 +463,21 @@ mod tests {
     fn unknown_git_op_is_reported() {
         let err = handle("git_does_not_exist", &json!({})).unwrap_err();
         assert!(err.contains("unhandled git op"));
+    }
+
+    #[test]
+    fn parses_plain_and_upstream_branch_lines() {
+        assert_eq!(parse_branch_line("## main"), "main");
+        assert_eq!(
+            parse_branch_line("## feature/x...origin/feature/x [ahead 1, behind 2]"),
+            "feature/x"
+        );
+    }
+
+    #[test]
+    fn parses_branch_of_a_repo_without_commits() {
+        // 关键回归：`## No commits yet on master` 曾被解析成分支名 "No"。
+        assert_eq!(parse_branch_line("## No commits yet on master"), "master");
     }
 
     #[test]

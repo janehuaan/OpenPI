@@ -1,3 +1,9 @@
+pub mod goal;
+pub mod identity;
+
+pub use goal::{GoalManager, GoalStatus};
+pub use identity::{AgentIdentity, Permission};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

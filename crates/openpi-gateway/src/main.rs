@@ -31,8 +31,8 @@ use tokio::sync::Mutex;
 
 type Body = BoxBody<Bytes, std::io::Error>;
 
-const UPSTREAM_UA: &str = "command-code/1.74.1";
-const UPSTREAM_VER: &str = "1.74.1";
+const UPSTREAM_UA: &str = "command-code/1.79.2";
+const UPSTREAM_VER: &str = "1.79.2";
 const CLINE_UA: &str = "Bun/1.4.2";
 const CLINE_VER: &str = "3.0.68";
 
@@ -972,6 +972,7 @@ fn cc_model_ids() -> Vec<String> {
         "Qwen/Qwen3.8-Max-0902",
         "Qwen/Qwen3.8-Omni-Flash",
         "claude-sonnet-5-5",
+        "claude-haiku-5-5",
         "deepseek/deepseek-v4-flash",
         "deepseek/deepseek-v4-flash-fast",
         "deepseek/deepseek-v4-flash-vision-exp",
@@ -990,6 +991,7 @@ fn cc_model_ids() -> Vec<String> {
         "meta/muse-spark-1.2-contributor",
         "meta/muse-spark-1.3",
         "meta/muse-spark-1.3-contributor",
+        "mistral/mistral-large-4",
         "moonshotai/Kimi-K2.5",
         "moonshotai/Kimi-K2.6",
         "moonshotai/Kimi-K2.7-Code",

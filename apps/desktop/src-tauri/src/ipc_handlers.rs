@@ -918,6 +918,7 @@ pub async fn handle_invoke(
                 "sessionId": sid,
                 "sessionName": label,
                 "messageCount": messages.len(),
+                "isStreaming": running,
             });
 
             Ok(json!({
@@ -1717,7 +1718,7 @@ pub async fn handle_invoke(
             Ok(json!([]))
         }
 
-        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" | "jev_trigger_dreaming" | "jev_dreamer_status" | "jev_record_event" | "jev_clear_blocks" => {
+        "write_memory_entry" | "delete_memory_entry" | "memory_meta" | "maintain_memory" | "get_memory_hub" | "save_memory_handbook" | "trigger_memory_consolidation" | "list_archived_memory" | "restore_archived_memory" | "jev_status" | "jev_route" | "jev_check_command" | "jev_process_output" | "jev_evaluate_task" | "jev_trigger_dreaming" | "jev_dreamer_status" | "jev_record_event" | "jev_clear_blocks" | "list_personal_memories" | "upsert_personal_memory" | "delete_personal_memory" | "list_personal_goals" | "upsert_personal_goal" | "update_personal_goal_progress" | "delete_personal_goal" | "list_action_cards" | "dismiss_action_card" | "get_today_briefing" | "get_safety_status" | "evaluate_decision" | "rollback_preference" | "classify_user_reaction" | "execute_through_gateway" => {
             let op = if channel == "write_memory_entry" || channel == "delete_memory_entry" {
                 memory_request_op(&channel, &args)
             } else {
@@ -2065,7 +2066,7 @@ pub async fn handle_invoke(
             };
 
             if let Some(c_obj) = core_settings.as_object_mut() {
-                for sync_key in ["defaultModel", "defaultProvider", "defaultThinkingLevel", "defaultMode", "autoCompact", "autoMemory", "reserveTokens", "desktopNotifications", "notificationThresholdSec"] {
+                for sync_key in ["defaultModel", "defaultProvider", "reviewer", "defaultThinkingLevel", "defaultMode", "autoCompact", "autoMemory", "reserveTokens", "desktopNotifications", "notificationThresholdSec"] {
                     if let Some(val) = merged.get(sync_key) {
                         c_obj.insert(sync_key.to_string(), val.clone());
                     }

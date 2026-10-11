@@ -13,6 +13,7 @@ openpi-state = { path = "../openpi-state" }
 openpi-tools = { path = "../openpi-tools" }
 openpi-jev = { path = "../openpi-jev" }
 openpi-engine = { path = "../openpi-engine" }
+openpi-safety = { path = "../openpi-safety" }
 tokio.workspace = true
 tokio-util.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
@@ -30,3 +31,4 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 rand = "0.8"
 tokio-tungstenite = "0.24"
+notify = "8"

@@ -93,6 +93,9 @@ pub fn scan_all_skills() -> Vec<SynthesizedSkill> {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                // 仅接受 <name>/SKILL.md 目录形式。顶层散落的 .md（INDEX.md、
+                // CONTRIBUTING.md、tool-index.md 等索引/文档）不是技能，跳过以免
+                // 污染注入列表并挤占真正的技能名额。
                 let skill_file = if path.is_dir() {
                     let direct = path.join("SKILL.md");
                     if direct.exists() {
@@ -100,8 +103,6 @@ pub fn scan_all_skills() -> Vec<SynthesizedSkill> {
                     } else {
                         continue;
                     }
-                } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                    path.clone()
                 } else {
                     continue;
                 };
@@ -167,15 +168,21 @@ pub fn format_skills_prompt_directive(skills: &[SynthesizedSkill]) -> String {
         return String::new();
     }
 
+    // 用户策划技能（agent/skills，synthesized=false）优先于自动合成技能，
+    // 避免自动沉淀的噪音把手工技能挤出注入名额。sort_by_key 稳定，同级保持原顺序。
+    let mut ordered: Vec<&SynthesizedSkill> = skills.iter().collect();
+    ordered.sort_by_key(|s| s.synthesized);
+
     let mut lines = Vec::new();
-    for s in skills.iter().take(12) {
+    for s in ordered.into_iter().take(50) {
         let desc = if s.description.is_empty() { "标准执行规约" } else { s.description.as_str() };
         let scripts_info = if let Some(ref sdir) = s.scripts_dir {
             format!(" [含确定性资产脚本: {}]", sdir.display())
         } else {
             String::new()
         };
-        lines.push(format!("- **{}**: {} (规约定义: ~/.openpi/memories/skills/{}/SKILL.md){}", s.name, desc, s.name, scripts_info));
+        // 用技能真实来源路径，避免把 agent/skills 的技能误标成 memories/skills。
+        lines.push(format!("- **{}**: {} (规约定义: {}){}", s.name, desc, s.file_path.display(), scripts_info));
     }
 
     format!(

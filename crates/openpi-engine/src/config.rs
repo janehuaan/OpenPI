@@ -87,10 +87,46 @@ pub struct ProviderConfig {
     pub api_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_review_mode")]
+    pub mode: String, // "code_changes" | "always"
+    #[serde(default = "default_execution_mode", alias = "executionMode")]
+    pub execution_mode: String, // "async" (default, non-blocking) | "blocking"
+}
+
+fn default_review_mode() -> String {
+    "code_changes".to_string()
+}
+
+fn default_execution_mode() -> String {
+    "async".to_string()
+}
+
+impl Default for ReviewerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: None,
+            model: None,
+            mode: default_review_mode(),
+            execution_mode: default_execution_mode(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
+    pub default_thinking_level: Option<String>,
+    pub reviewer: ReviewerConfig,
     pub max_steps: usize,
     pub models: HashMap<String, ModelConfig>,
     pub providers: HashMap<String, ProviderConfig>,
@@ -105,6 +141,8 @@ impl EngineConfig {
 
         let mut default_model = None;
         let mut default_provider = None;
+        let mut default_thinking_level = None;
+        let mut reviewer = ReviewerConfig::default();
         let mut max_steps = std::env::var("OPENPI_MAX_STEPS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -118,6 +156,14 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(tl) = v.get("defaultThinkingLevel").and_then(|x| x.as_str()) {
+                        default_thinking_level = Some(tl.to_string());
+                    }
+                    if let Some(r_val) = v.get("reviewer") {
+                        if let Ok(rc) = serde_json::from_value::<ReviewerConfig>(r_val.clone()) {
+                            reviewer = rc;
+                        }
                     }
                     if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
                         max_steps = s as usize;
@@ -134,6 +180,14 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(tl) = v.get("defaultThinkingLevel").and_then(|x| x.as_str()) {
+                        default_thinking_level = Some(tl.to_string());
+                    }
+                    if let Some(r_val) = v.get("reviewer") {
+                        if let Ok(rc) = serde_json::from_value::<ReviewerConfig>(r_val.clone()) {
+                            reviewer = rc;
+                        }
                     }
                     if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
                         max_steps = s as usize;
@@ -228,10 +282,34 @@ impl EngineConfig {
         Ok(Self {
             default_provider,
             default_model,
+            default_thinking_level,
+            reviewer,
             max_steps,
             models,
             providers: providers_map,
         })
+    }
+
+    pub fn resolve_reviewer_model(&self) -> Option<ModelConfig> {
+        if !self.reviewer.enabled {
+            return None;
+        }
+        let model_id = self.reviewer.model.as_deref()?;
+        if model_id.trim().is_empty() {
+            return None;
+        }
+        let full_key = if let Some(ref prov) = self.reviewer.provider {
+            if !model_id.contains('/') {
+                format!("{}/{}", prov, model_id)
+            } else {
+                model_id.to_string()
+            }
+        } else {
+            model_id.to_string()
+        };
+        self.resolve_model(Some(&full_key))
+            .or_else(|_| self.resolve_model(Some(model_id)))
+            .ok()
     }
 
     pub fn resolve_model(&self, requested: Option<&str>) -> Result<ModelConfig> {

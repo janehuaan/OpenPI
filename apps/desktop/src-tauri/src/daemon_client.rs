@@ -294,13 +294,20 @@ impl DaemonClient {
             }
         }
 
-        // Clean up on disconnect
+        // Clean up on disconnect: alert UI to immediately abort hanging streams
         let mut lock = write_slot.lock().await;
         *lock = None;
         let mut p = pending.lock().await;
         for (_, tx) in p.drain() {
             let _ = tx.send(Err("Daemon disconnected".to_string()));
         }
+        let _ = event_tx.send((
+            "*".to_string(),
+            serde_json::json!({
+                "type": "stream_closed",
+                "reason": "daemon_disconnected"
+            })
+        )).await;
     }
 
     pub async fn request(&self, req: ClientRequest) -> Result<Value, String> {
