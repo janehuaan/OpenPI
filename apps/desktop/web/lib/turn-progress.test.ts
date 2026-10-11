@@ -67,4 +67,37 @@ describe("turn progress", () => {
 		}, 150);
 		expect(progress?.label).toBe("正在准备下一步操作…");
 	});
+
+	it("stamps the last-event time on every real event so idleness is visible", () => {
+		let progress: TurnProgress | undefined = initialTurnProgress("one", 1_000);
+		progress = reduceTurnProgress(progress, { instanceId: "one", type: "turn_start" }, 5_000);
+		expect(progress?.lastEventAt).toBe(5_000);
+		progress = reduceTurnProgress(progress, { instanceId: "one", type: "tool_execution_start", toolName: "bash" }, 9_000);
+		expect(progress?.lastEventAt).toBe(9_000);
+		// 事件属于别的实例时不能改动本地状态（也不该盖时间戳）。
+		expect(reduceTurnProgress(progress, { instanceId: "two", type: "turn_start" }, 20_000)).toBe(progress);
+	});
+
+	it("keeps the tool-call count from the engine guard event", () => {
+		let progress: TurnProgress | undefined = initialTurnProgress("one", 1_000);
+		progress = reduceTurnProgress(
+			progress,
+			{ instanceId: "one", type: "turn_guard", level: "soft", toolCalls: 40, budget: 160, message: "本轮已执行 40 次工具调用，Agent 正在收敛" },
+			2_000,
+		);
+		expect(progress?.toolCount).toBe(40);
+		expect(progress?.guardMessage).toBe("本轮已执行 40 次工具调用，Agent 正在收敛");
+
+		// 后续工具事件继续累加计数，且不会抹掉护栏提示。
+		progress = reduceTurnProgress(progress, { instanceId: "one", type: "tool_execution_end" }, 3_000);
+		expect(progress?.toolCount).toBe(41);
+		expect(progress?.guardMessage).toBe("本轮已执行 40 次工具调用，Agent 正在收敛");
+	});
+
+	it("clears the progress (and its guard notice) once the turn settles", () => {
+		let progress: TurnProgress | undefined = initialTurnProgress("one", 1_000);
+		progress = reduceTurnProgress(progress, { instanceId: "one", type: "turn_guard", toolCalls: 160, message: "已达工具调用预算（160），正在生成最终汇报" }, 2_000);
+		expect(progress?.guardMessage).toContain("最终汇报");
+		expect(reduceTurnProgress(progress, { instanceId: "one", type: "agent_settled" }, 3_000)).toBeUndefined();
+	});
 });

@@ -353,6 +353,10 @@ export function IslandApp() {
 					maxSteps: typeof event.maxSteps === "number" ? event.maxSteps : undefined,
 					model: typeof event.model === "string" ? event.model : undefined,
 					error: event.error,
+					toolCalls: event.toolCalls,
+					budget: event.budget,
+					level: event.level,
+					message: event.message,
 				});
 			});
 

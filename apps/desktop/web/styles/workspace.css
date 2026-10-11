@@ -370,10 +370,32 @@
 /* ── Elite Developer Agent Runtime Dynamic Verb HUD ── */
 .agent-runtime-hud {
 	display: inline-flex;
+	flex-direction: column;
+	gap: 6px;
 	align-self: flex-start;
 	margin: 6px 0 10px 0;
 	user-select: none;
 	font-family: var(--font, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif);
+}
+
+/* 引擎护栏（工具预算 / 重复操作）冒泡出来的一句话。 */
+.agent-runtime-guard {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 640px;
+	padding: 4px 10px;
+	border-radius: 8px;
+	border: 1px solid var(--border, #e2e8f0);
+	background: var(--bg-muted, rgba(148, 163, 184, 0.08));
+	color: var(--text-secondary, #475569);
+	font-size: 11.5px;
+	line-height: 1.45;
+}
+
+.agent-runtime-guard-icon {
+	font-size: 11px;
+	opacity: 0.9;
 }
 
 .agent-runtime-main-bar {

@@ -26,6 +26,13 @@ yarn check:targets          # 非本机架构的 cfg 分支
 
 改完 Rust 至少跑 `yarn check:targets`；它比 `cargo check` 强，是 clippy 级别。
 
+**验证 UI 别用 `osascript ... keystroke` 往 app 里打字**：这台机器默认输入法是「简体拼音」，
+中文提示词会被输入法吞成乱码（实测把 `请用 bash...echo hello...` 变成「嗷嗷八十啊啊啊啊恶臭hello啊啊」）
+**塞进用户当前会话**，既验证不了东西又污染对话。要验组件渲染就用
+`react-dom/server` 的 `renderToStaticMarkup` 写 `.test.ts`（`vitest` 的 include 只收 `*.test.ts`，
+用 `createElement` 避开 `.tsx`；无需 jsdom / 新依赖）；要验引擎行为就起**隔离 daemon**
+（`HOME=/tmp/xxx` + `OPENPI_TURN_TOOL_BUDGET=...`），别碰真实数据。
+
 ## 已完成的工作与特性记录
 - **首页「dots 式常驻 Agent」范式改造 (Always-On Agent Presence)**：
   - 背景：用户明确要求对齐 OpenAI DevDay 2026（2026-09-29）发布的 **dots**（常驻个人 agent：可命名形象 + 自己的云电脑 + Recent Activity + 主动冒泡）与 **GPT-6 Intelligent UI** 范式，并明确选择先做 **方向 A（dots 式常驻 agent）**。
@@ -59,7 +66,18 @@ yarn check:targets          # 非本机架构的 cfg 分支
     9. **修掉分支名解析出 `No`**：`git status -sb` 在**尚无提交**的仓库里输出 `## No commits yet on master`，`git_ops.rs` 直接取第一个 token 得到分支名 `"No"`（真机 macosvir 就是这个状态，主屏「未提交变更」卡片副标题显示 `No`）。抽出 `parse_branch_line()` 处理该前缀，新增 2 例回归测试。
   - 验证：`yarn typecheck` 0 错误；`yarn build` 3.22s；`vitest` **18 文件 148/148**（新增 `lib/agent-os.test.ts` 7 例 + `lib/view-route.test.ts` 4 例）；`cargo test -p openpi-storage -p openpi-daemon` 全绿（含 2 个新回归）；`cargo test -p openpi-desktop --lib` 9/9（含 2 个 git 分支解析回归）；clippy `-D warnings` 0 警告；`cargo build --release -p openpi-daemon` + `scripts/install-daemon.sh`（daemon 9291 → 11403 热切换）；真机重打包安装 `/Applications/OpenPI.app`；**真机 socket 实证**：清理历史 8 张重复卡片后，新 daemon 只产出 1 张稳定 id 卡片（`card-git_uncommitted-0f1693488b1ed1e8`），数字刷新不再新增；**真机截图实证**冷启动落在「今日/Now」、四段世界状态全部真实数据、我建议仅 1 张卡片。
 
-- **消息显示范式重构 + 首页信息架构重排 (Answer Brief & Collapsible Today Head)**：
+- **单轮工具预算与「原地打转」护栏 + 执行进度可视化 (Turn Guard & Live Progress)**：
+  - 触发场景（真机）：用户问「怎么回事啊」——截图里 Agent 显示「执行中 · 21m 21s」。排查后确认**不是卡死**（会话日志每 2~15 秒还在写），而是**一轮跑太久且 UI 给不出进度信号**。取证：该轮最终 **360 次工具调用**、68+ 分钟，同一条 `log show --predicate 'process == "chronod" ...'` 跑了 **23 次**、`lldb` 16 次、`sqlite3` 12 次、同一个文件 `read` 11 次。
+  - 根因：agent loop 只有 `max_steps` 一道闸（默认 200，`0` = 无限），而**一步可发多个工具调用**，所以步数闸挡不住工具调用膨胀；且 UI 的 `TurnProgress` 只有「已耗时」，没有「第几次工具调用」「多久没动静」，用户无法区分「稳步推进」和「真卡住」。
+  - 落地：
+    1. **新增 `crates/openpi-engine/src/turn_guard.rs`（纯函数 + 单测）**：`TurnGuard` 记录本轮工具调用，三档软性收尾（soft = 预算 1/4，firm = 1/2，hard = 预算）+ 打转检测（同一条命令**连续 3 次**或**累计 5 次** → 立即提示换思路，冷却 3 次调用再念）。默认预算 **160**，可用 `OPENPI_TURN_TOOL_BUDGET` 覆盖（沿用 `OPENPI_MAX_STEPS` 的 env 约定）。**刻意不硬杀**：到硬顶才转入既有的「最终总结」通道（tools 关闭、强制产出汇报）。
+    2. **注入时机**：提示先攒在 `step_notices`，**等这一批工具结果全部追加完**再 push 进消息链 —— 否则 assistant 的 `tool_calls` 会缺 tool 结果，上游直接 400。提示只进本轮 LLM 上下文，**不写 journal**（journal 是给用户看的记录，伪造 toolResult 会污染它；UI 走 `turn_guard` 事件拿同一句话）。
+    3. **新事件 `turn_guard`**（`level` / `toolCalls` / `budget` / `message`），经 daemon → Tauri → webview 原样透传（该链路无类型白名单）。
+    4. **UI 进度信号（`turn-progress.ts` + `turn-progress-row.tsx`）**：`lastEventAt` 由**每条真实事件**盖时间戳（不是本地计时器），HUD 显示「第 N 次工具调用 · 12s 无响应」（≥60s 变琥珀色）+ 护栏冒泡条 `🛡️ 本轮已执行 40 次工具调用，Agent 正在收敛`。
+  - 修掉一个自造 bug：指纹原先直接哈希 `args.to_string()`（JSON 文本），而 `\n` 在 JSON 里是**两个转义字符**、不是空白，于是同一条命令换个换行就成新指纹。改为 `push_normalized()` 展开 JSON 后按原样拼接再折叠空白（字符串值先 `trim`）。
+  - 验证：`openpi-engine` **57 tests 全绿**（新增 9 例：空白折叠 / 命令与工具区分 / 超长截断 / soft+firm 只各响一次 / 硬顶 / 连续重复 / 非连续累计重复 / 冷却 / 预算下限）；`vitest` **19 文件 154/154**（新增 `lib/turn-progress.test.ts` 3 例：事件时间戳 / 护栏计数 / settle 清空；新增 `components/.../turn-progress-row.test.ts` 3 例 —— 用 `react-dom/server` 真渲染，无需 jsdom/新依赖，钉住「第 N 次工具调用 / Xs 无响应 / 护栏冒泡」真的出现在 DOM 里）；`yarn typecheck` 0 错误；clippy `-D warnings` 0 警告；`cargo test --workspace` 196/0；`yarn check:targets` 通过。
+  - **真机端到端实证（隔离 daemon，`HOME=/tmp/opitest` + `OPENPI_TURN_TOOL_BUDGET=8`，不碰真实数据）**：① 让它连跑 6 次 `echo hello` → `turn_guard` 事件在**第 3 次**和**第 6 次**各触发一次 `level:"repeat"`（冷却 3 次生效），模型收到提示后**主动停止重复**；② 让它跑 10 条**互不相同**的命令 → 执行满 8 次后 daemon 打印 `tool budget exhausted (8 calls, budget 8), requesting final synthesis`，`turn_guard` 事件 `level:"final"`，本轮以**最终汇报**收尾而不是继续膨胀。
+
   - 背景：首页呈现「OS 仪表盘 + 裸聊天气泡」的混搭，与「个人助理」定位割裂。方案见 `docs/message-redesign-plan.md`。
   - 根因：`workspace-preview.tsx` 的消息只有两条渲染路径 —— `parseAgentOutcome` 命中 → `AgentOutcomeCard`，否则 → 裸 `MarkdownText`；而 `parseAgentOutcome` 要求出现「做了什么/交付成果/执行结果」小标题才生效，**分析/建议/问答型回复全部落到裸文本**。另有 `ClaudeCodeRecapCard` 复述正文导致重复。
   - 落地：

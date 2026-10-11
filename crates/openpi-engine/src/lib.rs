@@ -8,6 +8,7 @@ pub mod tool_registry;
 pub mod memory_worker;
 pub mod title_summarizer;
 pub mod skill_synthesizer;
+pub mod turn_guard;
 
 pub use agent_loop::AgentLoop;
 pub use config::{EngineConfig, ModelConfig, PersonaConfig, ReviewerConfig};

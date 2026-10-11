@@ -11,6 +11,10 @@ export interface TurnProgress {
 	toolName?: string;
 	toolCount?: number;
 	lastToolName?: string;
+	/** 最近一次收到任何事件的时间：用来显示「最近活动 Xs 前」，区分「在推进」和「卡住」。 */
+	lastEventAt?: number;
+	/** 引擎侧护栏（工具预算 / 重复操作）给出的一句话。 */
+	guardMessage?: string;
 }
 
 export type TurnProgressEvent = {
@@ -27,6 +31,11 @@ export type TurnProgressEvent = {
 	status?: unknown;
 	attempt?: unknown;
 	mode?: unknown;
+	/** `turn_guard` 事件：本轮工具调用次数 / 预算 / 提示语。 */
+	toolCalls?: unknown;
+	budget?: unknown;
+	level?: unknown;
+	message?: unknown;
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -69,9 +78,30 @@ export function reduceTurnProgress(
 	event: TurnProgressEvent,
 	now = Date.now(),
 ): TurnProgress | undefined {
+	const next = reduceTurnProgressInner(current, event, now);
+	// 任何一条事件都算「有动静」。UI 用它显示「最近活动 Xs 前」，
+	// 这样用户能一眼分辨「在稳步推进」和「真的卡住了」。
+	if (!next || next === current) return next;
+	return { ...next, lastEventAt: now };
+}
+
+function reduceTurnProgressInner(
+	current: TurnProgress | undefined,
+	event: TurnProgressEvent,
+	now = Date.now(),
+): TurnProgress | undefined {
 	const instanceId = event.instanceId;
 	if (!current || current.instanceId !== instanceId) return current;
 	const type = event.type;
+	if (type === "turn_guard") {
+		const message = typeof event.message === "string" ? event.message : undefined;
+		const toolCalls = typeof event.toolCalls === "number" ? event.toolCalls : current.toolCount;
+		return {
+			...current,
+			toolCount: toolCalls ?? current.toolCount,
+			guardMessage: message ?? current.guardMessage,
+		};
+	}
 	if (type === "agent_start") return { ...current, stage: "starting", label: "代理已启动，准备处理中…" };
 	if (type === "turn_start") {
 		const step = typeof event.step === "number" ? event.step : current.step;
