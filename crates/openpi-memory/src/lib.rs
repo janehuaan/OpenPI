@@ -4,6 +4,8 @@ pub mod indexer;
 pub mod repomap;
 pub mod decay;
 pub mod metal;
+pub mod lifecycle;
+pub mod context_builder;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +17,8 @@ pub use bm25::Bm25Index;
 pub use vector::cosine_similarity;
 pub use indexer::{CodeChunk, CodeSearchHit, CodebaseIndex, FileFingerprint, IndexDelta};
 pub use repomap::RepoMapGenerator;
+pub use lifecycle::MemoryCategory;
+pub use context_builder::{ContextBuilder, ContextPackage};
 
 #[derive(Clone)]
 pub struct CodebaseMemoryManager {

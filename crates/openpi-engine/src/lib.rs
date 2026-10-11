@@ -10,7 +10,7 @@ pub mod title_summarizer;
 pub mod skill_synthesizer;
 
 pub use agent_loop::AgentLoop;
-pub use config::{EngineConfig, ModelConfig, PersonaConfig};
+pub use config::{EngineConfig, ModelConfig, PersonaConfig, ReviewerConfig};
 pub use llm_client::LlmClient;
 pub use session_manager::EngineSessionManager;
 pub use tool_registry::ToolRegistry;
@@ -18,6 +18,23 @@ pub use skill_synthesizer::{SynthesizedSkill, save_synthesized_skill, scan_all_s
 
 pub fn engine_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// 基于当前工程与用户提示词，安全提取个人记忆上下文切片 (Personal Intelligence Context)
+pub fn build_personal_context_directive(cwd: &str, user_prompt: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let db_path = std::env::var("OPENPI_DB_PATH").unwrap_or_else(|_| format!("{}/.openpi/openpi.db", home));
+    if let Ok(storage) = openpi_storage::Storage::open(&db_path) {
+        let active_project = std::path::Path::new(cwd)
+            .file_name()
+            .and_then(|n| n.to_str());
+        if let Ok(pkg) = openpi_memory::ContextBuilder::build(&storage, user_prompt, active_project, 1500) {
+            if !pkg.prompt_fragment.is_empty() {
+                return format!("\n\n{}", pkg.prompt_fragment);
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -61,11 +78,26 @@ mod tests {
             &[tc],
             "自建",
             "gemini-3.8-flash-high",
-            100,
+            1000,
             25,
+            768,
+            0,
             "toolUse",
         ).unwrap();
         assert!(!asst_id.is_empty());
+
+        // Cache accounting must survive the round-trip to disk: the usage panel
+        // reads its stats straight from this journal file.
+        let raw = std::fs::read_to_string(&journal.file_path).unwrap();
+        let assistant_entry = raw
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|entry| entry.get("id").and_then(|v| v.as_str()) == Some(asst_id.as_str()))
+            .expect("assistant entry present in journal");
+        let usage = &assistant_entry["message"]["usage"];
+        assert_eq!(usage["cacheRead"], 768);
+        assert_eq!(usage["cacheWrite"], 0);
+        assert_eq!(usage["input"], 232, "input must exclude the cached portion");
 
         let tool_res_id = journal.append_tool_result("call_123", "read", "[package]\nname = ...", false).unwrap();
         assert!(!tool_res_id.is_empty());

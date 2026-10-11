@@ -20,6 +20,27 @@ const BACKGROUND_TURN_INTERVAL: u64 = 3;
 /// still running, so only clearly oversized payloads are folded.
 const INFLIGHT_ARG_STRING_KEEP: usize = 2000;
 
+#[derive(Debug, Clone)]
+pub struct ReviewResult {
+    pub approved: bool,
+    pub critique: String,
+    pub reviewer_id: String,
+    pub provider_id: String,
+}
+
+pub(crate) fn parse_review_output(text: &str) -> (bool, String) {
+    let lower = text.to_lowercase();
+    if lower.contains("status: rejected") || lower.contains("status: reject") || lower.starts_with("rejected") {
+        (false, text.to_string())
+    } else if lower.contains("status: approved") || lower.contains("status: approve") || lower.starts_with("approved") {
+        (true, text.to_string())
+    } else if lower.contains("defects:") || lower.contains("defect:") || lower.contains("flaws:") {
+        (false, text.to_string())
+    } else {
+        (true, text.to_string())
+    }
+}
+
 struct DesktopStreamBridge {
     session_id: String,
     event_tx: broadcast::Sender<(String, Value)>,
@@ -198,6 +219,125 @@ impl AgentLoop {
         }
     }
 
+    async fn execute_review(
+        llm: &LlmClient,
+        rev_cfg: &crate::config::ModelConfig,
+        user_prompt: &str,
+        actor_reply: &str,
+        tool_actions: &[String],
+        cwd: &str,
+        cancel_token: CancellationToken,
+    ) -> Result<ReviewResult> {
+        let git_dir = std::path::Path::new(cwd).join(".git");
+        let git_diff = if git_dir.exists() {
+            // 1. Fast check: check if any tracked/staged files actually changed
+            let status_out = tokio::process::Command::new("git")
+                .args(["diff", "--name-only", "HEAD"])
+                .current_dir(cwd)
+                .output()
+                .await
+                .ok();
+
+            let has_changes = status_out
+                .as_ref()
+                .and_then(|o| String::from_utf8(o.stdout.clone()).ok())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+
+            if !has_changes {
+                // Zero file modifications: immediately pass in < 5ms without burning LLM time!
+                return Ok(ReviewResult {
+                    approved: true,
+                    critique: "无实际代码变更，质检秒级自动放行。".into(),
+                    reviewer_id: rev_cfg.id.clone(),
+                    provider_id: rev_cfg.provider.clone(),
+                });
+            }
+
+            // 2. Focused diff excluding lockfiles, build caches, and node_modules
+            tokio::process::Command::new("git")
+                .args([
+                    "diff",
+                    "HEAD",
+                    "--",
+                    ".",
+                    ":!*.lock",
+                    ":!yarn.lock",
+                    ":!Cargo.lock",
+                    ":!package-lock.json",
+                    ":!dist",
+                    ":!target",
+                    ":!node_modules",
+                    ":!.next",
+                ])
+                .current_dir(cwd)
+                .output()
+                .await
+                .ok()
+                .and_then(|out| String::from_utf8(out.stdout).ok())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let capped_diff = if git_diff.chars().count() > 8_000 {
+            let prefix: String = git_diff.chars().take(8_000).collect();
+            format!("{}\n\n[Diff truncated for rapid review]", prefix)
+        } else {
+            git_diff
+        };
+
+        let tools_text = if tool_actions.is_empty() {
+            "(No tools invoked)".to_string()
+        } else {
+            // Keep at most last 8 tool actions to stay ultra-compact
+            let start = tool_actions.len().saturating_sub(8);
+            tool_actions[start..].join("\n")
+        };
+
+        let system_prompt = "You are OpenPI Critic. Inspect code changes against the user's goal with extreme skepticism and high speed.\n\
+Output format (MUST strictly follow):\n\
+STATUS: APPROVED (or STATUS: REJECTED)\n\
+CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approved>";
+
+        let user_content = format!(
+            "### User Goal:\n{}\n\n### Primary Agent Answer:\n{}\n\n### Tool Actions:\n{}\n\n### Git Diff:\n{}",
+            user_prompt, actor_reply, tools_text, if capped_diff.trim().is_empty() { "(No code diffs)" } else { &capped_diff }
+        );
+
+        struct NullHandler;
+        impl StreamEventHandler for NullHandler {}
+
+        let messages = vec![
+            ChatMessage::system(system_prompt),
+            ChatMessage::user(user_content),
+        ];
+
+        // Fast generation: limit max_tokens to 256 for rapid response
+        let mut fast_rev_cfg = rev_cfg.clone();
+        fast_rev_cfg.max_tokens = 256;
+
+        let fut = llm.stream_chat_completion(
+            &fast_rev_cfg,
+            messages,
+            None,
+            cancel_token,
+            &NullHandler,
+        );
+
+        // Fast 12s timeout (down from 35s)
+        let res = tokio::time::timeout(std::time::Duration::from_secs(12), fut).await??;
+        let text = res.text.trim();
+        let (approved, critique) = parse_review_output(text);
+
+        Ok(ReviewResult {
+            approved,
+            critique,
+            reviewer_id: rev_cfg.id.clone(),
+            provider_id: rev_cfg.provider.clone(),
+        })
+    }
+
     pub async fn run_turn(
         &self,
         session_id: &str,
@@ -206,6 +346,7 @@ impl AgentLoop {
         model_override: Option<&str>,
         cancel_token: CancellationToken,
     ) -> Result<()> {
+        let _ = self.reload_config();
         let model_cfg = {
             let r = self.config.read().map_err(|e| anyhow::anyhow!("Poisoned lock: {}", e))?;
             match r.resolve_model(model_override) {
@@ -263,6 +404,7 @@ impl AgentLoop {
         let persona_directive = persona.to_prompt_directive();
         let all_skills = crate::skill_synthesizer::scan_all_skills();
         let skills_directive = crate::skill_synthesizer::format_skills_prompt_directive(&all_skills);
+        let personal_directive = crate::build_personal_context_directive(cwd, user_prompt);
 
         let system_prompt = format!(
             "You are OpenPI, an autonomous AI software engineer running on the native Rust engine (openpi-engine).\n\
@@ -271,8 +413,9 @@ impl AgentLoop {
              1. Fast, surgical execution: use read to inspect files, edit/search_replace to perform minimal atomic updates, and bash to test or run commands.\n\
              2. Be decisive and efficient: avoid redundant repeated searches, excessive read cycles, or unnecessary multiple rounds of verification. When the target code or root cause is clear, make the edit directly.\n\
              3. Never run broad recursive searches across the home directory; use targeted grep or find instead.\n\
-             4. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.{}{}",
-            cwd, ctx_label, beta, persona_directive, skills_directive
+             4. Decisive reasoning: Keep your chain of thought concise, goal-oriented, and analytical. Never repeat identical thoughts, loops of deliberation, or stall before action. Once a plan or step is decided, immediately proceed to tool calls or response.\n\
+             5. [Dream-RSI Prior ({}, Beta* = {:.2})]: Focus strictly on solving the assigned task with low churn and high precision.{}{}{}",
+            cwd, ctx_label, beta, persona_directive, skills_directive, personal_directive
         );
 
         active_messages.push(ChatMessage::system(system_prompt));
@@ -304,6 +447,11 @@ impl AgentLoop {
         // for a finished turn, or the agent silently stops mid-task.
         let mut empty_streak: usize = 0;
         const MAX_EMPTY_RETRIES: usize = 2;
+
+        let mut modified_code = false;
+        let mut tool_actions_summary: Vec<String> = Vec::new();
+        let mut review_attempts: usize = 0;
+        const MAX_REVIEW_RETRIES: usize = 2;
 
         while step < max_steps {
             if cancel_token.is_cancelled() {
@@ -360,6 +508,8 @@ impl AgentLoop {
                         &model_cfg.id,
                         0,
                         0,
+                        0,
+                        0,
                         "error",
                     );
                     let _ = self.event_tx.send((
@@ -379,6 +529,8 @@ impl AgentLoop {
 
             let in_tok = llm_res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
             let out_tok = llm_res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+            let cache_read_tok = llm_res.usage.as_ref().map(|u| u.cache_read_tokens()).unwrap_or(0);
+            let cache_write_tok = llm_res.usage.as_ref().map(|u| u.cache_creation_tokens()).unwrap_or(0);
 
             if !llm_res.tool_calls.is_empty() {
                 empty_streak = 0;
@@ -391,6 +543,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "toolUse",
                 )?;
 
@@ -454,6 +608,14 @@ impl AgentLoop {
                         }),
                     ));
 
+                    let tool_name = tc.function.name.as_str();
+                    if matches!(tool_name, "edit" | "write" | "search_replace" | "bash" | "managed_bash") {
+                        modified_code = true;
+                    }
+                    let summary_str = format!("{}: {}", tool_name, parsed_args);
+                    let capped_summary: String = summary_str.chars().take(200).collect();
+                    tool_actions_summary.push(capped_summary);
+
                     // Append tool result to journal and context
                     journal.append_tool_result(
                         &tc.id,
@@ -507,6 +669,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "error",
                 )?;
                 let asst_now = chrono::Utc::now().timestamp_millis();
@@ -528,7 +692,253 @@ impl AgentLoop {
                 finished_normally = true;
                 break;
             } else {
-                // Final textual response (no further tool calls)
+                // Primary agent generated a final textual response (no further tool calls).
+                // Before settling, check if a third-party review is configured & warranted.
+                let reviewer_model_opt = {
+                    let r = self.config.read().ok();
+                    r.and_then(|c| {
+                        if c.reviewer.enabled && (c.reviewer.mode == "always" || modified_code || review_attempts > 0) {
+                            c.resolve_reviewer_model()
+                        } else {
+                            None
+                        }
+                    })
+                };
+
+                let execution_mode = {
+                    let r = self.config.read().ok();
+                    r.map(|c| c.reviewer.execution_mode.clone()).unwrap_or_else(|| "async".into())
+                };
+
+                if execution_mode != "blocking" {
+                    // ⚡ 【非阻塞后台异步质检模式】(Async Mode): 立即交付主回答，绝不阻塞用户任务与交互输入
+                    journal.append_assistant_message(
+                        &llm_res.text,
+                        &llm_res.reasoning,
+                        &[],
+                        &model_cfg.provider,
+                        &model_cfg.id,
+                        in_tok,
+                        out_tok,
+                        cache_read_tok,
+                        cache_write_tok,
+                        "stop",
+                    )?;
+
+                    let asst_now = chrono::Utc::now().timestamp_millis();
+                    let _ = self.event_tx.send((
+                        session_id.to_string(),
+                        json!({
+                            "type": "message_end",
+                            "message": {
+                                "role": "assistant",
+                                "content": [{ "type": "text", "text": llm_res.text }],
+                                "timestamp": asst_now
+                            }
+                        }),
+                    ));
+
+                    // 后台并发执行独立质检，速度快且完全不拖慢交互
+                    if let Some(rev_cfg) = reviewer_model_opt {
+                        let event_tx = self.event_tx.clone();
+                        let llm_client = self.llm_client.clone();
+                        let session_id_str = session_id.to_string();
+                        let user_prompt_str = user_prompt.to_string();
+                        let actor_reply_str = llm_res.text.clone();
+                        let tool_actions = tool_actions_summary.clone();
+                        let cwd_str = cwd.to_string();
+                        let cancel_token = cancel_token.clone();
+
+                        tokio::spawn(async move {
+                            let _ = event_tx.send((
+                                session_id_str.clone(),
+                                json!({
+                                    "type": "review_start",
+                                    "reviewer": rev_cfg.id,
+                                    "provider": rev_cfg.provider,
+                                    "mode": "async",
+                                    "attempt": 1
+                                }),
+                            ));
+
+                            match Self::execute_review(
+                                &llm_client,
+                                &rev_cfg,
+                                &user_prompt_str,
+                                &actor_reply_str,
+                                &tool_actions,
+                                &cwd_str,
+                                cancel_token,
+                            ).await {
+                                Ok(rev_res) => {
+                                    let _ = event_tx.send((
+                                        session_id_str.clone(),
+                                        json!({
+                                            "type": "review_result",
+                                            "reviewer": rev_cfg.id,
+                                            "provider": rev_cfg.provider,
+                                            "status": if rev_res.approved { "approved" } else { "rejected" },
+                                            "critique": rev_res.critique,
+                                            "mode": "async",
+                                            "attempt": 1
+                                        }),
+                                    ));
+
+                                    if !rev_res.approved {
+                                        info!(
+                                            "Session {} async review rejected by {}: {}",
+                                            session_id_str, rev_cfg.id, rev_res.critique
+                                        );
+                                        let mut bg_journal = SessionJournal::open(&session_id_str);
+                                        let critique_text = format!(
+                                            "⚠️ [第三方独立评审 ({}) 质检建议]:\n{}",
+                                            rev_cfg.id, rev_res.critique
+                                        );
+                                        let _ = bg_journal.append_assistant_message(
+                                            &critique_text,
+                                            "",
+                                            &[],
+                                            &rev_cfg.provider,
+                                            &rev_cfg.id,
+                                            0, 0, 0, 0,
+                                            "critique_rejected",
+                                        );
+                                    } else {
+                                        info!(
+                                            "Session {} async review approved by {}: {}",
+                                            session_id_str, rev_cfg.id, rev_res.critique
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Session {} async review failed: {}. Automatically bypassed.", session_id_str, e);
+                                    let _ = event_tx.send((
+                                        session_id_str.clone(),
+                                        json!({
+                                            "type": "review_result",
+                                            "reviewer": rev_cfg.id,
+                                            "provider": rev_cfg.provider,
+                                            "status": "bypassed",
+                                            "critique": format!("评审调用异常 (已自动放行): {}", e),
+                                            "mode": "async",
+                                            "attempt": 1
+                                        }),
+                                    ));
+                                }
+                            }
+                        });
+                    }
+
+                    finished_normally = true;
+                    break;
+                }
+
+                // 🛑 【同步严格门禁模式】(Blocking Mode): 仅在用户显式要求严格门禁时阻断等待
+                if let Some(rev_cfg) = reviewer_model_opt {
+                    if review_attempts < MAX_REVIEW_RETRIES {
+                        info!(
+                            "Triggering blocking third-party review ({}/{}) for session {}, attempt {}/{}",
+                            rev_cfg.provider, rev_cfg.id, session_id, review_attempts + 1, MAX_REVIEW_RETRIES
+                        );
+
+                        let _ = self.event_tx.send((
+                            session_id.to_string(),
+                            json!({
+                                "type": "review_start",
+                                "reviewer": rev_cfg.id,
+                                "provider": rev_cfg.provider,
+                                "mode": "blocking",
+                                "attempt": review_attempts + 1
+                            }),
+                        ));
+
+                        let review_fut = Self::execute_review(
+                            &self.llm_client,
+                            &rev_cfg,
+                            user_prompt,
+                            &llm_res.text,
+                            &tool_actions_summary,
+                            cwd,
+                            cancel_token.clone(),
+                        );
+
+                        match review_fut.await {
+                            Ok(rev_res) => {
+                                let _ = self.event_tx.send((
+                                    session_id.to_string(),
+                                    json!({
+                                        "type": "review_result",
+                                        "reviewer": rev_cfg.id,
+                                        "provider": rev_cfg.provider,
+                                        "status": if rev_res.approved { "approved" } else { "rejected" },
+                                        "critique": rev_res.critique,
+                                        "mode": "blocking",
+                                        "attempt": review_attempts + 1
+                                    }),
+                                ));
+
+                                if !rev_res.approved {
+                                    review_attempts += 1;
+                                    warn!(
+                                        "Session {} review rejected by {}: {}",
+                                        session_id, rev_cfg.id, rev_res.critique
+                                    );
+
+                                    // Record the intermediate assistant answer to journal
+                                    let _ = journal.append_assistant_message(
+                                        &llm_res.text,
+                                        &llm_res.reasoning,
+                                        &[],
+                                        &model_cfg.provider,
+                                        &model_cfg.id,
+                                        in_tok,
+                                        out_tok,
+                                        cache_read_tok,
+                                        cache_write_tok,
+                                        "critique_rejected",
+                                    );
+
+                                    let mut asst_msg = ChatMessage::assistant(&llm_res.text);
+                                    if !llm_res.reasoning.trim().is_empty() {
+                                        asst_msg.reasoning_content = Some(llm_res.reasoning.clone());
+                                    }
+                                    active_messages.push(asst_msg);
+
+                                    let critique_prompt = format!(
+                                        "[第三方独立模型评审 ({}) 质检未通过 - 驳回修正]:\n\n{}\n\n请针对上述审查意见进行修改和补充验证，消除缺陷后再完成本轮任务。严禁盲目自信或未经验证假装完成。",
+                                        rev_cfg.id, rev_res.critique
+                                    );
+                                    active_messages.push(ChatMessage::user(critique_prompt));
+
+                                    // Continue the cognitive turn loop! Actor will generate tool calls to fix defects.
+                                    continue;
+                                } else {
+                                    info!(
+                                        "Session {} review approved by {}: {}",
+                                        session_id, rev_cfg.id, rev_res.critique
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Session {} review call failed: {}. Continuing without blocking turn.", session_id, e);
+                                let _ = self.event_tx.send((
+                                    session_id.to_string(),
+                                    json!({
+                                        "type": "review_result",
+                                        "reviewer": rev_cfg.id,
+                                        "provider": rev_cfg.provider,
+                                        "status": "bypassed",
+                                        "critique": format!("评审调用异常 (已自动放行): {}", e),
+                                        "mode": "blocking",
+                                        "attempt": review_attempts + 1
+                                    }),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // Final textual response for blocking mode (either approved or not applicable)
                 journal.append_assistant_message(
                     &llm_res.text,
                     &llm_res.reasoning,
@@ -537,6 +947,8 @@ impl AgentLoop {
                     &model_cfg.id,
                     in_tok,
                     out_tok,
+                    cache_read_tok,
+                    cache_write_tok,
                     "stop",
                 )?;
 
@@ -597,6 +1009,8 @@ impl AgentLoop {
                     last_assistant_text = synth_text.clone();
                     let in_tok = res.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
                     let out_tok = res.usage.as_ref().map(|u| u.completion_tokens).unwrap_or(0);
+                    let cache_read_tok = res.usage.as_ref().map(|u| u.cache_read_tokens()).unwrap_or(0);
+                    let cache_write_tok = res.usage.as_ref().map(|u| u.cache_creation_tokens()).unwrap_or(0);
 
                     let _ = journal.append_assistant_message(
                         &synth_text,
@@ -606,6 +1020,8 @@ impl AgentLoop {
                         &model_cfg.id,
                         in_tok,
                         out_tok,
+                        cache_read_tok,
+                        cache_write_tok,
                         "stop",
                     );
 
@@ -635,6 +1051,8 @@ impl AgentLoop {
                         &[],
                         &model_cfg.provider,
                         &model_cfg.id,
+                        0,
+                        0,
                         0,
                         0,
                         "stop",
@@ -807,5 +1225,34 @@ mod tests {
                 assert_eq!(t.chars().count(), 5000);
             }
         }
+    }
+
+    #[test]
+    fn test_parse_review_output_approved_and_rejected() {
+        let text_approved = "STATUS: APPROVED\nSUMMARY: Code is clean and tests pass.";
+        let (ok, out) = parse_review_output(text_approved);
+        assert!(ok);
+        assert_eq!(out, text_approved);
+
+        let text_rejected = "STATUS: REJECTED\nDEFECTS:\n- [Null pointer]: Line 42 does not check None.";
+        let (ok2, out2) = parse_review_output(text_rejected);
+        assert!(!ok2);
+        assert_eq!(out2, text_rejected);
+
+        let text_defects_only = "Found issues:\nDEFECTS:\n- Unhandled error in file reader.";
+        let (ok3, _) = parse_review_output(text_defects_only);
+        assert!(!ok3);
+
+        let text_flaws = "Here are the flaws:\n- Incorrect port binding";
+        let (ok4, _) = parse_review_output(text_flaws);
+        assert!(!ok4);
+
+        let text_lowercase = "status: rejected\ndefects: broken logic";
+        let (ok5, _) = parse_review_output(text_lowercase);
+        assert!(!ok5);
+
+        let text_normal = "Looks completely fine, all requirements met.";
+        let (ok6, _) = parse_review_output(text_normal);
+        assert!(ok6);
     }
 }

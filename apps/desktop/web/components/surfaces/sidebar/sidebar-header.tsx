@@ -16,11 +16,11 @@ export function SidebarHeader({
 }) {
 	return (
 		<div className="sidebar-header">
-			<button type="button" className="sidebar-brand" title="OpenPI" onClick={() => onNavigate("chat")}>
+			<button type="button" className="sidebar-brand" title="OpenPI Personal Agent OS" onClick={() => onNavigate("today")}>
 				<span className="sidebar-brand-mark">π</span>
 				<span className="sidebar-brand-text">
 					<strong>OpenPI</strong>
-					<span>智能编程助理</span>
+					<span>Personal Agent OS</span>
 				</span>
 			</button>
 		</div>

@@ -1,5 +1,14 @@
 import type { SpeechInputEvent } from "./lib/speech-recognition";
-import type { AppSettings } from "./lib/app-types";
+import type {
+	AppSettings,
+	ActionCardRecord,
+	PersonalMemoryRecord,
+	PersonalGoalRecord,
+	TodayBriefing,
+	SafetyStatus,
+	DecisionMetrics,
+	DiscreteDecisionAction,
+} from "./lib/app-types";
 import type {
 	AgentInstance,
 	AgnesImageRequest,
@@ -232,6 +241,67 @@ export const desktopApi = {
 	) => call<boolean>("write_memory_entry", { cwd, memoryType, key, value, body, scope }),
 	deleteMemoryEntry: (cwd: string, memoryType: string, key: string, scope: "project" | "global" = "project") =>
 		call<boolean>("delete_memory_entry", { cwd, memoryType, key, scope }),
+
+	// Personal Agent OS APIs
+	listPersonalMemories: (category?: string, minImportance?: number, limit = 50) =>
+		call<{ memories: PersonalMemoryRecord[] }>("list_personal_memories", { category, minImportance, limit }),
+	upsertPersonalMemory: (memory: PersonalMemoryRecord) =>
+		call<{ success: boolean; id: string }>("upsert_personal_memory", { memory }),
+	deletePersonalMemory: (id: string) =>
+		call<{ success: boolean }>("delete_personal_memory", { id }),
+
+	listPersonalGoals: (status?: string, limit = 50) =>
+		call<{ goals: PersonalGoalRecord[] }>("list_personal_goals", { status, limit }),
+	upsertPersonalGoal: (goal: PersonalGoalRecord) =>
+		call<{ success: boolean; id: string }>("upsert_personal_goal", { goal }),
+	updatePersonalGoalProgress: (id: string, progress: number, status?: string) =>
+		call<{ success: boolean }>("update_personal_goal_progress", { id, progress, status }),
+	deletePersonalGoal: (id: string) =>
+		call<{ success: boolean }>("delete_personal_goal", { id }),
+	getTodayBriefing: () =>
+		call<TodayBriefing>("get_today_briefing"),
+	listActionCards: (status?: string, limit = 50) =>
+		call<{ cards: ActionCardRecord[] }>("list_action_cards", { status, limit }),
+	dismissActionCard: (id: string) =>
+		call<{ success: boolean }>("dismiss_action_card", { id }),
+	// 让「个人层主动执行」真正穿透统一网关（受权限 / 预算 / 熔断约束）
+	executeThroughGateway: (context: string, action = "proactive:card", isReadOnly = true) =>
+		call<{ success: boolean; message: string; tokensUsed: number; durationMs: number }>(
+			"execute_through_gateway",
+			{
+				request: {
+					goalId: null,
+					action,
+					priority: "normal",
+					context,
+					permission: isReadOnly ? "read_only" : "write",
+					isReadOnly,
+					hasUserConfirmation: false,
+					estimatedTokens: 2000,
+					constraint: {
+						timeoutMs: 60000,
+						memoryLimitMb: 512,
+						retryBudget: 2,
+						concurrencyLimit: 3,
+						outputLimitBytes: 2097152,
+						toolCallLimit: 15,
+						recursiveAgentDepth: 2,
+						globalKillSwitch: false,
+					},
+				},
+			},
+		),
+
+	// v1.1 Safety, Reliability & Gateway APIs
+	getSafetyStatus: () =>
+		call<SafetyStatus>("get_safety_status"),
+	evaluateDecision: (metrics: Partial<DecisionMetrics>) =>
+		call<{ action: DiscreteDecisionAction; discreteAction: any; metrics: DecisionMetrics }>("evaluate_decision", { metrics }),
+	rollbackPreference: (id: string) =>
+		call<{ success: boolean; rolledBackId: string }>("rollback_preference", { id }),
+	classifyUserReaction: (feedback: string, isRepetitive = false) =>
+		call<{ category: string }>("classify_user_reaction", { feedback, isRepetitive }),
+
 	memoryMeta: (cwd: string) =>
 		call<{
 			meta: {

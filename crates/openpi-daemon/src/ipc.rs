@@ -11,6 +11,33 @@ use crate::app_ops::handle_app_op;
 use crate::cloud_sync::CloudSync;
 use crate::supervisor::Supervisor;
 
+/// 系统级事件通道：无论客户端订阅了哪些会话，都必须放行。
+///
+/// - `"*"`              广播（daemon 断连通知、全局事件）
+/// - `"task-scheduler"` 定时任务事件
+/// - `"proactive"`      主动服务 / 晨报 / 行动卡片
+///
+/// 桌面端从不订阅 `"*"`，所以旧过滤逻辑会把这三类系统事件在「客户端已订阅过
+/// 具体会话」后全部丢弃 —— 这正是 `task-scheduler` 事件时灵时不灵的根因。
+pub const SYSTEM_EVENT_CHANNELS: [&str; 3] = ["*", "task-scheduler", "proactive"];
+
+/// 判定某个 `session_id` 的事件是否应转发给订阅了 `subs` 的客户端。
+pub fn event_passes_filter(session_id: &str, subs: &HashSet<String>) -> bool {
+    // 1. 系统通道永远放行
+    if SYSTEM_EVENT_CHANNELS.contains(&session_id) {
+        return true;
+    }
+    // 2. 客户端尚未订阅任何会话时，全部放行
+    if subs.is_empty() {
+        return true;
+    }
+    // 3. 精确匹配 / 通配订阅 / 子串匹配（保留原有宽松语义）
+    subs.contains(session_id)
+        || subs
+            .iter()
+            .any(|s| s == "*" || session_id.contains(s.as_str()) || s.contains(session_id))
+}
+
 pub async fn run_ipc_server(
     socket_path: &str,
     supervisor: Supervisor,
@@ -144,14 +171,18 @@ async fn handle_connection(
         loop {
             match event_rx.recv().await {
                 Ok((session_id, event)) => {
-                    let subs = subs_clone.lock().await;
-                    if !subs.is_empty()
-                        && !subs.contains(&session_id)
-                        && !subs.iter().any(|s| session_id.contains(s) || s.contains(&session_id) || s == "*")
-                    {
-                        continue;
+                    let is_system = session_id == "*"
+                        || session_id == "task-scheduler"
+                        || session_id == "proactive";
+                    if !is_system {
+                        let subs = subs_clone.lock().await;
+                        if !subs.is_empty()
+                            && !subs.contains(&session_id)
+                            && !subs.iter().any(|s| session_id.contains(s) || s.contains(&session_id) || s == "*")
+                        {
+                            continue;
+                        }
                     }
-                    drop(subs);
 
                     let msg = ServerMessage::event(&session_id, event);
                     if let Ok(line) = msg.to_json_line() {

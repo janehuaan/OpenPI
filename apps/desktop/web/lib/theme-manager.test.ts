@@ -71,10 +71,10 @@ describe("ThemeManager", () => {
 		expect(defaultFlavorForMode("light")).toBe("light-default");
 	});
 
-	it("initializes with dark theme by default when storage is empty", () => {
+	it("initializes with light theme by default when storage is empty", () => {
 		const config = getStoredThemeConfig();
-		expect(config.mode).toBe("dark");
-		expect(config.flavor).toBe("dark-default");
+		expect(config.mode).toBe("light");
+		expect(config.flavor).toBe("light-default");
 	});
 
 	it("applies theme to DOM root and updates localStorage", () => {

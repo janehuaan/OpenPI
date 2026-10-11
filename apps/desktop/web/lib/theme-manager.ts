@@ -116,14 +116,14 @@ export const THEME_PRESETS: ThemePreset[] = [
 	},
 	{
 		id: "light-default",
-		name: "工作室极简 (Studio Minimal)",
-		desc: "北欧冷白画廊质感，纯净高透，纯粹无杂色",
-		tag: "纯净工坊 · Minimal",
+		name: "极简个人助理 (Personal Assistant)",
+		desc: "极简个人助理设计，纯白清爽无杂色，日间高效专注首选",
+		tag: "个人助理 · Minimal",
 		mode: "light",
 		swatches: {
 			bg: "#f8fafc",
 			elevated: "#ffffff",
-			accent: "#0f172a",
+			accent: "#2563eb",
 			text: "#0f172a",
 		},
 	},
@@ -156,11 +156,7 @@ export interface ThemeConfig {
  */
 export function resolveEffectiveMode(mode: ThemeMode): "dark" | "light" {
 	if (mode === "dark") return "dark";
-	if (mode === "light") return "light";
-	if (typeof window !== "undefined" && window.matchMedia) {
-		return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-	}
-	return "dark";
+	return "light";
 }
 
 /**
@@ -175,10 +171,10 @@ export function defaultFlavorForMode(mode: "dark" | "light"): ThemeFlavor {
  */
 export function getStoredThemeConfig(): ThemeConfig {
 	if (typeof window === "undefined") {
-		return { mode: "dark", flavor: "dark-default" };
+		return { mode: "light", flavor: "light-default" };
 	}
 
-	let mode: ThemeMode = "dark";
+	let mode: ThemeMode = "light";
 	const rawMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
 	if (rawMode === "system" || rawMode === "dark" || rawMode === "light") {
 		mode = rawMode;

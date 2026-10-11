@@ -510,6 +510,149 @@ pub async fn handle_app_op(
             })))
         }
 
+        // --- Personal Agent OS ops ---
+        "list_personal_memories" => {
+            let category = op.get("category").and_then(|c| c.as_str());
+            let min_importance = op.get("minImportance").and_then(|m| m.as_f64()).map(|m| m as f32);
+            let limit = op.get("limit").and_then(|l| l.as_u64()).unwrap_or(50) as usize;
+            let memories = storage.list_personal_memories(category, min_importance, limit)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "memories": memories })))
+        }
+
+        "upsert_personal_memory" => {
+            let mem_val = op.get("memory").unwrap_or(&Value::Null);
+            let mem: openpi_storage::PersonalMemoryRecord = serde_json::from_value(mem_val.clone())?;
+            storage.upsert_personal_memory(&mem)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": true, "id": mem.id })))
+        }
+
+        "delete_personal_memory" => {
+            let mem_id = op.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            let success = storage.delete_personal_memory(mem_id)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": success })))
+        }
+
+        "list_personal_goals" => {
+            let status = op.get("status").and_then(|s| s.as_str());
+            let limit = op.get("limit").and_then(|l| l.as_u64()).unwrap_or(50) as usize;
+            let goals = storage.list_personal_goals(status, limit)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "goals": goals })))
+        }
+
+        "upsert_personal_goal" => {
+            let goal_val = op.get("goal").unwrap_or(&Value::Null);
+            let goal: openpi_storage::PersonalGoalRecord = serde_json::from_value(goal_val.clone())?;
+            storage.upsert_personal_goal(&goal)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": true, "id": goal.id })))
+        }
+
+        "update_personal_goal_progress" => {
+            let goal_id = op.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            let progress = op.get("progress").and_then(|p| p.as_f64()).unwrap_or(0.0) as f32;
+            let status = op.get("status").and_then(|s| s.as_str());
+            let now = chrono::Utc::now().to_rfc3339();
+            let success = storage.update_personal_goal_progress(goal_id, progress, status, &now)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": success })))
+        }
+
+        "delete_personal_goal" => {
+            let goal_id = op.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            let success = storage.delete_personal_goal(goal_id)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": success })))
+        }
+
+        "list_action_cards" => {
+            let status = op.get("status").and_then(|s| s.as_str());
+            let limit = op.get("limit").and_then(|l| l.as_u64()).unwrap_or(50) as usize;
+            let cards = storage.list_action_cards(status, limit)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "cards": cards })))
+        }
+
+        "dismiss_action_card" => {
+            let card_id = op.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            let success = storage.dismiss_action_card(card_id)?;
+            Ok(ServerMessage::ok(id, serde_json::json!({ "success": success })))
+        }
+
+        "get_today_briefing" => {
+            let briefing = crate::proactive::ProactiveEngine::generate_briefing(storage)?;
+            Ok(ServerMessage::ok(id, serde_json::to_value(&briefing)?))
+        }
+
+        // --- v1.1 Safety, Reliability & Gateway Ops ---
+        "get_safety_status" => {
+            let cb_state = supervisor.gateway.circuit_breaker.state();
+            let autonomous_allowed = supervisor.gateway.circuit_breaker.is_autonomous_action_allowed();
+            let budget_report = supervisor.gateway.budget_manager.report();
+            let constraints = openpi_safety::circuit_breaker::ExecutionConstraint::default();
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "circuitState": cb_state,
+                "autonomousActionAllowed": autonomous_allowed,
+                "budgetReport": budget_report,
+                "constraints": constraints,
+            })))
+        }
+
+        "evaluate_decision" => {
+            let metrics_val = op.get("metrics").unwrap_or(&Value::Null);
+            let metrics: openpi_safety::decision::DecisionMetrics = serde_json::from_value(metrics_val.clone())
+                .unwrap_or_default();
+            let action = openpi_safety::decision::DeterministicDecisionEngine::evaluate(&metrics);
+            let action_str = match action {
+                openpi_safety::decision::DiscreteDecisionAction::Ignore => "IGNORE",
+                openpi_safety::decision::DiscreteDecisionAction::Remember => "REMEMBER",
+                openpi_safety::decision::DiscreteDecisionAction::Suggest => "SUGGEST",
+                openpi_safety::decision::DiscreteDecisionAction::Ask => "ASK",
+                openpi_safety::decision::DiscreteDecisionAction::Prepare => "PREPARE",
+                openpi_safety::decision::DiscreteDecisionAction::Execute => "EXECUTE",
+                openpi_safety::decision::DiscreteDecisionAction::Resume => "RESUME",
+                openpi_safety::decision::DiscreteDecisionAction::Monitor => "MONITOR",
+            };
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "action": action_str,
+                "discreteAction": action,
+                "metrics": metrics,
+            })))
+        }
+
+        "rollback_preference" => {
+            let pref_id = op.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            let res = supervisor.attribution.rollback_preference(pref_id);
+            match res {
+                Ok(_) => {
+                    let _ = storage.delete_personal_memory(pref_id);
+                    Ok(ServerMessage::ok(id, serde_json::json!({ "success": true, "rolledBackId": pref_id })))
+                }
+                Err(e) => {
+                    let deleted_from_storage = storage.delete_personal_memory(pref_id).unwrap_or(false);
+                    if deleted_from_storage {
+                        Ok(ServerMessage::ok(id, serde_json::json!({ "success": true, "rolledBackId": pref_id })))
+                    } else {
+                        Ok(ServerMessage::err(id, format!("Failed to rollback preference: {}", e)))
+                    }
+                }
+            }
+        }
+
+        "classify_user_reaction" => {
+            let feedback = op.get("feedback").and_then(|v| v.as_str()).unwrap_or_default();
+            let is_repetitive = op.get("isRepetitive").and_then(|v| v.as_bool()).unwrap_or(false);
+            let category = openpi_safety::attribution::PreferenceManager::attribute_reaction(feedback, is_repetitive);
+            Ok(ServerMessage::ok(id, serde_json::json!({
+                "category": category,
+            })))
+        }
+
+        "execute_through_gateway" => {
+            let req_val = op.get("request").unwrap_or(&Value::Null);
+            let req: crate::gateway::PersonalExecutionRequest = serde_json::from_value(req_val.clone())?;
+            let res = supervisor.gateway.execute(req).await;
+            match res {
+                Ok(result) => Ok(ServerMessage::ok(id, serde_json::to_value(result)?)),
+                Err(err) => Ok(ServerMessage::err(id, err)),
+            }
+        }
+
         "save_memory_handbook" => {
             let content = op.get("content").and_then(|v| v.as_str()).unwrap_or_default();
             let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();

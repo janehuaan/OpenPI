@@ -69,6 +69,9 @@ pub struct Supervisor {
     pub memory: Arc<openpi_memory::CodebaseMemoryManager>,
     pub pi_cli_path: Arc<tokio::sync::RwLock<String>>,
     pub engine: Arc<openpi_engine::EngineSessionManager>,
+    pub gateway: Arc<crate::gateway::ExecutionGateway>,
+    pub event_bus: Arc<crate::event_bus::EventBus>,
+    pub attribution: Arc<openpi_safety::attribution::PreferenceManager>,
 }
 
 impl Supervisor {
@@ -158,6 +161,8 @@ impl Supervisor {
         let engine_cfg = openpi_engine::EngineConfig::load().unwrap_or_else(|_| openpi_engine::EngineConfig {
             default_provider: None,
             default_model: None,
+            default_thinking_level: None,
+            reviewer: openpi_engine::ReviewerConfig::default(),
             max_steps: 200,
             models: HashMap::new(),
             providers: HashMap::new(),
@@ -169,6 +174,12 @@ impl Supervisor {
             event_tx.clone(),
         ));
 
+        let cb = Arc::new(openpi_safety::circuit_breaker::CircuitBreaker::with_default_config());
+        let budget = Arc::new(openpi_safety::budget::ResourceBudgetManager::new(100_000));
+        let gateway = Arc::new(crate::gateway::ExecutionGateway::new(cb, budget));
+        let event_bus = Arc::new(crate::event_bus::EventBus::new(1024));
+        let attribution = Arc::new(openpi_safety::attribution::PreferenceManager::new());
+
         let supervisor = Self {
             sessions: Arc::new(Mutex::new(map)),
             event_tx,
@@ -176,6 +187,9 @@ impl Supervisor {
             memory,
             pi_cli_path,
             engine,
+            gateway,
+            event_bus,
+            attribution,
         };
 
         // Save consolidated records in background

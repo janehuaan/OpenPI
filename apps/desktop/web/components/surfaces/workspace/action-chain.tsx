@@ -36,7 +36,7 @@ export function AgentActionChain({
 	isWorking?: boolean;
 	workspaceCwd?: string;
 }) {
-	const hasError = actions.some((a) => a.isError);
+	const hasError = actions.some((a) => a.isError || (!isWorking && a.output === undefined && !a.badge));
 	const [isOpen, setIsOpen] = useState(defaultOpen ?? isWorking);
 	const wasWorkingRef = useRef(isWorking);
 	const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
@@ -101,15 +101,21 @@ export function AgentActionChain({
 				onClick={() => setIsOpen((prev) => !prev)}
 				aria-expanded={isOpen}
 			>
-				<span>{summaryText}</span>
-				{hasError && <span className="trajectory-badge error">error</span>}
-				<ChevronDown
-					size={12}
-					className="trajectory-chevron"
-					style={{
-						transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-					}}
-				/>
+				<div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+					<Terminal size={12} style={{ color: hasError ? "#ef4444" : "#f97316", opacity: 0.9 }} />
+					<span>{summaryText}</span>
+				</div>
+				<div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+					{hasError && <span className="trajectory-badge error">error</span>}
+					<ChevronDown
+						size={12}
+						className="trajectory-chevron"
+						style={{
+							transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+							transition: "transform 160ms ease",
+						}}
+					/>
+				</div>
 			</button>
 			{isOpen && (
 				<div className="trajectory-list">
@@ -176,6 +182,8 @@ export function AgentActionChain({
 										<span className={`trajectory-badge ${item.isError ? "error" : ""}`}>
 											{item.badge}
 										</span>
+									) : item.output === undefined ? (
+										<span className="trajectory-badge error">interrupted</span>
 									) : null}
 
 								</div>

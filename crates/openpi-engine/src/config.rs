@@ -29,6 +29,39 @@ pub struct SamplingParams {
     pub top_p: Option<f32>,
 }
 
+/// Whether to send Anthropic-style prompt-cache breakpoints for a provider.
+///
+/// Many OpenAI-compatible relays (huaan.space, cc-style proxies) are backed by
+/// Anthropic and only populate `usage.prompt_tokens_details.cached_tokens` when
+/// the request carries an explicit `cache_control` breakpoint. Without it the
+/// usage panel reports a permanent 0% hit rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PromptCacheMode {
+    /// Send a breakpoint on the system prompt (default).
+    #[default]
+    Auto,
+    /// Never send cache breakpoints (for providers that reject the field).
+    Off,
+}
+
+impl PromptCacheMode {
+    pub fn enabled(self) -> bool {
+        matches!(self, PromptCacheMode::Auto)
+    }
+
+    /// Lenient parse of a models.json `"promptCache"` value. Anything other
+    /// than an explicit disable keeps the default (on).
+    pub fn from_json(value: Option<&Value>) -> Self {
+        match value.and_then(Value::as_str).map(|s| s.trim().to_ascii_lowercase()) {
+            Some(s) if matches!(s.as_str(), "off" | "none" | "disabled" | "false" | "no") => {
+                PromptCacheMode::Off
+            }
+            _ => PromptCacheMode::Auto,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub id: String,
@@ -41,6 +74,10 @@ pub struct ModelConfig {
     pub reasoning: bool,
     #[serde(default)]
     pub sampling_params_by_thinking_level: Option<HashMap<String, SamplingParams>>,
+    /// Prompt-cache policy; defaults to `Auto` so relays start caching without
+    /// any config change. Set `"promptCache": "off"` on the provider to opt out.
+    #[serde(default)]
+    pub prompt_cache: PromptCacheMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,10 +87,46 @@ pub struct ProviderConfig {
     pub api_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default = "default_review_mode")]
+    pub mode: String, // "code_changes" | "always"
+    #[serde(default = "default_execution_mode", alias = "executionMode")]
+    pub execution_mode: String, // "async" (default, non-blocking) | "blocking"
+}
+
+fn default_review_mode() -> String {
+    "code_changes".to_string()
+}
+
+fn default_execution_mode() -> String {
+    "async".to_string()
+}
+
+impl Default for ReviewerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: None,
+            model: None,
+            mode: default_review_mode(),
+            execution_mode: default_execution_mode(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     pub default_provider: Option<String>,
     pub default_model: Option<String>,
+    pub default_thinking_level: Option<String>,
+    pub reviewer: ReviewerConfig,
     pub max_steps: usize,
     pub models: HashMap<String, ModelConfig>,
     pub providers: HashMap<String, ProviderConfig>,
@@ -68,6 +141,8 @@ impl EngineConfig {
 
         let mut default_model = None;
         let mut default_provider = None;
+        let mut default_thinking_level = None;
+        let mut reviewer = ReviewerConfig::default();
         let mut max_steps = std::env::var("OPENPI_MAX_STEPS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -81,6 +156,14 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(tl) = v.get("defaultThinkingLevel").and_then(|x| x.as_str()) {
+                        default_thinking_level = Some(tl.to_string());
+                    }
+                    if let Some(r_val) = v.get("reviewer") {
+                        if let Ok(rc) = serde_json::from_value::<ReviewerConfig>(r_val.clone()) {
+                            reviewer = rc;
+                        }
                     }
                     if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
                         max_steps = s as usize;
@@ -97,6 +180,14 @@ impl EngineConfig {
                     }
                     if let Some(p) = v.get("defaultProvider").and_then(|x| x.as_str()) {
                         default_provider = Some(p.to_string());
+                    }
+                    if let Some(tl) = v.get("defaultThinkingLevel").and_then(|x| x.as_str()) {
+                        default_thinking_level = Some(tl.to_string());
+                    }
+                    if let Some(r_val) = v.get("reviewer") {
+                        if let Ok(rc) = serde_json::from_value::<ReviewerConfig>(r_val.clone()) {
+                            reviewer = rc;
+                        }
                     }
                     if let Some(s) = v.get("maxSteps").and_then(|x| x.as_u64()) {
                         max_steps = s as usize;
@@ -134,6 +225,7 @@ impl EngineConfig {
                                 },
                             );
 
+                            // Provider-level default; individual models may override it.
                             if let Some(m_arr) = prov_val.get("models").and_then(|m| m.as_array()) {
                                 for m in m_arr {
                                     let model_id = match m.get("id").and_then(|id| id.as_str()) {
@@ -171,6 +263,9 @@ impl EngineConfig {
                                         max_tokens,
                                         reasoning,
                                         sampling_params_by_thinking_level: sampling_params,
+                                        prompt_cache: PromptCacheMode::from_json(
+                                            m.get("promptCache").or_else(|| prov_val.get("promptCache")),
+                                        ),
                                     };
 
                                     // Store with both plain ID and "provider/id"
@@ -187,10 +282,34 @@ impl EngineConfig {
         Ok(Self {
             default_provider,
             default_model,
+            default_thinking_level,
+            reviewer,
             max_steps,
             models,
             providers: providers_map,
         })
+    }
+
+    pub fn resolve_reviewer_model(&self) -> Option<ModelConfig> {
+        if !self.reviewer.enabled {
+            return None;
+        }
+        let model_id = self.reviewer.model.as_deref()?;
+        if model_id.trim().is_empty() {
+            return None;
+        }
+        let full_key = if let Some(ref prov) = self.reviewer.provider {
+            if !model_id.contains('/') {
+                format!("{}/{}", prov, model_id)
+            } else {
+                model_id.to_string()
+            }
+        } else {
+            model_id.to_string()
+        };
+        self.resolve_model(Some(&full_key))
+            .or_else(|_| self.resolve_model(Some(model_id)))
+            .ok()
     }
 
     pub fn resolve_model(&self, requested: Option<&str>) -> Result<ModelConfig> {
@@ -233,6 +352,7 @@ impl EngineConfig {
                     max_tokens: 8192,
                     reasoning: false,
                     sampling_params_by_thinking_level: None,
+                    prompt_cache: PromptCacheMode::Auto,
                 });
             }
         }
@@ -261,6 +381,7 @@ impl EngineConfig {
                     max_tokens: 8192,
                     reasoning: false,
                     sampling_params_by_thinking_level: None,
+                    prompt_cache: PromptCacheMode::Auto,
                 });
             }
         }
@@ -277,6 +398,7 @@ impl EngineConfig {
                 max_tokens: 8192,
                 reasoning: false,
                 sampling_params_by_thinking_level: None,
+                prompt_cache: PromptCacheMode::Auto,
             });
         }
 

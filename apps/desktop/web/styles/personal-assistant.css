@@ -1,0 +1,1387 @@
+/* OpenPI — Personal Assistant Design System (Theme-Driven Dynamic Architecture) */
+
+/* ── 1. Layout Container ── */
+html,
+body,
+#root {
+	background: var(--bg) !important;
+	background-color: var(--bg) !important;
+	color: var(--text) !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	width: 100vw !important;
+	height: 100vh !important;
+	overflow: hidden !important;
+}
+
+.reference-workspace.personal-assistant-theme {
+	height: 100vh !important;
+	height: 100dvh !important;
+	width: 100vw !important;
+	display: grid !important;
+	grid-template-rows: 100% !important;
+	grid-template-columns: 220px minmax(0, 1fr) 280px !important;
+	overflow: hidden !important;
+	background: var(--bg) !important;
+	background-color: var(--bg) !important;
+	color: var(--text) !important;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "SF Pro Text", Helvetica, Arial, sans-serif !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	transition: grid-template-columns 200ms ease;
+}
+
+.reference-workspace.personal-assistant-theme.context-collapsed {
+	grid-template-columns: 220px minmax(0, 1fr) 0px !important;
+}
+
+.reference-workspace.personal-assistant-theme.left-collapsed {
+	grid-template-columns: 220px minmax(0, 1fr) 280px !important;
+}
+
+.reference-workspace.personal-assistant-theme.left-collapsed.context-collapsed {
+	grid-template-columns: 220px minmax(0, 1fr) 0px !important;
+}
+
+/* ── 2. Three Columns Grid Placement ── */
+.personal-assistant-theme > .pa-sidebar {
+	grid-column: 1 !important;
+	grid-row: 1 !important;
+	width: 220px !important;
+	min-width: 220px !important;
+	max-width: 220px !important;
+	height: 100vh !important;
+	height: 100dvh !important;
+	background: var(--bg-elevated) !important;
+	background-color: var(--bg-elevated) !important;
+	border-right: 1px solid var(--border) !important;
+	display: flex !important;
+	flex-direction: column !important;
+	padding: 14px 12px !important;
+	box-sizing: border-box !important;
+	user-select: none !important;
+	overflow: hidden !important;
+	z-index: 10 !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme > .reference-main {
+	grid-column: 2 !important;
+	grid-row: 1 !important;
+	width: 100% !important;
+	height: 100vh !important;
+	height: 100dvh !important;
+	min-height: 0 !important;
+	background: var(--bg) !important;
+	background-color: var(--bg) !important;
+	color: var(--text) !important;
+	display: flex !important;
+	flex-direction: column !important;
+	overflow: hidden !important;
+	box-sizing: border-box !important;
+}
+
+.personal-assistant-theme > .pa-inspector-sidebar {
+	grid-column: 3 !important;
+	grid-row: 1 !important;
+	width: 280px !important;
+	min-width: 280px !important;
+	max-width: 280px !important;
+	height: 100vh !important;
+	height: 100dvh !important;
+	background: var(--bg-elevated) !important;
+	background-color: var(--bg-elevated) !important;
+	border-left: 1px solid var(--border) !important;
+	display: flex !important;
+	flex-direction: column !important;
+	box-sizing: border-box !important;
+	overflow: hidden !important;
+	z-index: 10 !important;
+	color: var(--text) !important;
+}
+
+/* macOS Window Controls */
+.pa-window-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 2px 4px 14px;
+	-webkit-app-region: drag;
+}
+
+.pa-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	display: inline-block;
+}
+.pa-dot.red { background: #ff5f56; border: 1px solid #e0443e; }
+.pa-dot.yellow { background: #ffbd2e; border: 1px solid #dea123; }
+.pa-dot.green { background: #27c93f; border: 1px solid #1aab29; }
+
+/* Brand Header */
+.pa-brand-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 4px 8px 16px;
+	cursor: pointer;
+}
+
+.pa-brand-icon {
+	width: 24px;
+	height: 24px;
+	color: var(--accent);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.pa-brand-text {
+	display: flex;
+	flex-direction: column;
+}
+
+.pa-brand-title {
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--text);
+	line-height: 1.2;
+}
+
+.pa-brand-subtitle {
+	font-size: 11px;
+	color: var(--text-tertiary);
+	font-weight: 400;
+	line-height: 1.2;
+}
+
+/* Primary Navigation */
+.pa-nav-group {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.pa-nav-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	font-size: 13.5px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.pa-nav-item:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+.pa-nav-item.active {
+	background: var(--accent-soft);
+	color: var(--accent);
+	font-weight: 500;
+}
+
+.pa-nav-item.active svg {
+	color: var(--accent);
+}
+
+/* ── Sidebar Scrollable Container (Projects & Conversations) ── */
+.pa-sidebar-scroll {
+	margin-top: 14px;
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding-right: 2px;
+}
+
+.pa-sidebar-section {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.pa-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 8px 4px;
+}
+
+.pa-section-title {
+	font-size: 11.5px;
+	font-weight: 600;
+	color: var(--text-tertiary);
+	text-transform: none;
+	letter-spacing: 0.02em;
+}
+
+.pa-section-action-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 4px;
+	border: none;
+	background: transparent;
+	color: var(--text-tertiary);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pa-section-action-btn:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+/* Projects Tree List */
+.pa-project-list {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.pa-project-group {
+	display: flex;
+	flex-direction: column;
+	border-radius: 6px;
+	transition: background 0.15s ease;
+}
+
+.pa-project-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 6px 8px;
+	border-radius: 6px;
+	cursor: pointer;
+	user-select: none;
+	transition: background 0.15s ease;
+}
+
+.pa-project-row:hover {
+	background: var(--bg-muted);
+}
+
+.pa-project-toggle-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	border: none;
+	background: transparent;
+	color: var(--text-tertiary);
+	cursor: pointer;
+	padding: 0;
+	flex-shrink: 0;
+}
+
+.pa-project-toggle-btn:hover {
+	color: var(--text);
+}
+
+.pa-project-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1;
+	min-width: 0;
+	margin-left: 2px;
+}
+
+.pa-project-folder-icon {
+	color: var(--accent);
+	flex-shrink: 0;
+}
+
+.pa-project-name {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pa-project-row-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.pa-project-add-session-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	border: none;
+	background: transparent;
+	color: var(--text-tertiary);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.pa-project-row:hover .pa-project-add-session-btn {
+	opacity: 1;
+}
+
+.pa-project-add-session-btn:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+.pa-project-sessions {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin-left: 16px;
+	padding-left: 8px;
+	border-left: 1.5px solid var(--border);
+	margin-top: 2px;
+	margin-bottom: 4px;
+}
+
+.pa-project-session-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 5px 8px;
+	border-radius: 6px;
+	font-size: 12px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pa-project-session-item:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+.pa-project-session-item.active {
+	background: var(--accent-soft);
+	color: var(--accent);
+	font-weight: 550;
+}
+
+.pa-project-session-item.active .pa-session-icon {
+	color: var(--accent);
+}
+
+.pa-session-item-left {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+}
+
+.pa-session-item-left span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pa-session-icon {
+	color: var(--text-tertiary);
+	flex-shrink: 0;
+}
+
+/* Recent Conversations List */
+.pa-recent-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.pa-recent-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 7px 10px;
+	border-radius: 8px;
+	font-size: 12.5px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pa-recent-item:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+.pa-recent-item.active {
+	background: var(--accent-soft);
+	color: var(--accent);
+	font-weight: 550;
+}
+
+.pa-recent-item.active .pa-session-icon {
+	color: var(--accent);
+}
+
+.pa-recent-item-left {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+}
+
+.pa-recent-item-left span {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.pa-active-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+	flex-shrink: 0;
+}
+
+.pa-empty-hint {
+	padding: 8px 12px;
+	font-size: 12px;
+	color: var(--text-tertiary);
+}
+
+/* User Profile Footer */
+.pa-profile-footer {
+	margin-top: auto;
+	padding-top: 12px;
+	border-top: 1px solid var(--border-subtle);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 10px 4px;
+	cursor: pointer;
+	border-radius: 8px;
+	transition: background 0.15s ease;
+}
+
+.pa-profile-footer:hover {
+	background: var(--bg-muted);
+}
+
+.pa-profile-left {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.pa-profile-avatar {
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	overflow: hidden;
+	background: var(--bg-muted);
+	flex-shrink: 0;
+}
+
+.pa-profile-avatar img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.pa-profile-name {
+	font-size: 13.5px;
+	font-weight: 500;
+	color: var(--text);
+}
+
+/* ── Popover Styles ── */
+.today-os-profile-popover {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 14px !important;
+	box-shadow: var(--shadow) !important;
+	padding: 8px !important;
+	min-width: 210px !important;
+	color: var(--text) !important;
+	z-index: 100 !important;
+}
+
+.today-os-profile-popover-header {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 10px;
+}
+
+.today-os-popover-avatar img {
+	width: 34px;
+	height: 34px;
+	border-radius: 50%;
+	object-fit: cover;
+	border: 1px solid var(--border);
+}
+
+.today-os-popover-name {
+	font-size: 13.5px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.today-os-popover-desc {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+.today-os-profile-popover-divider {
+	height: 1px;
+	background: var(--border-subtle);
+	margin: 6px 4px;
+}
+
+.today-os-popover-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 8px 12px;
+	border-radius: 8px;
+	border: none;
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 12.5px;
+	cursor: pointer;
+	text-align: left;
+	transition: all 0.15s ease;
+}
+
+.today-os-popover-item:hover {
+	background: var(--bg-muted);
+	color: var(--text);
+}
+
+/* ── 3. Center Workspace ── */
+.pa-main-workspace {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--bg);
+	position: relative;
+}
+
+/* Top Greeting Bar */
+.pa-greeting-bar {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	padding: 24px 32px 16px;
+	flex-shrink: 0;
+}
+
+.pa-greeting-title {
+	font-size: 22px;
+	font-weight: 700;
+	color: var(--text);
+	line-height: 1.3;
+}
+
+.pa-greeting-subtitle {
+	font-size: 13px;
+	color: var(--text-secondary);
+	margin-top: 4px;
+}
+
+.pa-weather-date {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 4px;
+}
+
+.pa-weather {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12.5px;
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+.pa-date {
+	font-size: 12px;
+	color: var(--text-tertiary);
+}
+
+/* Today's Key Highlights (今天的重点) */
+.pa-focus-container {
+	margin: 0 32px 16px;
+	padding: 16px 18px;
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	box-shadow: var(--shadow-soft);
+	flex-shrink: 0;
+}
+
+.pa-focus-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 12px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.pa-focus-cards {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 12px;
+}
+
+.pa-focus-card {
+	background: var(--bg-muted);
+	border: 1px solid var(--border-subtle);
+	border-radius: 10px;
+	padding: 12px 14px;
+	cursor: pointer;
+	transition: border-color 0.15s ease, background-color 0.15s ease;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	min-height: 78px;
+}
+
+.pa-focus-card:hover {
+	border-color: var(--accent);
+}
+
+.pa-focus-card-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 6px;
+}
+
+.pa-focus-card-title-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.pa-focus-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+}
+.pa-focus-dot.blue { background: var(--accent); }
+.pa-focus-dot.green { background: var(--ok, #10b981); }
+.pa-focus-dot.orange { background: var(--warn, #f59e0b); }
+
+.pa-focus-card-body {
+	font-size: 11.5px;
+	color: var(--text-secondary);
+	line-height: 1.45;
+	white-space: pre-line;
+}
+
+/* ── Collapsed 态势头：滚动后收窄，把空间让给结构化对话 ── */
+.pa-greeting-bar.collapsed {
+	padding: 10px 32px 4px;
+}
+
+.pa-greeting-bar.collapsed .pa-greeting-title {
+	font-size: 15px;
+}
+
+.pa-greeting-bar.collapsed .pa-greeting-subtitle,
+.pa-greeting-bar.collapsed .pa-weather-date {
+	display: none;
+}
+
+.pa-focus-container.collapsed {
+	margin: 0 32px 10px;
+	padding: 8px 14px;
+	border-radius: 10px;
+}
+
+.pa-focus-container.collapsed .pa-focus-header {
+	margin-bottom: 0;
+}
+
+.pa-focus-container.collapsed .pa-focus-cards {
+	display: none;
+}
+
+.pa-focus-summary {
+	display: none;
+	margin-left: 6px;
+	font-size: 12px;
+	font-weight: 400;
+	color: var(--text-secondary);
+}
+
+.pa-focus-container.collapsed .pa-focus-summary {
+	display: inline;
+}
+
+/* ── dots 式常驻 Agent 形象（pa-presence） ── */
+.pa-presence-wrap {
+	padding: 22px 32px 12px;
+	flex-shrink: 0;
+}
+
+.pa-presence {
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	box-shadow: var(--shadow-soft);
+	padding: 14px 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.pa-presence-head {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.pa-orb {
+	position: relative;
+	width: 40px;
+	height: 40px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.pa-orb-core {
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--accent);
+	box-shadow: inset -3px -4px 8px rgba(0, 0, 0, 0.25), 0 0 12px var(--accent-soft);
+	z-index: 1;
+}
+
+.pa-orb-ring {
+	position: absolute;
+	inset: 0;
+	border-radius: 50%;
+	border: 2px solid var(--accent);
+	opacity: 0.5;
+	animation: pa-orb-pulse 2.6s ease-out infinite;
+}
+
+.pa-orb-working .pa-orb-core {
+	background: #f59e0b;
+	box-shadow: inset -3px -4px 8px rgba(0, 0, 0, 0.25), 0 0 14px rgba(245, 158, 11, 0.45);
+}
+
+.pa-orb-working .pa-orb-ring {
+	border-color: #f59e0b;
+	animation-duration: 1.2s;
+}
+
+.pa-orb-confirm .pa-orb-core {
+	background: #b45309;
+}
+
+@keyframes pa-orb-pulse {
+	0% { transform: scale(0.85); opacity: 0.55; }
+	70% { transform: scale(1.35); opacity: 0; }
+	100% { transform: scale(1.35); opacity: 0; }
+}
+
+.pa-presence-meta {
+	flex: 1;
+	min-width: 0;
+}
+
+.pa-presence-name {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text);
+}
+
+.pa-presence-badge {
+	font-size: 10.5px;
+	font-weight: 600;
+	padding: 1px 8px;
+	border-radius: 999px;
+	border: 1px solid;
+	background: var(--bg-muted);
+}
+
+.pa-presence-detail {
+	font-size: 12.5px;
+	color: var(--text-secondary);
+	margin-top: 3px;
+}
+
+.pa-presence-sub {
+	font-size: 11.5px;
+	color: var(--text-tertiary);
+	margin-top: 3px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.pa-dot-sep {
+	opacity: 0.5;
+}
+
+.pa-presence-activity-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11.5px;
+	color: var(--text-secondary);
+	background: var(--bg-muted);
+	border: 1px solid var(--border-subtle);
+	border-radius: 999px;
+	padding: 4px 12px;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.pa-presence-activity-toggle:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.pa-activity {
+	border-top: 1px solid var(--border-subtle);
+	padding-top: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: 220px;
+	overflow-y: auto;
+}
+
+.pa-activity-empty {
+	font-size: 12px;
+	color: var(--text-tertiary);
+}
+
+.pa-activity-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+}
+
+.pa-activity-time {
+	font-size: 11px;
+	color: var(--text-tertiary);
+	font-variant-numeric: tabular-nums;
+	width: 36px;
+	flex-shrink: 0;
+	padding-top: 2px;
+}
+
+.pa-activity-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	margin-top: 5px;
+	flex-shrink: 0;
+	background: var(--accent);
+}
+
+.pa-activity-dot.run {
+	background: var(--ok, #10b981);
+}
+
+.pa-activity-body {
+	min-width: 0;
+}
+
+.pa-activity-label {
+	font-size: 12.5px;
+	color: var(--text);
+	font-weight: 600;
+}
+
+.pa-activity-detail {
+	font-size: 11.5px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+/* ── 主动卡片冒泡（pa-bubble） ── */
+.pa-bubble {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	border-radius: 10px;
+	padding: 8px 12px;
+	border: 1px solid var(--border-subtle);
+	background: var(--bg-muted);
+}
+
+.pa-bubble-warn {
+	border-color: rgba(245, 158, 11, 0.45);
+	background: rgba(245, 158, 11, 0.08);
+}
+
+.pa-bubble-icon {
+	color: #f59e0b;
+	display: inline-flex;
+	margin-top: 1px;
+	flex-shrink: 0;
+}
+
+.pa-bubble-body {
+	min-width: 0;
+}
+
+.pa-bubble-text {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.pa-bubble-detail {
+	font-size: 11.5px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+/* Conversation Feed */
+.pa-feed-container {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 0 32px 16px;
+	display: flex;
+	flex-direction: column;
+}
+
+/* User Bubble (Right Aligned) */
+.personal-assistant-theme .reference-message-row.user {
+	display: flex !important;
+	justify-content: flex-end !important;
+	margin: 12px 0 !important;
+}
+
+.personal-assistant-theme .reference-message-row.user .reference-user-card {
+	background: var(--accent-soft) !important;
+	color: var(--text) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 16px 16px 4px 16px !important;
+	box-shadow: var(--shadow-soft) !important;
+	padding: 10px 16px !important;
+	font-size: 13.5px !important;
+	line-height: 1.45 !important;
+	max-width: 580px !important;
+}
+
+.personal-assistant-theme .reference-message-row.user .reference-user-card p {
+	color: var(--text) !important;
+	margin: 0 !important;
+}
+
+/* Assistant Message (Left Aligned) */
+.personal-assistant-theme .reference-message-row.assistant {
+	margin: 12px 0 !important;
+}
+
+.personal-assistant-theme .reference-message-row.assistant .reference-assistant-card {
+	background: var(--bg-elevated) !important;
+	color: var(--text) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 14px !important;
+	box-shadow: var(--shadow-soft) !important;
+	padding: 16px 20px !important;
+	max-width: 85% !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+.personal-assistant-theme .reference-message-row.assistant .reference-assistant-card p,
+.personal-assistant-theme .reference-message-row.assistant .reference-assistant-card span,
+.personal-assistant-theme .reference-message-row.assistant .reference-assistant-card div,
+.personal-assistant-theme .reference-message-row.assistant .reference-assistant-card li {
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .turn-separator-badge {
+	background: var(--bg-muted) !important;
+	color: var(--text-tertiary) !important;
+	border: 1px solid var(--border) !important;
+}
+
+/* ── Deep Thinking Accordion ── */
+.personal-assistant-theme .message-reasoning {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 10px !important;
+	color: var(--text) !important;
+	margin: 8px 0 !important;
+}
+
+.personal-assistant-theme .message-reasoning summary {
+	color: var(--text-secondary) !important;
+	padding: 8px 12px !important;
+	font-size: 12px !important;
+	font-weight: 500 !important;
+	border-radius: 10px !important;
+}
+
+.personal-assistant-theme .message-reasoning summary:hover {
+	background: var(--accent-soft) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .message-reasoning .reasoning-brain-icon {
+	color: var(--accent) !important;
+}
+
+.personal-assistant-theme .message-reasoning pre {
+	background: var(--bg-muted) !important;
+	border-top: 1px solid var(--border-subtle) !important;
+	color: var(--text-secondary) !important;
+	font-size: 12px !important;
+}
+
+/* Floating Composer shelf & box */
+.personal-assistant-theme .reference-composer-shelf {
+	background: transparent !important;
+	padding: 10px 32px 20px !important;
+	width: 100% !important;
+	box-sizing: border-box !important;
+}
+
+.personal-assistant-theme .reference-composer,
+.personal-assistant-theme .today-os-dock-floating {
+	margin: 0 auto !important;
+	width: min(768px, 100%) !important;
+	max-width: 100% !important;
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 16px !important;
+	box-shadow: var(--shadow) !important;
+	padding: 12px 16px !important;
+	backdrop-filter: none !important;
+	-webkit-backdrop-filter: none !important;
+}
+
+.personal-assistant-theme .reference-composer:focus-within,
+.personal-assistant-theme .today-os-dock-floating:focus-within {
+	border-color: var(--accent) !important;
+	box-shadow: 0 4px 20px var(--accent-soft) !important;
+}
+
+.personal-assistant-theme .reference-composer textarea,
+.personal-assistant-theme .today-os-dock-textarea {
+	color: var(--text) !important;
+	font-size: 13.5px !important;
+	background: transparent !important;
+	border: none !important;
+	outline: none !important;
+	resize: none !important;
+}
+
+.personal-assistant-theme .reference-composer textarea::placeholder,
+.personal-assistant-theme .today-os-dock-textarea::placeholder {
+	color: var(--text-tertiary) !important;
+}
+
+.personal-assistant-theme .reference-model-control,
+.personal-assistant-theme .today-os-dock-model-pill {
+	background: var(--bg-muted) !important;
+	color: var(--text-secondary) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 6px !important;
+	padding: 3px 8px !important;
+	font-size: 11.5px !important;
+	font-weight: 500 !important;
+}
+
+.personal-assistant-theme .reference-model-control span,
+.personal-assistant-theme .reference-model-control strong {
+	color: var(--text-secondary) !important;
+}
+
+.personal-assistant-theme .reference-composer-icon,
+.personal-assistant-theme .today-os-dock-tool-btn,
+.personal-assistant-theme .today-os-dock-btn {
+	color: var(--text-secondary) !important;
+	background: transparent !important;
+	border: none !important;
+	border-radius: 6px !important;
+	padding: 5px !important;
+	cursor: pointer !important;
+}
+
+.personal-assistant-theme .reference-composer-icon:hover,
+.personal-assistant-theme .today-os-dock-tool-btn:hover,
+.personal-assistant-theme .today-os-dock-btn:hover {
+	color: var(--text) !important;
+	background: var(--bg-muted) !important;
+}
+
+.personal-assistant-theme .reference-send,
+.personal-assistant-theme .today-os-send-arrow-btn {
+	background: var(--accent) !important;
+	color: var(--accent-contrast, #ffffff) !important;
+	border-radius: 50% !important;
+	width: 32px !important;
+	height: 32px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	box-shadow: 0 2px 8px var(--accent-soft) !important;
+	border: none !important;
+	cursor: pointer !important;
+	transition: background 0.15s ease, transform 0.1s ease !important;
+}
+
+.personal-assistant-theme .reference-send:hover:not(:disabled),
+.personal-assistant-theme .today-os-send-arrow-btn:hover:not(:disabled) {
+	filter: brightness(1.1) !important;
+	transform: scale(1.05) !important;
+}
+
+.personal-assistant-theme .reference-send:disabled,
+.personal-assistant-theme .today-os-send-arrow-btn:disabled {
+	opacity: 0.5 !important;
+	cursor: not-allowed !important;
+}
+
+.pa-recent-actions {
+	display: none;
+	align-items: center;
+	gap: 4px;
+}
+
+.pa-recent-item:hover .pa-recent-actions,
+.pa-project-session-item:hover .pa-recent-actions {
+	display: flex;
+}
+
+.pa-item-action-btn {
+	background: transparent;
+	border: none;
+	color: var(--text-tertiary);
+	cursor: pointer;
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.pa-item-action-btn:hover {
+	color: var(--text);
+	background: var(--bg-muted);
+}
+
+.pa-item-action-btn.danger:hover {
+	color: var(--danger, #ef4444);
+	background: var(--danger-soft, #fee2e2);
+}
+
+/* ── Custom Surfaces Theme Styling (Goals, Projects, Activity, Agent, Memory) ── */
+.personal-assistant-theme .goals-surface-container,
+.personal-assistant-theme .projects-surface-container,
+.personal-assistant-theme .activity-surface-container,
+.personal-assistant-theme .agent-surface-container,
+.personal-assistant-theme .memory-surface-container {
+	background: var(--bg) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .goals-card,
+.personal-assistant-theme .project-card,
+.personal-assistant-theme .activity-event-card,
+.personal-assistant-theme .agent-card,
+.personal-assistant-theme .memory-card,
+.personal-assistant-theme .glass-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow-soft) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .glass-card:hover {
+	background: var(--bg-elevated) !important;
+	box-shadow: var(--shadow) !important;
+}
+
+/* Operation Panels (Memory & Capabilities) */
+.personal-assistant-theme .operation-panel-page,
+.personal-assistant-theme .operations-surface {
+	background: var(--bg) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .operation-page-header {
+	background: var(--bg-elevated) !important;
+	border-bottom: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .operation-panel-body {
+	background: var(--bg) !important;
+}
+
+.personal-assistant-theme .memory-tabs-bar {
+	background: var(--bg-elevated) !important;
+	border-bottom: 1px solid var(--border) !important;
+}
+
+/* Tab Underline and Primary Button Styling */
+.personal-assistant-theme .context-tab {
+	color: var(--text-secondary) !important;
+	border-bottom: 2px solid transparent !important;
+}
+
+.personal-assistant-theme .context-tab:hover {
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .context-tab.active {
+	color: var(--accent) !important;
+	border-bottom: 2px solid var(--accent) !important;
+}
+
+.personal-assistant-theme .button.primary,
+.personal-assistant-theme button.primary {
+	background: var(--accent) !important;
+	color: var(--accent-contrast, #ffffff) !important;
+	border: 1px solid transparent !important;
+}
+
+.personal-assistant-theme .button.primary:hover,
+.personal-assistant-theme button.primary:hover {
+	filter: brightness(1.08) !important;
+}
+
+/* Settings Redesign Theme Overrides */
+.personal-assistant-theme .settings-redesign-shell {
+	background: var(--bg) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .settings-header {
+	background: var(--bg-elevated) !important;
+	border-bottom: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .settings-header-title strong {
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .settings-header-title span {
+	color: var(--text-tertiary) !important;
+}
+
+.personal-assistant-theme .settings-sidebar {
+	background: var(--bg-elevated) !important;
+	border-right: 1px solid var(--border) !important;
+}
+
+.personal-assistant-theme .settings-nav-section-title {
+	color: var(--text-tertiary) !important;
+}
+
+.personal-assistant-theme .settings-nav-item {
+	color: var(--text-secondary) !important;
+	background: transparent !important;
+	border-color: transparent !important;
+}
+
+.personal-assistant-theme .settings-nav-item:hover {
+	background: var(--bg-muted) !important;
+	color: var(--text) !important;
+	border-color: var(--border) !important;
+}
+
+.personal-assistant-theme .settings-nav-item.active {
+	background: var(--accent-soft) !important;
+	color: var(--accent) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: none !important;
+	font-weight: 600 !important;
+}
+
+.personal-assistant-theme .settings-main {
+	background: var(--bg) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .settings-section-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow-soft) !important;
+	border-radius: 14px !important;
+}
+
+.personal-assistant-theme .settings-section-card-header {
+	background: var(--bg-elevated) !important;
+	border-bottom: 1px solid var(--border-subtle) !important;
+}
+
+.personal-assistant-theme .settings-section-card-title h3 {
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .settings-section-card-title span {
+	color: var(--text-tertiary) !important;
+}
+
+.personal-assistant-theme .persona-card,
+.personal-assistant-theme .provider-config-card,
+.personal-assistant-theme .security-card,
+.personal-assistant-theme .extension-item-card {
+	background: var(--bg-elevated) !important;
+	border: 1px solid var(--border) !important;
+	box-shadow: var(--shadow-soft) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .persona-input,
+.personal-assistant-theme .persona-textarea,
+.personal-assistant-theme input.field-input,
+.personal-assistant-theme textarea.field-input,
+.personal-assistant-theme select.field-select {
+	background: var(--bg-muted) !important;
+	border: 1px solid var(--border) !important;
+	color: var(--text) !important;
+}
+
+.personal-assistant-theme .persona-input:focus,
+.personal-assistant-theme .persona-textarea:focus,
+.personal-assistant-theme input.field-input:focus,
+.personal-assistant-theme textarea.field-input:focus {
+	border-color: var(--accent) !important;
+	box-shadow: 0 0 0 3px var(--accent-soft) !important;
+}

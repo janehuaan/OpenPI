@@ -15,12 +15,15 @@ export function ClaudeCodeRecapCard({
 	message,
 	lastUserPrompt,
 	todoState,
+	suppressRecap = false,
 	onApplySuggestion,
 	onSendSuggestion,
 }: {
 	message: ConversationMessage;
 	lastUserPrompt?: string;
 	todoState?: TodoState;
+	/** 正文已由结构化卡片（交付看板 / 结论简报）呈现时置 true：只留建议，不再复述正文。 */
+	suppressRecap?: boolean;
 	onApplySuggestion(text: string): void;
 	onSendSuggestion(text: string): void;
 }) {
@@ -40,9 +43,13 @@ export function ClaudeCodeRecapCard({
 
 	if (!recap && suggestions.length === 0) return null;
 
+	// 正文已结构化时不复述（避免与交付看板 / 结论简报重复）
+	const showRecap = Boolean(recap) && !suppressRecap;
+	if (!showRecap && suggestions.length === 0) return null;
+
 	return (
-		<div className={`claude-recap-card ${!recap ? "suggestions-only" : ""}`} role="region" aria-label="执行摘要与下一步建议">
-			{recap && (
+		<div className={`claude-recap-card ${!showRecap ? "suggestions-only" : ""}`} role="region" aria-label="执行摘要与下一步建议">
+			{showRecap && (
 				<div className="claude-recap-header">
 					<Sparkles size={12} className="claude-recap-icon" />
 					<span className="claude-recap-badge">本轮复盘</span>

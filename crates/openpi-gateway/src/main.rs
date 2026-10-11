@@ -23,7 +23,7 @@ use http_body_util::{combinators::BoxBody, BodyExt, Full, StreamBody};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::{header, Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::{json, Map, Value};
 use tokio::net::TcpListener;
@@ -31,8 +31,8 @@ use tokio::sync::Mutex;
 
 type Body = BoxBody<Bytes, std::io::Error>;
 
-const UPSTREAM_UA: &str = "command-code/1.74.1";
-const UPSTREAM_VER: &str = "1.74.1";
+const UPSTREAM_UA: &str = "command-code/1.79.2";
+const UPSTREAM_VER: &str = "1.79.2";
 const CLINE_UA: &str = "Bun/1.4.2";
 const CLINE_VER: &str = "3.0.68";
 
@@ -51,6 +51,8 @@ struct Cfg {
     // misc
     http: reqwest::Client,
     bind: String,
+    /// 入站鉴权 key（必填）。空/缺失直接拒绝启动，避免裸奔网关直通付费订阅。
+    inbound_key: String,
 }
 
 struct ClineAuth {
@@ -64,10 +66,24 @@ struct ClineAuth {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cfg = Arc::new(load_cfg()?);
+    // 安全硬锁：默认只允许绑定回环地址。外网绑定必须显式 OPENPI_GATEWAY_ALLOW_PUBLIC=1，
+    // 避免哪天改 env 时把「无公网防护的付费代理」直接暴露出去。
+    // 注意 `TcpListener::bind(":8788")` 会解析成 0.0.0.0（所有网卡），
+    // 所以空 host 一律按非回环处理，宁可拒绝启动也不能裸奔。
+    let is_loopback = is_loopback_bind(&cfg.bind);
+    if !is_loopback && std::env::var("OPENPI_GATEWAY_ALLOW_PUBLIC").as_deref() != Ok("1") {
+        anyhow::bail!(
+            "拒绝绑定非回环地址 {}：如确需对外，请显式设置 OPENPI_GATEWAY_ALLOW_PUBLIC=1 并自行加反向代理鉴权",
+            cfg.bind
+        );
+    }
     let listener = TcpListener::bind(&cfg.bind).await?;
     eprintln!(
-        "[openpi-gateway] listening http://{}  | command-code={}  cline={}",
-        cfg.bind, cfg.cc_base, cfg.cline_base
+        "[openpi-gateway] listening http://{}  | command-code={}  cline={}  | 入站鉴权: ON{}",
+        cfg.bind,
+        cfg.cc_base,
+        cfg.cline_base,
+        if is_loopback { " (仅本机)" } else { " (已放行公网!)" }
     );
     // 预热 cline 模型表，使路由表在首个请求前就绪（失败自动回退内置表）
     {
@@ -121,8 +137,56 @@ fn load_cfg() -> anyhow::Result<Cfg> {
         models_cache: Arc::new(Mutex::new(None)),
         http: reqwest::Client::new(),
         bind: env_or("OPENPI_GATEWAY_ADDR", "127.0.0.1:8788"),
+        inbound_key: load_inbound_key()?,
     })
 }
+
+/// 入站 key 来源优先级：OPENPI_GATEWAY_KEY 环境变量 > $HOME/.openpi/gateway-key（600）。
+/// 都没有则拒绝启动——宁可起不来，也不允许无鉴权直通付费上游。
+fn load_inbound_key() -> anyhow::Result<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = env_or("OPENPI_GATEWAY_KEY_FILE", &format!("{home}/.openpi/gateway-key"));
+    let key = match std::env::var("OPENPI_GATEWAY_KEY") {
+        Ok(k) if !k.trim().is_empty() => k.trim().to_string(),
+        _ => {
+            let key = std::fs::read_to_string(&path)
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "缺少入站鉴权 key：设置 OPENPI_GATEWAY_KEY 或创建 {path}（内容为随机串，建议 32+ 字节）"
+                    )
+                })?
+                .trim()
+                .to_string();
+            tighten_key_file_perms(&path);
+            key
+        }
+    };
+    if key.len() < 16 {
+        anyhow::bail!("入站鉴权 key 过短（{} 字节，至少 16），拒绝启动", key.len());
+    }
+    Ok(key)
+}
+
+/// key 文件必须是仅属主可读（600）。宽松时直接收紧（而非拒绝启动）并提示——
+/// 修权限是无损操作，让用户手工修反而容易忘。
+#[cfg(unix)]
+fn tighten_key_file_perms(path: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    // 读都成功了，metadata 失败不太可能；不因它阻塞启动
+    if let Ok(meta) = std::fs::metadata(path) {
+        let mode = meta.permissions().mode();
+        if mode & 0o077 != 0 {
+            eprintln!(
+                "[openpi-gateway] key 文件 {path} 权限过宽（{:o}），已自动收紧为 600",
+                mode & 0o777
+            );
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn tighten_key_file_perms(_path: &str) {}
 
 fn load_cline_auth(path: &str) -> anyhow::Result<ClineAuth> {
     let raw = std::fs::read_to_string(path)
@@ -176,16 +240,96 @@ async fn route(model: &str, cfg: &Cfg) -> Upstream {
 }
 
 async fn handle(req: Request<Incoming>, cfg: Arc<Cfg>) -> Result<Response<Body>, Infallible> {
-    let resp = match (req.method(), req.uri().path()) {
+    let path = req.uri().path().to_string();
+    let method = req.method().clone();
+    let resp = match (&method, path.as_str()) {
+        // 探活端点：不含凭据/配额信息，保持免鉴权供 launchd/监控使用。
         (&Method::GET, "/health") => json_resp(json!({
             "status": "ok",
             "upstreams": { "command-code": cfg.cc_base, "cline": cfg.cline_base }
         })),
-        (&Method::GET, "/v1/models") => models_resp(&cfg).await,
-        (&Method::POST, "/v1/chat/completions") => chat(req, cfg).await,
-        _ => err_resp(StatusCode::NOT_FOUND, "not found"),
+        // 其余一律鉴权（fail-closed）。
+        _ => {
+            if let Some(bad) = check_inbound(&req, &cfg) {
+                bad
+            } else {
+                match (&method, path.as_str()) {
+                    (&Method::GET, "/v1/models") => models_resp(&cfg).await,
+                    (&Method::POST, "/v1/chat/completions") => chat(req, cfg).await,
+                    _ => err_resp(StatusCode::NOT_FOUND, "not found"),
+                }
+            }
+        }
     };
     Ok(resp)
+}
+
+/// 是否绑定在回环地址上。空 host（如 `":8788"`、`"8788"`）会被系统解析成
+/// 0.0.0.0（所有网卡），因此按**非回环**处理；无法解析的主机名同样拒绝，
+/// 不能因为「看不懂」就放行。
+fn is_loopback_bind(bind: &str) -> bool {
+    // 剥掉端口。IPv6 可能是 `[::1]:8788`（冒号分割会切碎地址），先找 `]`。
+    let host = match bind.rfind(']') {
+        Some(i) => &bind[..=i],
+        None => match bind.rfind(':') {
+            Some(i) => &bind[..i],
+            None => bind,
+        },
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.is_empty() {
+        return false;
+    }
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback(),
+        Err(_) => false, // 未知主机名：不假设安全
+    }
+}
+
+/// 校验入站 Authorization 头，返回 Some(错误响应) 表示拒绝。
+/// 抽成 header 切片 → (授权/拒绝) 的纯函数，便于单测（Incoming 无法在测试中构造）。
+fn check_inbound(req: &Request<Incoming>, cfg: &Cfg) -> Option<Response<Body>> {
+    authorize_header(
+        req.headers().get(hyper::header::AUTHORIZATION).and_then(|v| v.to_str().ok()),
+        &cfg.inbound_key,
+    )
+    .err()
+    .map(|m| unauthorized(&m))
+}
+
+/// 常量时间比较，避免通过响应时间推断 key。
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    let mut diff = (a.len() ^ b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        let x = *a.get(i).unwrap_or(&0);
+        let y = *b.get(i).unwrap_or(&0);
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// 入站鉴权核心：Ok = 放行，Err(msg) = 拒绝原因。
+fn authorize_header(header: Option<&str>, key: &str) -> Result<(), String> {
+    let Some(s) = header else {
+        return Err("缺少 Authorization 头".into());
+    };
+    let Some(tok) = s.strip_prefix("Bearer ").or_else(|| s.strip_prefix("bearer ")) else {
+        return Err("Authorization 必须为 Bearer <key>".into());
+    };
+    if ct_eq(tok.trim().as_bytes(), key.as_bytes()) {
+        Ok(())
+    } else {
+        Err("入站 key 无效".into())
+    }
+}
+
+fn unauthorized(msg: &str) -> Response<Body> {
+    let mut r = err_resp(StatusCode::UNAUTHORIZED, msg);
+    r.headers_mut().insert(header::WWW_AUTHENTICATE, "Bearer".parse().unwrap());
+    r
 }
 
 async fn chat(req: Request<Incoming>, cfg: Arc<Cfg>) -> Response<Body> {
@@ -602,9 +746,7 @@ async fn cc_nonstream(upstream: reqwest::Response, model: String) -> Response<Bo
             }
         }
     }
-    let prompt = usage.get("inputTokens").and_then(Value::as_i64).unwrap_or(0);
-    let completion = usage.get("outputTokens").and_then(Value::as_i64).unwrap_or(0);
-    let total = usage.get("totalTokens").and_then(Value::as_i64).unwrap_or(prompt + completion);
+    let usage_obj = cc_openai_usage(&usage);
     let mut msg = json!({ "role": "assistant", "content": content });
     if !reasoning.is_empty() {
         msg["reasoning_content"] = json!(reasoning);
@@ -615,7 +757,7 @@ async fn cc_nonstream(upstream: reqwest::Response, model: String) -> Response<Bo
         "created": chrono::Utc::now().timestamp(),
         "model": model,
         "choices": [{ "index": 0, "message": msg, "finish_reason": finish }],
-        "usage": { "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total }
+        "usage": usage_obj
     }))
 }
 
@@ -666,12 +808,101 @@ fn sse_chunk(id: &str, model: &str, created: i64, delta: Value, finish: Value, u
         "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }]
     });
     if let Some(u) = usage {
-        let p = u.get("inputTokens").and_then(Value::as_i64).unwrap_or(0);
-        let c = u.get("outputTokens").and_then(Value::as_i64).unwrap_or(0);
-        let t = u.get("totalTokens").and_then(Value::as_i64).unwrap_or(p + c);
-        obj["usage"] = json!({ "prompt_tokens": p, "completion_tokens": c, "total_tokens": t });
+        obj["usage"] = cc_openai_usage(&u);
     }
     Bytes::from(format!("data: {obj}\n\n"))
+}
+
+/// Translates command-code's Anthropic-style `totalUsage` into the OpenAI
+/// usage shape the engine understands.
+///
+/// Cache accounting used to be dropped here, which made the desktop usage panel
+/// report a permanent 0% hit rate even when the upstream cached the prompt.
+/// The upstream key names are not documented, so several plausible spellings
+/// are accepted; the value is `0` when the upstream reports no cache at all.
+fn cc_openai_usage(u: &Value) -> Value {
+    let input = u.get("inputTokens").and_then(Value::as_i64).unwrap_or(0);
+    let completion = u.get("outputTokens").and_then(Value::as_i64).unwrap_or(0);
+    let cache_read = find_int(u, CACHE_READ_KEYS).unwrap_or(0);
+    let cache_write = find_int(u, CACHE_WRITE_KEYS).unwrap_or(0);
+    // The upstream speaks the Anthropic schema, where `input_tokens` excludes
+    // the cached prefix. OpenAI's `prompt_tokens` includes it, so fold the
+    // cached tokens back in and let the engine subtract them again.
+    //
+    // Self-check against the upstream's own total: if folding would push our
+    // accounting past what the upstream says it billed, `inputTokens` already
+    // includes the cache (OpenAI semantics) and folding would double-count.
+    // In that case pass `inputTokens` through untouched and log loudly — the
+    // assumption this function is built on has changed upstream.
+    let upstream_total = u.get("totalTokens").and_then(Value::as_i64);
+    let folded = input + cache_read + cache_write;
+    let prompt = match upstream_total {
+        Some(t) if t > 0 && folded + completion > t => {
+            eprintln!(
+                "[openpi-gateway] usage 自检不符：inputTokens={} + cache={}/{} 超出上游 totalTokens={}，\
+                 按已含缓存处理（不再折叠）——上游语义可能变了，请人工对账",
+                input, cache_read, cache_write, t
+            );
+            input
+        }
+        _ => folded,
+    };
+    let total = upstream_total.unwrap_or(prompt + completion);
+    let mut usage = json!({
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total
+    });
+    if cache_read > 0 || cache_write > 0 {
+        usage["prompt_tokens_details"] = json!({
+            "cached_tokens": cache_read,
+            "cache_write_tokens": cache_write
+        });
+    }
+    usage
+}
+
+const CACHE_READ_KEYS: [&str; 9] = [
+    "cacheReadTokens",
+    "cacheReadInputTokens",
+    "cache_read_input_tokens",
+    "cachedTokens",
+    "cached_tokens",
+    "cacheRead",
+    "cache_read_tokens",
+    "promptCacheReadTokens",
+    "prompt_cache_read_tokens",
+];
+
+const CACHE_WRITE_KEYS: [&str; 9] = [
+    "cacheCreationTokens",
+    "cacheCreationInputTokens",
+    "cache_creation_input_tokens",
+    "cacheWriteTokens",
+    "cache_write_tokens",
+    "cachedCreationTokens",
+    "cached_creation_tokens",
+    "promptCacheWriteTokens",
+    "prompt_cache_write_tokens",
+];
+
+/// First positive integer among `keys`, or a nested `prompt_tokens_details`.
+fn find_int(u: &Value, keys: [&str; 9]) -> Option<i64> {
+    for k in keys {
+        if let Some(v) = u.get(k).and_then(Value::as_i64) {
+            if v > 0 {
+                return Some(v);
+            }
+        }
+    }
+    for k in keys {
+        if let Some(v) = u.pointer(&format!("/prompt_tokens_details/{k}")).and_then(Value::as_i64) {
+            if v > 0 {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 fn normalize_reason(r: Option<&str>) -> &'static str {
@@ -724,27 +955,72 @@ async fn models_resp(cfg: &Cfg) -> Response<Body> {
     }))
 }
 
-/// command-code 当前账户**实测可用**模型（30 个中 16 个）。
-/// 剔除：google/gemini-* 全系(需 Pro+)、meta/muse-spark-1.1~1.3(需 Pro/GOAT)、
-/// xai/grok-4.6~4.7(需 GOAT)、minimax/*-free(已下架)、openai/gpt-5.6(不在计划)。
+/// command-code 当前账户实测放行可用模型（61 个）。
 fn cc_model_ids() -> Vec<String> {
     const IDS: &[&str] = &[
+        "MiniMaxAI/MiniMax-M2.5",
+        "MiniMaxAI/MiniMax-M2.7",
+        "MiniMaxAI/MiniMax-M3",
+        "Qwen/Qwen3.6-Max-Preview",
+        "Qwen/Qwen3.6-Plus",
+        "Qwen/Qwen3.7-Flash",
+        "Qwen/Qwen3.7-Max",
+        "Qwen/Qwen3.7-Plus",
+        "Qwen/Qwen3.8-27B",
+        "Qwen/Qwen3.8-Flash",
+        "Qwen/Qwen3.8-Max",
+        "Qwen/Qwen3.8-Max-0902",
+        "Qwen/Qwen3.8-Omni-Flash",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
         "deepseek/deepseek-v4-flash",
         "deepseek/deepseek-v4-flash-fast",
         "deepseek/deepseek-v4-flash-vision-exp",
         "deepseek/deepseek-v4-pro",
         "deepseek/deepseek-v4.1-flash",
         "deepseek/deepseek-v4.1-flash-fast",
+        "google/gemini-3.7-flash",
+        "google/gemini-3.8-flash",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-6-luna",
+        "inclusionai/ling-3.0-flash-sante:free",
+        "inclusionai/ling-3.1-flash:free",
+        "meituan/LongCat-2.0",
+        "meta/muse-spark-1.2",
         "meta/muse-spark-1.2-contributor",
+        "meta/muse-spark-1.3",
         "meta/muse-spark-1.3-contributor",
+        "mistral/mistral-large-4",
         "moonshotai/Kimi-K2.5",
         "moonshotai/Kimi-K2.6",
         "moonshotai/Kimi-K2.7-Code",
         "moonshotai/Kimi-K2.7-Code-Highspeed",
         "moonshotai/Kimi-K3",
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "poolside/laguna-s-2.1-free",
+        "stepfun/Step-3.5-Flash",
+        "stepfun/Step-3.7-Flash",
+        "stepfun/Step-5-Preview",
+        "tencent/hy3-paid",
+        "tencent/hy4-preview",
+        "thinkingmachines/inkling",
+        "thinkingmachines/inkling-small",
         "xai/grok-4.5",
+        "xai/grok-4.6",
+        "xai/grok-4.7",
+        "xiaomi/mimo-v2.5",
+        "xiaomi/mimo-v2.5-pro",
+        "xiaomi/mimo-v2.6-flash",
+        "xiaomi/mimo-v2.6-pro",
+        "xiaomi/mimo-v2.6-pro-ultraspeed",
         "z-ai/glm-5.3-flash",
         "z-ai/glm-5.3-flashx",
+        "zai-org/GLM-5",
+        "zai-org/GLM-5.1",
+        "zai-org/GLM-5.2",
+        "zai-org/GLM-5.2-Fast",
+        "zai-org/GLM-5.3",
     ];
     IDS.iter().map(|s| s.to_string()).collect()
 }
@@ -878,5 +1154,143 @@ mod cc_proto_tests {
         assert_eq!(b[1]["source"]["type"], "url");
         assert_eq!(b[2]["source"]["media_type"], "image/webp");
         assert_eq!(b[2]["source"]["data"], "AAA");
+    }
+}
+
+#[cfg(test)]
+mod inbound_auth_tests {
+    use super::authorize_header;
+
+    const KEY: &str = "unit-test-key-0123456789";
+
+    #[test]
+    fn missing_header_is_rejected() {
+        assert!(authorize_header(None, KEY).is_err());
+    }
+
+    #[test]
+    fn malformed_scheme_is_rejected() {
+        for bad in ["Basic YWJjOjEyMw==", "unit-test-key-0123456789", KEY, "Token abc", "Bearer"] {
+            assert!(authorize_header(Some(bad), KEY).is_err(), "必须拒绝: {bad}");
+        }
+    }
+
+    #[test]
+    fn wrong_token_is_rejected() {
+        for bad in ["Bearer wrong-key-000000000", "Bearer ", "Bearer x", "Bearer unit-test-key-012345678"] {
+            assert!(authorize_header(Some(bad), KEY).is_err(), "必须拒绝: {bad}");
+        }
+    }
+
+    #[test]
+    fn correct_key_passes_case_insensitive_scheme() {
+        for good in ["Bearer unit-test-key-0123456789", "bearer unit-test-key-0123456789"] {
+            assert!(authorize_header(Some(good), KEY).is_ok(), "应放行: {good}");
+        }
+    }
+
+    #[test]
+    fn trailing_whitespace_is_tolerated() {
+        assert!(authorize_header(Some("Bearer  unit-test-key-0123456789 "), KEY).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod cc_usage_tests {
+    use super::cc_openai_usage;
+    use serde_json::json;
+
+    #[test]
+    fn cache_fields_are_forwarded() {
+        let u = cc_openai_usage(&json!({
+            "inputTokens": 1200, "outputTokens": 40, "totalTokens": 5317,
+            "cacheReadInputTokens": 4077, "cacheCreationInputTokens": 0
+        }));
+        assert_eq!(u["prompt_tokens"], 5277);
+        assert_eq!(u["completion_tokens"], 40);
+        assert_eq!(u["total_tokens"], 5317);
+        assert_eq!(u["prompt_tokens_details"]["cached_tokens"], 4077);
+    }
+
+    #[test]
+    fn camel_case_and_nested_spellings_are_accepted() {
+        let camel = cc_openai_usage(&json!({ "inputTokens": 10, "outputTokens": 1, "cacheReadTokens": 900 }));
+        assert_eq!(camel["prompt_tokens_details"]["cached_tokens"], 900);
+        assert_eq!(camel["prompt_tokens"], 910);
+
+        let nested = cc_openai_usage(&json!({
+            "inputTokens": 10, "outputTokens": 1,
+            "prompt_tokens_details": { "cached_tokens": 500, "cache_write_tokens": 64 }
+        }));
+        assert_eq!(nested["prompt_tokens_details"]["cached_tokens"], 500);
+        assert_eq!(nested["prompt_tokens_details"]["cache_write_tokens"], 64);
+    }
+
+    #[test]
+    fn no_cache_fields_keeps_the_old_payload() {
+        let u = cc_openai_usage(&json!({ "inputTokens": 100, "outputTokens": 5, "totalTokens": 105 }));
+        assert_eq!(u, json!({ "prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105 }));
+        assert!(u.get("prompt_tokens_details").is_none());
+    }
+
+    #[test]
+    fn zero_cache_counts_are_treated_as_absent() {
+        let u = cc_openai_usage(&json!({ "inputTokens": 7, "outputTokens": 1, "cacheReadTokens": 0 }));
+        assert_eq!(u["prompt_tokens"], 7);
+        assert!(u.get("prompt_tokens_details").is_none());
+    }
+}
+
+#[cfg(test)]
+mod bind_guard_tests {
+    use super::is_loopback_bind;
+
+    #[test]
+    fn plain_loopback_forms_are_recognized() {
+        for good in ["127.0.0.1:8788", "localhost:8788", "127.0.0.54:8788", "[::1]:8788"] {
+            assert!(is_loopback_bind(good), "应视为回环: {good}");
+        }
+    }
+
+    #[test]
+    fn wildcard_and_public_binds_are_not_loopback() {
+        // The trap this test pins: `":8788"` parses as 0.0.0.0 (all interfaces),
+        // so an empty host must count as NON-loopback.
+        for bad in [":8788", "8788", "0.0.0.0:8788", "[::]:8788", "192.168.1.10:8788", "lan.local:8788"] {
+            assert!(!is_loopback_bind(bad), "不得视为回环: {bad}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod cc_usage_fold_guard_tests {
+    use super::cc_openai_usage;
+    use serde_json::json;
+
+    #[test]
+    fn folding_is_skipped_when_upstream_already_includes_the_cache() {
+        // OpenAI-style upstream: totalTokens = inputTokens(incl. cache) + output.
+        // Folding on top of that would exceed the upstream's own accounting.
+        let u = cc_openai_usage(&json!({
+            "inputTokens": 1000, "outputTokens": 40, "totalTokens": 1040,
+            "cached_tokens": 768
+        }));
+        assert_eq!(u["prompt_tokens"], 1000, "input already includes the cache");
+        assert_eq!(u["total_tokens"], 1040);
+        assert_eq!(u["prompt_tokens_details"]["cached_tokens"], 768);
+
+        // Anthropic-style upstream (the documented assumption): the fold fits.
+        let ok = cc_openai_usage(&json!({
+            "inputTokens": 232, "outputTokens": 40, "totalTokens": 5317,
+            "cacheReadInputTokens": 4077
+        }));
+        assert_eq!(ok["prompt_tokens"], 4309);
+        assert_eq!(ok["total_tokens"], 5317);
+    }
+
+    #[test]
+    fn no_total_tokens_falls_back_to_the_documented_assumption() {
+        let u = cc_openai_usage(&json!({ "inputTokens": 10, "outputTokens": 1, "cacheReadTokens": 900 }));
+        assert_eq!(u["prompt_tokens"], 910);
     }
 }

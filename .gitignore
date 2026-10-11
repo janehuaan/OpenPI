@@ -25,3 +25,8 @@ release_notes.md
 *.tar.gz
 *.zip
 .commandcode/
+# 素材：只入库真正被界面引用的图片。原始素材与已废弃的巨幅壁纸（UI 已弃用）
+# 不入库，避免给仓库永久塞进 ~1MB 的废弃图。
+apps/desktop/web/assets/hero-bg-raw.png
+apps/desktop/web/assets/sunset-mountains.jpg
+apps/desktop/web/public/assets/sunset-mountains.jpg

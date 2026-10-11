@@ -44,6 +44,50 @@ export const ArrowUp = (props: IconProps) => (
 		<path d={"M12 19V5"} />
 	</Icon>
 );
+export const ArrowRight = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M5 12h14"} />
+		<path d={"m12 5 7 7-7 7"} />
+	</Icon>
+);
+export const ArrowUpRight = (props: IconProps) => (
+	<Icon {...props}>
+		<path d={"M7 17 17 7"} />
+		<path d={"M7 7h10v10"} />
+	</Icon>
+);
+export const CheckCircle2 = (props: IconProps) => (
+	<Icon {...props}>
+		<circle cx={"12"} cy={"12"} r={"10"} />
+		<path d={"m9 12 2 2 4-4"} />
+	</Icon>
+);
+export const Circle = (props: IconProps) => (
+	<Icon {...props}>
+		<circle cx={"12"} cy={"12"} r={"10"} />
+	</Icon>
+);
+export const Database = (props: IconProps) => (
+	<Icon {...props}>
+		<ellipse cx={"12"} cy={"5"} rx={"9"} ry={"3"} />
+		<path d={"M3 5V19A9 3 0 0 0 21 19V5"} />
+		<path d={"M3 12A9 3 0 0 0 21 12"} />
+	</Icon>
+);
+export const HardDrive = (props: IconProps) => (
+	<Icon {...props}>
+		<line x1={"22"} x2={"2"} y1={"12"} y2={"12"} />
+		<path d={"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"} />
+		<line x1={"6"} x2={"6.01"} y1={"16"} y2={"16"} />
+		<line x1={"10"} x2={"10.01"} y1={"16"} y2={"16"} />
+	</Icon>
+);
+export const Lock = (props: IconProps) => (
+	<Icon {...props}>
+		<rect width={"18"} height={"11"} x={"3"} y={"11"} rx={"2"} ry={"2"} />
+		<path d={"M7 11V7a5 5 0 0 1 10 0v4"} />
+	</Icon>
+);
 export const Bell = (props: IconProps) => (
 	<Icon {...props}>
 		<path d={"M10.268 21a2 2 0 0 0 3.464 0"} />
@@ -279,6 +323,7 @@ export const UserRound = (props: IconProps) => (
 		<path d={"M20 21a8 8 0 0 0-16 0"} />
 	</Icon>
 );
+export const User = UserRound;
 export const WandSparkles = (props: IconProps) => (
 	<Icon {...props}>
 		<path
@@ -778,6 +823,12 @@ export const Moon = (props: IconProps) => (
 	</Icon>
 );
 
+export const Cloud = (props: IconProps) => (
+	<Icon {...props}>
+		<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+	</Icon>
+);
+
 export const Palette = (props: IconProps) => (
 	<Icon {...props}>
 		<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
@@ -787,6 +838,29 @@ export const Palette = (props: IconProps) => (
 		<path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
 	</Icon>
 );
+
+export const Settings = (props: IconProps) => (
+	<Icon {...props}>
+		<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+		<circle cx="12" cy="12" r="3" />
+	</Icon>
+);
+
+export const Home = (props: IconProps) => (
+	<Icon {...props}>
+		<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+		<polyline points="9 22 9 12 15 12 15 22" />
+	</Icon>
+);
+
+export const Target = (props: IconProps) => (
+	<Icon {...props}>
+		<circle cx="12" cy="12" r="10" />
+		<circle cx="12" cy="12" r="6" />
+		<circle cx="12" cy="12" r="2" />
+	</Icon>
+);
+
 
 
 

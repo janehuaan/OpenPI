@@ -340,7 +340,6 @@ export function assistantToolsHaveResults(messages: ConversationMessage[], assis
 	return false;
 }
 
-/** Short human title for sidebar — not a raw dump of the first prompt. */
 export function instanceTitle(instance: AgentInstance, sessionName?: string): string {
 	const raw = (sessionName || instance.label || "").trim();
 	if (!raw || raw === "新对话") {
@@ -352,14 +351,32 @@ export function instanceTitle(instance: AgentInstance, sessionName?: string): st
 		}
 		return "新对话";
 	}
-	let title = raw.replace(/\s+/g, " ");
+
+	// Smart Directive & Task Extraction
+	if (/ephemeral\s*subagent/i.test(raw) || raw.includes("Ephemeral") || raw.startsWith("【Ephemeral")) {
+		const objMatch = raw.match(/(?:Objective|目标)[:：]\s*([^\n\r.]+)/i);
+		if (objMatch && objMatch[1]?.trim()) {
+			return `审计: ${objMatch[1].trim().slice(0, 24)}`;
+		}
+		const roleMatch = raw.match(/(?:Role|角色)[:：]\s*([^\n\r]+)/i);
+		if (roleMatch && roleMatch[1]?.trim()) {
+			return `子任务: ${roleMatch[1].trim().slice(0, 24)}`;
+		}
+		return "后台审计任务";
+	}
+
+	if (raw.includes("chatgpt.com/share/")) {
+		return "ChatGPT 导入会话";
+	}
+
+	let title = raw.replace(/\s+/g, " ").replace(/^#+\s*/, "");
 	// Test / demos often store the full prompt as the label
 	if (/^(reply|write|say|respond|exactly|ok)\b/i.test(title) && title.length > 28) {
 		title = "快速测试";
-	} else if (/^(调用|用 |使用)/.test(title) && title.length > 32) {
+	} else if (/^(调用|用 |使用)/.test(title) && title.length > 28) {
 		title = `${title.slice(0, 20)}…`;
 	}
-	if (title.length > 36) title = `${title.slice(0, 34)}…`;
+	if (title.length > 32) title = `${title.slice(0, 30)}…`;
 	return title;
 }
 

@@ -18,12 +18,13 @@ import {
 	RefreshCw,
 	Search,
 	Server,
+	Shield,
 	Sparkles,
 	Trash2,
 	X,
 	Zap,
 } from "../../../../icons";
-import type { AppSettings, ModelProviderConfig } from "../../../../../lib/app-types";
+import type { AppSettings, ModelProviderConfig, ReviewerSettings } from "../../../../../lib/app-types";
 import type {
 	AvailableModel,
 	ProviderPingResult,
@@ -175,6 +176,10 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 	const [defaultProvider, setDefaultProvider] = useState<string>("");
 	const [defaultModel, setDefaultModel] = useState<string>("");
 	const [thinkingLevel, setThinkingLevel] = useState<string>("off");
+	const [reviewerSettings, setReviewerSettings] = useState<ReviewerSettings>({
+		enabled: false,
+		mode: "code_changes",
+	});
 
 	// Ping states
 	const [pingingId, setPingingId] = useState<string | null>(null);
@@ -248,6 +253,7 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 				setAppSettings(settings);
 				if (settings.defaultModel) setDefaultModel(settings.defaultModel);
 				if (settings.defaultThinkingLevel) setThinkingLevel(settings.defaultThinkingLevel);
+				if (settings.reviewer) setReviewerSettings(settings.reviewer);
 			}
 			if (vf) {
 				setVisionConfig(vf);
@@ -312,6 +318,22 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 		} catch (err) {
 			setError(err instanceof Error ? err.message : String(err));
 		}
+	};
+
+	// Save reviewer settings (Actor-Critic)
+	const handleUpdateReviewer = async (patch: Partial<ReviewerSettings>) => {
+		const next: ReviewerSettings = { ...reviewerSettings, ...patch };
+		setReviewerSettings(next);
+		try {
+			await desktopApi.updateAppSettings({ reviewer: next });
+			window.dispatchEvent(new Event("openpi:app-settings-changed"));
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	};
+
+	const handleSelectReviewerModel = async (modelId: string, providerId: string) => {
+		await handleUpdateReviewer({ model: modelId, provider: providerId, enabled: true });
 	};
 
 	// Ping a provider
@@ -796,6 +818,142 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 				</div>
 			</section>
 
+			{/* ── 1.5 Third-Party Model Reviewer Card (Actor-Critic) ── */}
+			<section className={`hero-reviewer-card ${!reviewerSettings.enabled ? "disabled" : ""}`}>
+				<div className="hero-model-top">
+					<div className="hero-model-info">
+						<div className="hero-reviewer-avatar">
+							<Shield size={24} />
+						</div>
+						<div className="hero-model-details">
+							<span className="hero-model-tag" style={{ color: "#8b5cf6" }}>
+								<Sparkles size={12} /> 第三方独立模型评审 (Actor-Critic)
+							</span>
+							<span className="hero-model-name">
+								{reviewerSettings.model || "(未指定评审模型)"}
+							</span>
+							<span className="hero-model-provider">
+								服务商: {reviewerSettings.provider || "(跟随模型)"} · {reviewerSettings.enabled ? "状态: 质检拦截已生效" : "状态: 暂未开启 (仅主模型独断)"}
+							</span>
+						</div>
+					</div>
+
+					<div className="hero-model-actions">
+						<button
+							type="button"
+							className={`button ${reviewerSettings.enabled ? "primary" : "secondary"}`}
+							style={{
+								padding: "8px 14px",
+								fontSize: "12px",
+								background: reviewerSettings.enabled ? "#8b5cf6" : undefined,
+								borderColor: reviewerSettings.enabled ? "#8b5cf6" : undefined,
+								color: reviewerSettings.enabled ? "#ffffff" : undefined,
+							}}
+							onClick={() => handleUpdateReviewer({ enabled: !reviewerSettings.enabled })}
+						>
+							{reviewerSettings.enabled ? "✓ 独立评审生效中" : "点击开启评审机制"}
+						</button>
+
+						<div className="hero-select-wrapper">
+							<select
+								className="hero-select"
+								value={reviewerSettings.model || ""}
+								onChange={(e) => {
+									const nextModel = e.target.value;
+									const match = allModels.find((m) => m.id === nextModel);
+									if (match) {
+										void handleSelectReviewerModel(match.id, match.provider);
+									} else {
+										void handleUpdateReviewer({ model: nextModel, enabled: true });
+									}
+								}}
+							>
+								<option value="">选择独立评审模型…</option>
+								{allModels.map((m) => (
+									<option key={`reviewer-${m.provider}/${m.id}`} value={m.id}>
+										{m.name} ({m.provider})
+									</option>
+								))}
+							</select>
+							<ChevronDown size={14} className="hero-select-icon" />
+						</div>
+
+						{reviewerSettings.provider && (
+							<button
+								type="button"
+								className="button secondary"
+								style={{ padding: "8px 12px", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}
+								disabled={pingingId === reviewerSettings.provider}
+								onClick={() => handlePing(reviewerSettings.provider!)}
+								title="测试评审模型服务商连接"
+							>
+								<Activity size={14} className={pingingId === reviewerSettings.provider ? "spin" : ""} />
+								<span>{pingingId === reviewerSettings.provider ? "测试中…" : "连通性测试"}</span>
+							</button>
+						)}
+					</div>
+				</div>
+
+				{reviewerSettings.provider && pingResults[reviewerSettings.provider] && (
+					<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+						<span className={`latency-pill ${pingResults[reviewerSettings.provider].ok ? "ok" : "fail"}`}>
+							<span className="latency-dot" />
+							{pingResults[reviewerSettings.provider].ok
+								? `评审端点正常 · ${pingResults[reviewerSettings.provider].latencyMs}ms (HTTP ${pingResults[reviewerSettings.provider].status})`
+								: `评审端点异常 · ${pingResults[reviewerSettings.provider].message || "无法访问"}`}
+						</span>
+					</div>
+				)}
+
+				<div className="thinking-budget-row">
+					<div className="thinking-budget-left">
+						<strong>
+							<Shield size={14} /> 评审触发策略 (Review Trigger Mode)
+						</strong>
+						<span>对抗主模型的确认偏误与假装完成，执行双盲质量把关</span>
+					</div>
+					<div className="segmented-pill-group">
+						{[
+							{ id: "code_changes", label: "代码/工具产生变更时质检 (推荐)" },
+							{ id: "always", label: "每轮对话终局均强制审查" },
+						].map((item) => (
+							<button
+								key={item.id}
+								type="button"
+								className={`segmented-pill-btn ${(reviewerSettings.mode || "code_changes") === item.id ? "active" : ""}`}
+								onClick={() => handleUpdateReviewer({ mode: item.id as "code_changes" | "always" })}
+							>
+								{item.label}
+							</button>
+						))}
+					</div>
+				</div>
+
+				<div className="thinking-budget-row" style={{ marginTop: "14px", paddingTop: "14px", borderTop: "1px dashed rgba(168, 85, 247, 0.15)" }}>
+					<div className="thinking-budget-left">
+						<strong>
+							<Zap size={14} /> 评审执行方式 (Execution Pipeline)
+						</strong>
+						<span>后台并发质检秒级交付不阻塞任务，严格门禁会阻断等待</span>
+					</div>
+					<div className="segmented-pill-group">
+						{[
+							{ id: "async", label: "⚡ 后台并发异步质检 (推荐，秒级交付不卡顿)" },
+							{ id: "blocking", label: "🛑 严格门禁同步阻断 (等待质检通过才放行)" },
+						].map((item) => (
+							<button
+								key={item.id}
+								type="button"
+								className={`segmented-pill-btn ${(reviewerSettings.executionMode || "async") === item.id ? "active" : ""}`}
+								onClick={() => handleUpdateReviewer({ executionMode: item.id as "async" | "blocking" })}
+							>
+								{item.label}
+							</button>
+						))}
+					</div>
+				</div>
+			</section>
+
 			{/* ── 2. Configured Providers & Model Pool ── */}
 			<section className="settings-section-card">
 				<div className="settings-section-card-header">
@@ -1270,8 +1428,13 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 													<div className="model-pool-grid">
 														{modelsList.map((m) => {
 															const isDef = defaultModel === m.id && defaultProvider === pId;
+															const isRev = Boolean(
+																reviewerSettings.enabled &&
+																reviewerSettings.model === m.id &&
+																(reviewerSettings.provider === pId || !reviewerSettings.provider)
+															);
 															return (
-																<div key={m.id} className={`model-badge-card ${isDef ? "is-default" : ""}`}>
+																<div key={m.id} className={`model-badge-card ${isDef ? "is-default" : ""} ${isRev ? "is-reviewer" : ""}`}>
 																	<div className="model-badge-card-top">
 																		<span className="model-badge-card-name" title={m.name}>
 																			{m.name}
@@ -1299,7 +1462,16 @@ export const ModelsTab: FC<ModelsTabProps> = ({ instanceId, onReload }) => {
 																			disabled={isDef}
 																			onClick={() => handleSelectDefaultModel(m.id, pId)}
 																		>
-																			{isDef ? "✓ 当前主力" : "设为主力"}
+																			{isDef ? "✓ 主力" : "设为主力"}
+																		</button>
+																		<button
+																			type="button"
+																			className={`btn-set-reviewer ${isRev ? "current" : ""}`}
+																			disabled={isRev}
+																			onClick={() => handleSelectReviewerModel(m.id, pId)}
+																			title="指定此模型为第三方独立评审模型"
+																		>
+																			{isRev ? "✓ 评审" : "设为评审"}
 																		</button>
 																		<div className="model-badge-card-buttons">
 																			<button
