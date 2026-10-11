@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionCardPrompt, buildAgentActivity, buildCausalChain } from "./agent-os";
+import { actionCardPrompt, actionCardRepo, buildAgentActivity, buildCausalChain, formatClock } from "./agent-os";
 import type { ActionCardRecord } from "./app-types";
 import type { TaskRun } from "../types";
 
@@ -83,6 +83,42 @@ describe("actionCardPrompt", () => {
 		expect(actionCardPrompt(card({ payload: "not json" }))).toBe(
 			"检测到 73 个文件有未提交改动，建议审查后再继续",
 		);
+	});
+});
+
+describe("actionCardRepo", () => {
+	it("reads the repo name from the payload cwd", () => {
+		expect(actionCardRepo(card())).toBe("openpi-next");
+	});
+
+	it("tolerates a trailing slash and windows separators", () => {
+		expect(actionCardRepo(card({ payload: JSON.stringify({ cwd: "/Users/huaan/macosvir/" }) }))).toBe(
+			"macosvir",
+		);
+		expect(actionCardRepo(card({ payload: JSON.stringify({ cwd: "C:\\work\\demo" }) }))).toBe("demo");
+	});
+
+	it("returns an empty string when the payload has no usable cwd", () => {
+		expect(actionCardRepo(card({ payload: JSON.stringify({ changedFiles: 3 }) }))).toBe("");
+		expect(actionCardRepo(card({ payload: "not json" }))).toBe("");
+	});
+});
+
+describe("formatClock", () => {
+	it("renders HH:MM in the viewer's local time, not the raw UTC slice", () => {
+		const iso = "2026-10-11T13:59:15.222266+00:00";
+		// 卡片时间必须和「最近活动」时间线一致：都按浏览器本地时区渲染。
+		// 此前卡片直接 `slice(11, 16)` 取 ISO 串 → 显示 UTC，和活动流差 8 小时。
+		const d = new Date(iso);
+		const expected = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+		expect(formatClock(iso)).toBe(expected);
+		expect(formatClock(iso)).toMatch(/^\d{2}:\d{2}$/);
+	});
+
+	it("returns an empty string for missing or unparseable input", () => {
+		expect(formatClock(undefined)).toBe("");
+		expect(formatClock(null)).toBe("");
+		expect(formatClock("not a date")).toBe("");
 	});
 });
 

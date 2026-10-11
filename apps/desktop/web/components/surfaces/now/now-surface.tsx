@@ -18,7 +18,7 @@ import {
 } from "../../icons.tsx";
 import type { AgentInstance, GitStatusResult, RunningTool, TaskRun } from "../../../types.ts";
 import type { View } from "../../../lib/app-types.ts";
-import { useAgentOS } from "../../../lib/agent-os.ts";
+import { actionCardRepo, formatClock, useAgentOS } from "../../../lib/agent-os.ts";
 import { instanceTitle } from "../../../lib/helpers.ts";
 
 /**
@@ -500,7 +500,7 @@ export function NowSurface({
 													{card.summary}
 												</div>
 												<div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
-													{card.actionType} · {card.createdAt?.slice(11, 16)}
+													{card.actionType}{actionCardRepo(card) ? ` · ${actionCardRepo(card)}` : ""} · {formatClock(card.createdAt)}
 												</div>
 											</div>
 										</div>
