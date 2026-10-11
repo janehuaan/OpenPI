@@ -95,6 +95,101 @@ export function actionCardPrompt(card: ActionCardRecord): string {
 }
 
 /**
+ * 一条「因果链」记录（Observed → Understood → Decision → Action → Result → Learned）。
+ *
+ * 只填**系统真的记录过**的字段：行动卡片只有 title/summary/actionType/status，
+ * 任务运行只有 status/trigger/pid/result/error。没有任何一步是编的 ——
+ * 系统没沉淀的那一步就留空，由 UI 显示「未记录」，而不是拿演示文案糊上去。
+ */
+export interface CausalChainEntry {
+	id: string;
+	time: string;
+	observed: string;
+	understood: string;
+	decision: string;
+	action: string;
+	result: string;
+	/** 系统目前不按事件沉淀学习结论，所以恒为空；保留字段是为了 UI 能如实标注。 */
+	learned?: string;
+	source: "card" | "run";
+	/** 等待用户裁决的建议（open 卡片）。 */
+	pending?: boolean;
+}
+
+function clockOf(iso?: string | null): number {
+	if (!iso) return 0;
+	const t = new Date(iso).getTime();
+	return Number.isNaN(t) ? 0 : t;
+}
+
+function cardDecision(card: ActionCardRecord): string {
+	if (card.status === "acted") return "已通过统一网关执行该建议";
+	if (card.status === "dismissed") return "用户已忽略，归档不再提醒";
+	return "等待用户裁决（尚未执行）";
+}
+
+function cardAction(card: ActionCardRecord): string {
+	if (card.status === "acted") return `执行动作：${card.actionType}`;
+	if (card.status === "dismissed") return "未执行任何动作";
+	return `建议动作：${card.actionType}（未执行）`;
+}
+
+function cardResult(card: ActionCardRecord): string {
+	if (card.status === "acted") return "已提交执行（网关回执未单独回写到卡片）";
+	if (card.status === "dismissed") return "已忽略，无执行结果";
+	return "尚无结果";
+}
+
+/**
+ * 把「行动卡片 + 任务运行」两类真实事件整理成因果链（时间倒序）。
+ * Activity 的因果时间线用它，替代此前写死的演示数据。
+ */
+export function buildCausalChain(
+	actionCards: ActionCardRecord[] = [],
+	taskRuns: TaskRun[] = [],
+	limit = 20,
+): CausalChainEntry[] {
+	const rows: Array<{ ts: number; item: CausalChainEntry }> = [];
+
+	for (const card of actionCards) {
+		rows.push({
+			ts: clockOf(card.createdAt),
+			item: {
+				id: `card-${card.id}`,
+				time: formatClock(card.createdAt),
+				observed: card.title,
+				understood: card.summary || "（后端未附说明）",
+				decision: cardDecision(card),
+				action: cardAction(card),
+				result: cardResult(card),
+				source: "card",
+				pending: card.status === "open",
+			},
+		});
+	}
+
+	for (const run of taskRuns) {
+		const when = run.finishedAt || run.startedAt || run.createdAt;
+		rows.push({
+			ts: clockOf(when),
+			item: {
+				id: `run-${run.id}`,
+				time: formatClock(when),
+				observed: `任务运行 · ${run.status}`,
+				understood: `任务 ${run.taskId}，触发方式：${run.trigger === "scheduled" ? "计划调度" : "用户手动"}`,
+				decision: run.trigger === "scheduled" ? "按既定计划放行执行" : "响应用户手动触发",
+				action: run.pid ? `启动子进程 PID ${run.pid}` : "启动执行进程（未记录 PID）",
+				result: run.error ? `失败：${run.error}` : run.result || `状态：${run.status}`,
+				source: "run",
+			},
+		});
+	}
+
+	rows.sort((a, b) => b.ts - a.ts);
+	return rows.slice(0, limit).map((row) => row.item);
+}
+
+/**
  * Layer 3 · OS State Tree —— 个人智能层的单一真源。
  *
  * 订阅 `openpi:proactive` 事件，合并 active 目标 / 高置信记忆 / 行动卡片，

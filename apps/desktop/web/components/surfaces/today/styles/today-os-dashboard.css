@@ -1,4 +1,8 @@
-/* OpenPI Personal Agent OS - Today Dashboard Stylesheet (v1.1) */
+/* OpenPI Personal Agent OS - Today Dashboard Stylesheet (v1.1)
+ *
+ * 注意：`TodayOsDashboard` 组件本身已被 `NowSurface` 取代并删除，但这份样式表
+ * **仍在使用** —— Workspace / Projects / Goals / Activity 四个 surface 都 import 它。
+ * 所以别按文件名判断它是死代码。 */
 
 .today-os-root {
 	display: flex;
