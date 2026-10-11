@@ -10,6 +10,7 @@ use crate::llm_client::{LlmClient, StreamEventHandler};
 use crate::protocol::ChatMessage;
 use crate::session_journal::SessionJournal;
 use crate::tool_registry::ToolRegistry;
+use crate::turn_guard::{GuardLevel, GuardNotice, TurnGuard};
 
 /// Background memory extraction and title summarization each cost an extra LLM
 /// round-trip per turn. Running both on every turn tripled the calls behind a
@@ -453,9 +454,26 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
         let mut review_attempts: usize = 0;
         const MAX_REVIEW_RETRIES: usize = 2;
 
+        // 单轮工具预算 + 打转检测：真机出现过一轮 360 次工具调用、78 分钟不收敛。
+        // 到硬顶不再执行新工具，转入既有的「最终总结」通道（tools 关闭），
+        // 而不是让这一轮无限膨胀或无声中断。
+        let mut turn_guard = TurnGuard::from_env();
+        let mut tool_budget_exhausted = false;
+
         while step < max_steps {
             if cancel_token.is_cancelled() {
                 warn!("Turn cancelled by user token");
+                break;
+            }
+
+            if turn_guard.budget_exhausted() {
+                warn!(
+                    "Session {}: tool budget exhausted ({} calls, budget {}), requesting final synthesis",
+                    session_id,
+                    turn_guard.tool_calls(),
+                    turn_guard.budget()
+                );
+                tool_budget_exhausted = true;
                 break;
             }
 
@@ -561,6 +579,7 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
                 active_messages.push(asst_msg);
 
                 // Execute each tool call sequentially
+                let mut step_notices: Vec<GuardNotice> = Vec::new();
                 for tc in &llm_res.tool_calls {
                     if cancel_token.is_cancelled() {
                         break;
@@ -568,6 +587,12 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
 
                     let parsed_args: Value = serde_json::from_str(&tc.function.arguments)
                         .unwrap_or_else(|_| json!({ "raw": tc.function.arguments }));
+
+                    // 预算 / 打转检测。提示先攒着，等这一批工具结果全部追加完再注入，
+                    // 否则 assistant 的 tool_calls 会缺 tool 结果，上游直接 400。
+                    if let Some(notice) = turn_guard.record(&tc.function.name, &parsed_args) {
+                        step_notices.push(notice);
+                    }
 
                     // Emit tool_execution_start
                     let _ = self.event_tx.send((
@@ -633,6 +658,36 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
                         MAX_TOOL_INLINE_BYTES,
                     );
                     active_messages.push(tool_msg);
+                }
+
+                // 这一批工具结果已全部入链，现在才注入预算 / 打转提示。
+                for notice in &step_notices {
+                    let _ = self.event_tx.send((
+                        session_id.to_string(),
+                        json!({
+                            "type": "turn_guard",
+                            "level": notice.level.as_str(),
+                            "toolCalls": notice.tool_calls,
+                            "budget": notice.budget,
+                            "message": notice.message,
+                        }),
+                    ));
+                    // 只进本轮的 LLM 上下文，不写进 journal：
+                    // journal 是给用户看的对话记录，伪造一条 toolResult 会污染它，
+                    // 而 UI 已经通过上面的 turn_guard 事件拿到了同一句话。
+                    active_messages.push(ChatMessage::user(notice.directive.clone()));
+                }
+                if step_notices
+                    .iter()
+                    .any(|n| n.level == GuardLevel::Firm || n.level == GuardLevel::Repeat)
+                {
+                    warn!(
+                        "Session {} step {}: turn guard fired ({} tool calls / budget {})",
+                        session_id,
+                        step,
+                        turn_guard.tool_calls(),
+                        turn_guard.budget()
+                    );
                 }
             } else if llm_res.text.trim().is_empty() {
                 // The provider produced neither tool calls nor visible text. This is
@@ -969,11 +1024,20 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
             }
         }
 
-        // If the turn reached max_steps without returning a final textual response,
-        // request a final synthesis step from the LLM with tools disabled so the user
-        // receives a complete summary instead of an abrupt silent stop.
-        if !finished_normally && !cancel_token.is_cancelled() && step >= max_steps {
-            warn!("Session {} reached max steps ({}), requesting final synthesis", session_id, max_steps);
+        // If the turn ran out of room (max_steps, or the per-turn tool budget) without
+        // returning a final textual response, request a final synthesis step from the
+        // LLM with tools disabled so the user receives a complete summary instead of an
+        // abrupt silent stop.
+        if !finished_normally && !cancel_token.is_cancelled() && (step >= max_steps || tool_budget_exhausted) {
+            let (why, used) = if tool_budget_exhausted {
+                ("工具调用预算", turn_guard.tool_calls())
+            } else {
+                ("最大步数", max_steps)
+            };
+            warn!(
+                "Session {} hit the {} limit ({}), requesting final synthesis",
+                session_id, why, used
+            );
             let _ = self.event_tx.send((
                 session_id.to_string(),
                 json!({
@@ -981,10 +1045,22 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
                     "message": { "role": "assistant" }
                 }),
             ));
-
-            active_messages.push(ChatMessage::user(
-                "⚠️ [系统提示]：本轮连续工具调用已达最大步数上限。工具现已关闭，请根据上方已经执行的所有工具调用和探索结果，向用户详细总结汇报当前进展、发现的核心内容、结论以及后续建议。"
+            let _ = self.event_tx.send((
+                session_id.to_string(),
+                json!({
+                    "type": "turn_guard",
+                    "level": "final",
+                    "toolCalls": turn_guard.tool_calls(),
+                    "budget": turn_guard.budget(),
+                    "message": format!("已达{}（{}），正在生成最终汇报", why, used),
+                }),
             ));
+
+            active_messages.push(ChatMessage::user(format!(
+                "⚠️ [系统提示]：本轮已达{}（{}）。工具现已关闭，请根据上方已经执行的所有工具调用和探索结果，\
+                 向用户详细总结汇报当前进展、发现的核心内容、结论以及后续建议。",
+                why, used
+            )));
 
             Self::compact_inflight_messages(&mut active_messages);
 
@@ -1000,8 +1076,8 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
                 Ok(res) => {
                     let synth_text = if res.text.trim().is_empty() {
                         format!(
-                            "⚠️ 本轮执行已达到最大步数限制（已执行 {} 步），且模型未返回总结内容。你可以发送“继续”指令让助手接着处理。",
-                            max_steps
+                            "⚠️ 本轮已达{}（{}），且模型未返回总结内容。你可以发送“继续”指令让助手接着处理。",
+                            why, used
                         )
                     } else {
                         res.text.clone()
@@ -1041,8 +1117,8 @@ CRITIQUE: <1-2 concise bullet points if rejected, or 1 brief sentence if approve
                 Err(e) => {
                     warn!("Failed to stream final synthesis at max steps: {}", e);
                     let fallback_text = format!(
-                        "⚠️ 本轮执行已达到最大步数限制（已执行 {} 步）。以上为已完成的阶段性探索，你可以发送“继续”指令让助手接着处理。",
-                        max_steps
+                        "⚠️ 本轮已达{}（{}）。以上为已完成的阶段性探索，你可以发送“继续”指令让助手接着处理。",
+                        why, used
                     );
                     last_assistant_text = fallback_text.clone();
                     let _ = journal.append_assistant_message(
