@@ -100,24 +100,15 @@ body,
 	color: var(--text) !important;
 }
 
-/* macOS Window Controls */
+/* macOS 窗口控制区：只保留一条拖拽留白，红黄绿交通灯交给系统原生绘制
+   （titleBarStyle: "Overlay" + decorations: true）。
+   不要再在这里画假圆点 —— 会与原生按钮错位叠成两排（实测 6 个圆点）。
+   高度 28px 与旧版假圆点的占位一致，保证品牌头位置不变。 */
 .pa-window-controls {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 2px 4px 14px;
+	height: 28px;
+	flex: none;
 	-webkit-app-region: drag;
 }
-
-.pa-dot {
-	width: 12px;
-	height: 12px;
-	border-radius: 50%;
-	display: inline-block;
-}
-.pa-dot.red { background: #ff5f56; border: 1px solid #e0443e; }
-.pa-dot.yellow { background: #ffbd2e; border: 1px solid #dea123; }
-.pa-dot.green { background: #27c93f; border: 1px solid #1aab29; }
 
 /* Brand Header */
 .pa-brand-header {

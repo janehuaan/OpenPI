@@ -33,7 +33,7 @@ export interface AgentOSState {
 	dismissCard: (card: ActionCardRecord) => Promise<boolean>;
 }
 
-function formatClock(iso?: string | null): string {
+export function formatClock(iso?: string | null): string {
 	if (!iso) return "";
 	const d = new Date(iso);
 	if (Number.isNaN(d.getTime())) return "";
@@ -92,6 +92,27 @@ export function actionCardPrompt(card: ActionCardRecord): string {
 		// payload 不是 JSON 时静默回落到 summary
 	}
 	return card.summary || card.title;
+}
+
+/**
+ * 行动卡片所属的仓库 / 目录名（`payload.cwd` 的 basename）。
+ *
+ * 后端对每种 action_type 会按 **cwd** 各留一张卡片（同一目录原地更新、不刷屏），
+ * 所以「macosvir 的 9 个文件」和「openpi-next 的 1 个文件」本来就是两张不同的卡。
+ * 但卡片标题完全一样，副标题里带上目录名，用户才不会把它们当成重复卡片。
+ */
+export function actionCardRepo(card: ActionCardRecord): string {
+	try {
+		const parsed = typeof card.payload === "string" ? JSON.parse(card.payload) : card.payload;
+		const cwd = (parsed as { cwd?: unknown } | null)?.cwd;
+		if (typeof cwd === "string" && cwd.trim()) {
+			const parts = cwd.split(/[/\\]/).filter(Boolean);
+			return parts.at(-1) ?? cwd;
+		}
+	} catch {
+		// payload 不是 JSON 时静默忽略
+	}
+	return "";
 }
 
 /**

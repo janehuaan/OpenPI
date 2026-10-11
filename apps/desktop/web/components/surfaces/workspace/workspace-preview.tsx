@@ -1811,12 +1811,13 @@ export function ReferenceWorkspacePreview({
 		>
 
 			<aside className="pa-sidebar">
-				{/* macOS Window Controls */}
-				<div className="pa-window-controls">
-					<span className="pa-dot red" />
-					<span className="pa-dot yellow" />
-					<span className="pa-dot green" />
-				</div>
+				{/*
+				 * macOS 的红黄绿交通灯由系统原生绘制（titleBarStyle: "Overlay" +
+				 * decorations: true），这里只保留一条同高度的拖拽留白，避免品牌头
+				 * 与原生按钮重叠。**不要在这里再画一套假圆点** —— 会与原生按钮错位
+				 * 叠成两排（实测 6 个圆点）。
+				 */}
+				<div className="pa-window-controls" aria-hidden="true" />
 
 				{/* Brand Header */}
 				<div className="pa-brand-header" onClick={() => onNavigate("today")}>

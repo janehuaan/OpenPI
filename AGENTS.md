@@ -34,6 +34,16 @@ yarn check:targets          # 非本机架构的 cfg 分支
 （`HOME=/tmp/xxx` + `OPENPI_TURN_TOOL_BUDGET=...`），别碰真实数据。
 
 ## 已完成的工作与特性记录
+- **修掉「窗口左上角出现 6 个圆点」：应用自绘假交通灯与系统原生交通灯叠成两排**：
+  - 现象（用户截图 + 真机复现）：窗口左上角有两排圆点 —— 上面一排灰色、下面一排红黄绿。用户圈出来问「这怎么回事」。
+  - 根因：`workspace-preview.tsx` 的侧栏里手写了三个假圆点（`<span className="pa-dot red|yellow|green" />`，配 `personal-assistant.css` 的 `.pa-dot*` 样式），而主窗口本来就是**原生带交通灯**的（`tauri.conf.json`：`titleBarStyle: "Overlay"` + `decorations: true`）。两套错位（假圆点比原生偏右下 ~8–11px）叠在一起 → 6 个圆点；窗口失焦时原生圆点变灰，两排看得最清楚。假圆点还**没有任何点击处理**（纯装饰），所以正确答案是删掉它、保留原生按钮。
+  - 修法：侧栏只留一条同高度的 `-webkit-app-region: drag` 留白（`.pa-window-controls { height: 28px; flex: none }`，与原假圆点占位一致，品牌头位置不变），删掉三个 `<span className="pa-dot ...">` 与 `.pa-dot*` 样式；加回归测试 `window-controls.test.ts`（侧栏组件 40+ 必填 props 没法渲染测试，改为对源码断言：不许再出现 `pa-dot red|yellow|green` / `.pa-dot {`）。
+  - 顺带修掉同屏另两个真问题：
+    1. **行动卡片时间显示的是 UTC**：`now-surface.tsx` 用 `card.createdAt?.slice(11, 16)` 直接切 ISO 串 → 卡片写 `13:59`，而「最近活动」时间线（`formatClock`）按本地时区写 `21:59`，同一件事差 8 小时。现在卡片也走 `formatClock`（已从 `lib/agent-os.ts` 导出），并有单测钉住「不是原始 UTC 切片」。
+    2. **两张卡片看着像重复**：`我建议` 里两张「检测到工作区存在未提交变动」其实是**两个不同仓库**（`macosvir` 9 个文件 / `openpi-next` 1 个文件）—— 后端 `card_identity()` 按 `cwd` 去重，本来就该各留一张；但标题一样、副标题不带仓库名，用户会当成刷屏。新增 `actionCardRepo()`（`lib/agent-os.ts`）把 `payload.cwd` 的 basename 显示在卡片副标题里：`git_uncommitted · macosvir · 21:59`。
+  - 验证：`yarn typecheck` 0 错误；`yarn build` 3.40s；`vitest` **21 文件 169/169**（新增 `window-controls.test.ts` 3 例 + `actionCardRepo` 3 例 + `formatClock` 2 例）；重打包签名安装 `/Applications/OpenPI.app` 后**真机截图实证**：左上角只剩 3 个原生圆点（灰影消失）、卡片副标题为 `git_uncommitted · macosvir · 21:59` / `git_uncommitted · openpi-next · 21:51`。
+  - 坑：`screencapture -l <windowID>` 抓的是 **WindowServer 缓存的旧窗口画面**（改完仍是 6 个圆点，差点误判没生效）；要看真实渲染必须用 `screencapture -R x,y,w,h` 抓屏幕区域（先把窗口 `set frontmost`）。
+
 - **首页「dots 式常驻 Agent」范式改造 (Always-On Agent Presence)**：
   - 背景：用户明确要求对齐 OpenAI DevDay 2026（2026-09-29）发布的 **dots**（常驻个人 agent：可命名形象 + 自己的云电脑 + Recent Activity + 主动冒泡）与 **GPT-6 Intelligent UI** 范式，并明确选择先做 **方向 A（dots 式常驻 agent）**。
   - 落地：
