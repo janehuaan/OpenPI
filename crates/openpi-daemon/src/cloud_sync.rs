@@ -400,6 +400,23 @@ impl CloudSync {
         if rows.is_empty() {
             return Ok(0);
         }
+        // 兜底：任何要进 Postgres 的字符串都不能含 NUL。正常路径（collect_files）已经在
+        // 源头跳过了含 NUL 的文件，这里防的是其他表/其他调用方，避免一处 NUL 让整批失败。
+        let mut nul_scrubbed = 0usize;
+        let safe_rows: Vec<Value> = rows
+            .iter()
+            .map(|row| {
+                let (clean, count) = sanitize_nul(row);
+                nul_scrubbed += count;
+                clean
+            })
+            .collect();
+        if nul_scrubbed > 0 {
+            warn!(
+                "[CloudSync] scrubbed {} NUL byte(s) before pushing to {} (Postgres text cannot store NUL)",
+                nul_scrubbed, table
+            );
+        }
         let url = format!(
             "{}/rest/v1/{}?on_conflict={}",
             base_url(auth),
@@ -413,7 +430,7 @@ impl CloudSync {
             .header("Authorization", format!("Bearer {}", auth.access_token))
             .header("Content-Type", "application/json")
             .header("Prefer", "resolution=merge-duplicates,return=minimal")
-            .json(rows)
+            .json(&safe_rows)
             .send()
             .await?;
         let status = res.status();
@@ -1581,6 +1598,17 @@ fn walk_dir(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<SyncFil
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
+        // NUL 是合法 UTF-8，能通过 read_to_string，却会被 Postgres 的 text 列拒绝，
+        // 让**整批** push 失败。这些文件（例如内嵌真实 NUL 的 payload 参考文档）里的
+        // NUL 有语义，剥离会篡改内容，所以直接不同步、只记一条日志。
+        if has_nul(&content) {
+            warn!(
+                "[CloudSync] skip {}: {} NUL byte(s), which Postgres text cannot store",
+                rel,
+                content.matches('\0').count()
+            );
+            continue;
+        }
         let mtime = meta
             .modified()
             .ok()
@@ -1590,9 +1618,109 @@ fn walk_dir(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<SyncFil
     }
 }
 
+/// Postgres 的 `text` 列**不接受 NUL 字节**（`22P05 unsupported Unicode escape
+/// sequence`），而 `\0` 是合法 UTF-8，`read_to_string` 会照单全收。真机上
+/// `~/.openpi/agent/skills/...` 里有几份渗透测试 payload 参考文档内嵌了真实 NUL，
+/// 结果是**整批 `cloud_files` push 全挂**（每 80s 报一次 400），所以必须显式处理。
+fn has_nul(s: &str) -> bool {
+    s.as_bytes().contains(&0)
+}
+
+/// 兜底替换：NUL → U+FFFD，保证任何走到 PostgREST 的字符串都能落库。
+fn strip_nul(s: &str) -> String {
+    s.replace('\0', "\u{FFFD}")
+}
+
+/// 递归清洗一个 JSON 值里的 NUL，返回 (清洗后的值, 替换掉的 NUL 个数)。
+fn sanitize_nul(value: &Value) -> (Value, usize) {
+    match value {
+        Value::String(s) if has_nul(s) => (Value::String(strip_nul(s)), s.matches('\0').count()),
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            let mut count = 0;
+            for item in items {
+                let (v, n) = sanitize_nul(item);
+                out.push(v);
+                count += n;
+            }
+            (Value::Array(out), count)
+        }
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            let mut count = 0;
+            for (key, val) in map {
+                let (v, n) = sanitize_nul(val);
+                out.insert(key.clone(), v);
+                count += n;
+            }
+            (Value::Object(out), count)
+        }
+        other => (other.clone(), 0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nul_bytes_are_detected_and_stripped() {
+        assert!(!has_nul("plain markdown"));
+        assert!(has_nul("payload file\u{0}with embedded nul"));
+        assert_eq!(strip_nul("a\u{0}b\u{0}"), "a\u{FFFD}b\u{FFFD}");
+    }
+
+    #[test]
+    fn sanitize_nul_walks_nested_json_and_counts_replacements() {
+        let row = json!({
+            "path": "agent/skills/x.md",
+            "content": "line\u{0}one",
+            "tags": ["a\u{0}", "clean"],
+            "meta": { "note": "ok", "raw": "\u{0}" },
+            "size": 12,
+        });
+        let (clean, count) = sanitize_nul(&row);
+        assert_eq!(count, 3, "content / tags[0] / meta.raw 三处共 3 个 NUL 都应被计入");
+        assert!(!clean.to_string().contains('\u{0}'));
+        assert_eq!(clean["content"], json!("line\u{FFFD}one"));
+        assert_eq!(clean["meta"]["note"], json!("ok"));
+        assert_eq!(clean["size"], json!(12));
+    }
+
+    #[test]
+    fn sanitize_nul_leaves_clean_rows_untouched() {
+        let row = json!({ "path": "agent/settings.json", "content": "{}" });
+        let (clean, count) = sanitize_nul(&row);
+        assert_eq!(count, 0);
+        assert_eq!(clean, row);
+    }
+
+    #[test]
+    fn collect_files_skips_files_containing_nul() {
+        // 真机上就是这类文件（`agent/skills/...` 里内嵌 NUL 的 payload 参考文档）让整批 push 400。
+        // 路径要落在 is_allowed_rel 的白名单内，否则这个测试证明不了任何事。
+        let root = std::env::temp_dir().join(format!("openpi-nul-test-{}", std::process::id()));
+        let dir = root.join("agent").join("skills");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("good.md"), "# fine\n").unwrap();
+        std::fs::write(dir.join("bad.md"), "# payload\n\u{0}\u{0}\n").unwrap();
+        std::fs::write(dir.join("binary.png"), [0u8, 1, 2]).unwrap(); // 扩展名不在白名单
+
+        let files = collect_files(&root);
+        let names: Vec<&str> = files.iter().map(|f| f.rel.as_str()).collect();
+        assert!(
+            names.contains(&"agent/skills/good.md"),
+            "正常文件必须同步: {names:?}"
+        );
+        assert!(
+            !names.iter().any(|n| n.ends_with("bad.md")),
+            "含 NUL 的文件必须被跳过: {names:?}"
+        );
+        assert!(!names.iter().any(|n| n.ends_with(".png")));
+        assert!(files.iter().all(|f| !has_nul(&f.content)));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn print_reference_envelope() {
