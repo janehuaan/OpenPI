@@ -16,58 +16,18 @@ import {
 	Zap,
 } from "../../icons.tsx";
 import type { TaskRun } from "../../../types.ts";
+import { buildCausalChain, useAgentOS } from "../../../lib/agent-os.ts";
 import "../today/styles/today-os-dashboard.css";
 
 interface ActivitySurfaceProps extends GitSurfaceProps {
 	taskRuns?: TaskRun[];
 }
 
-interface CausalEvent {
-	id: string;
-	time: string;
-	observed: string;
-	understood: string;
-	decision: string;
-	action: string;
-	result: string;
-	learned: string;
-}
-
-const DEFAULT_CAUSAL_EVENTS: CausalEvent[] = [
-	{
-		id: "act-1",
-		time: "22:45",
-		observed: "检测到工作区架构重构需求与 UI 统一指令",
-		understood: "需将整个桌面端全面升级为 Personal Agent OS 设计系统",
-		decision: "严格冻结 openpi-engine 执行底座，通过统一网关与安全护栏解耦",
-		action: "构建 Contextual Inspector、动态决策卡片并完成全页面设计对齐",
-		result: "全生命周期数据与 UI 100% 贯通，不变量看门狗检查全绿通过",
-		learned: "用户偏好专业克制、工程感强的系统架构，拒绝粗糙渐变与繁杂噪音",
-	},
-	{
-		id: "act-2",
-		time: "21:12",
-		observed: "第三方模型独立评审机制被调用",
-		understood: "主模型生成完成，需在不阻塞用户前提下进行质量把关",
-		decision: "采用非阻塞后台并发质检 (async mode)，空变更 5ms 旁路放行",
-		action: "启动 Actor-Critic 双盲质检并注入 max_tokens 硬顶约束",
-		result: "主回复延迟降为 0，质检报告平滑入账",
-		learned: "后台并发质检在保证质量的同时极大提升用户交互流畅度",
-	},
-	{
-		id: "act-3",
-		time: "19:30",
-		observed: "Git 代码仓库检测到多处文件改动与暂存更新",
-		understood: "新引入可靠性熔断状态机与分层预算管理器",
-		decision: "保护系统十大不变量，执行单元测试与跨架构 clippy 检查",
-		action: "运行 cargo test --workspace (148 测试) 及 yarn check:targets",
-		result: "100% 检查通过，无未捕获异常",
-		learned: "本地验证必须包含 aarch64 跨架构检查以保障 CI 质量",
-	},
-];
-
 export function ActivitySurface(props: ActivitySurfaceProps) {
 	const [activeTab, setActiveTab] = useState<"timeline" | "git" | "runs">("timeline");
+	// 因果链的数据来源是**真实的**行动卡片 + 任务运行；此前这里挂的是写死的演示事件。
+	const { actionCards, loading: osLoading } = useAgentOS({ taskRuns: props.taskRuns });
+	const causalEvents = buildCausalChain(actionCards, props.taskRuns ?? []);
 
 	return (
 		<div style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", background: "var(--bg)", color: "var(--text)", overflow: "hidden" }}>
@@ -162,12 +122,27 @@ export function ActivitySurface(props: ActivitySurfaceProps) {
 								智能体可解释活动记录 (Agent Causal Chain)
 							</h3>
 							<p style={{ margin: 0, fontSize: 12.5, color: "var(--text-secondary)" }}>
-								从感知到学习的完整因果因链：Observed → Understood → Decision → Action → Result → Learned
+								从感知到学习的完整因果链：Observed → Understood → Decision → Action → Result → Learned。
+								数据来自真实的行动卡片与任务运行；系统未沉淀的步骤如实标注「未记录」，不做演示数据兜底。
 							</p>
 						</div>
 
-						<div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-							{DEFAULT_CAUSAL_EVENTS.map((item) => (
+						{causalEvents.length === 0 ? (
+							<div
+								style={{
+									padding: "28px 24px",
+									borderRadius: 12,
+									border: "1px dashed var(--border)",
+									background: "var(--bg-muted, rgba(148, 163, 184, 0.06))",
+									color: "var(--text-secondary)",
+									fontSize: 13,
+								}}
+							>
+								{osLoading ? "正在读取真实活动记录…" : "暂无因果活动记录：后台还没有产出行动卡片或任务运行。"}
+							</div>
+						) : (
+							<div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+								{causalEvents.map((item) => (
 								<div
 									key={item.id}
 									style={{
@@ -186,10 +161,19 @@ export function ActivitySurface(props: ActivitySurfaceProps) {
 										<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 											<Clock3 size={13} color="var(--accent)" />
 											<span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)", fontFamily: "monospace" }}>{item.time}</span>
+											<span style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+												{item.source === "card" ? "行动卡片" : "任务运行"}
+											</span>
 										</div>
-										<span style={{ fontSize: 11, color: "var(--ok, #10b981)", background: "var(--ok-soft, rgba(16, 185, 129, 0.12))", padding: "1px 6px", borderRadius: 4 }}>
-											✓ 溯源完整
-										</span>
+										{item.pending ? (
+											<span style={{ fontSize: 11, color: "var(--warn, #d97706)", background: "var(--warn-soft, rgba(217, 119, 6, 0.12))", padding: "1px 6px", borderRadius: 4 }}>
+												⏳ 待用户裁决
+											</span>
+										) : (
+											<span style={{ fontSize: 11, color: "var(--ok, #10b981)", background: "var(--ok-soft, rgba(16, 185, 129, 0.12))", padding: "1px 6px", borderRadius: 4 }}>
+												✓ 已记录
+											</span>
+										)}
 									</div>
 
 									{/* 6 Steps Causal Node Chain */}
@@ -232,12 +216,15 @@ export function ActivitySurface(props: ActivitySurfaceProps) {
 										{/* 6. LEARNED */}
 										<div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "var(--warn-soft, rgba(217, 119, 6, 0.12))", padding: "8px 10px", borderRadius: 6, border: "1px dashed var(--warn, #d97706)" }}>
 											<span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--warn, #d97706)", width: 90, flexShrink: 0 }}>LEARNED</span>
-											<span style={{ color: "var(--text)", fontWeight: 500 }}>{item.learned}</span>
+											<span style={{ color: item.learned ? "var(--text)" : "var(--text-tertiary)", fontWeight: 500 }}>
+												{item.learned ?? "未记录（系统暂不按事件沉淀学习结论）"}
+											</span>
 										</div>
 									</div>
 								</div>
-							))}
-						</div>
+								))}
+							</div>
+						)}
 					</div>
 				) : activeTab === "git" ? (
 					<GitSurface {...props} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionCardPrompt, buildAgentActivity } from "./agent-os";
+import { actionCardPrompt, buildAgentActivity, buildCausalChain } from "./agent-os";
 import type { ActionCardRecord } from "./app-types";
 import type { TaskRun } from "../types";
 
@@ -83,5 +83,56 @@ describe("actionCardPrompt", () => {
 		expect(actionCardPrompt(card({ payload: "not json" }))).toBe(
 			"检测到 73 个文件有未提交改动，建议审查后再继续",
 		);
+	});
+});
+
+describe("buildCausalChain", () => {
+	it("builds the chain only from fields the system actually records", () => {
+		const chain = buildCausalChain([card()], [run()]);
+		expect(chain).toHaveLength(2);
+		// 时间倒序：任务运行(13:05) 比卡片(12:12) 新
+		expect(chain[0].id).toBe("run-run-1");
+		expect(chain[1].id).toBe("card-card-git_uncommitted-abc");
+
+		const fromRun = chain[0];
+		expect(fromRun.observed).toBe("任务运行 · succeeded");
+		expect(fromRun.understood).toContain("计划调度");
+		expect(fromRun.action).toBe("启动执行进程（未记录 PID）");
+		expect(fromRun.result).toBe("构建通过");
+
+		const fromCard = chain[1];
+		expect(fromCard.observed).toBe("检测到工作区存在未提交变动");
+		expect(fromCard.understood).toContain("73 个文件");
+		expect(fromCard.pending).toBe(true);
+		expect(fromCard.learned).toBeUndefined();
+	});
+
+	it("reflects the card's real status instead of a fixed story", () => {
+		const acted = buildCausalChain([card({ status: "acted" })])[0];
+		expect(acted.pending).toBe(false);
+		expect(acted.decision).toContain("统一网关");
+		expect(acted.action).toContain("git_uncommitted");
+
+		const dismissed = buildCausalChain([card({ status: "dismissed" })])[0];
+		expect(dismissed.action).toBe("未执行任何动作");
+		expect(dismissed.result).toContain("已忽略");
+	});
+
+	it("surfaces a failed run's error rather than its status", () => {
+		const failed = buildCausalChain([], [run({ status: "failed", error: "exit code 1" })])[0];
+		expect(failed.result).toBe("失败：exit code 1");
+	});
+
+	it("returns nothing when there is no real activity (no demo fallback)", () => {
+		expect(buildCausalChain()).toEqual([]);
+		expect(buildCausalChain([], [], 5)).toEqual([]);
+	});
+
+	it("honours the limit after sorting by recency", () => {
+		const many = [1, 2, 3].map((i) =>
+			card({ id: `c${i}`, createdAt: `2026-10-11T1${i}:00:00.000Z` }),
+		);
+		const chain = buildCausalChain(many, [], 2);
+		expect(chain.map((e) => e.id)).toEqual(["card-c3", "card-c2"]);
 	});
 });

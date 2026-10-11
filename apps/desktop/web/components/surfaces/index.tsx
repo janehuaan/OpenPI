@@ -38,7 +38,6 @@ export { AgentSurface } from "./panels/agent-surface";
 
 // Workspace
 export { NowSurface } from "./now/now-surface";
-export { TodayOsDashboard } from "./today/today-os-dashboard";
 export { ReferenceWorkspacePreview } from "./workspace/workspace-preview";
 export { ComposerStatusDock, type TokenStatsData } from "./workspace/composer-status-dock";
 export { AgentActionChain } from "./workspace/action-chain";
